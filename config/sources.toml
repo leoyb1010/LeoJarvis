@@ -1,0 +1,19 @@
+[[rss]]
+name = "machine-learning"
+url = "https://hnrss.org/frontpage"
+domain = "business"
+fulltext = false
+limit = 10
+
+[leomoney]
+base_url = "http://localhost:3210"
+
+[email]
+enabled = false
+host = "imap.example.com"
+user = "you@example.com"
+password = "application-password"
+limit = 20
+
+[calendar]
+ics_url = ""

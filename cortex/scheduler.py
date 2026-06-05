@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from . import db
+from .config import settings
+from .ingest.calendar_ingest import CalendarCollector
+from .ingest.email_ingest import EmailCollector
+from .ingest.leomoney import LeomoneyCollector
+from .ingest.rss import RSSCollector
+from .judge.engine import judge_and_store
+from .memory.store import remember_event
+from .notify.hub import hub
+
+COLLECTORS = [RSSCollector(), LeomoneyCollector(), EmailCollector(), CalendarCollector()]
+
+
+async def run_ingest_cycle() -> dict:
+    stats = {"seen": 0, "inserted": 0, "notify": 0, "errors": []}
+    for collector in COLLECTORS:
+        try:
+            for item in collector.collect():
+                stats["seen"] += 1
+                event_id = db.insert_event(
+                    source=item.source,
+                    domain=item.domain,
+                    kind=item.kind,
+                    title=item.title,
+                    content=item.content,
+                    url=item.url,
+                    meta=item.meta,
+                    dedup_key=item.dedup_key,
+                )
+                if event_id is None:
+                    continue
+                stats["inserted"] += 1
+                remember_event(event_id, f"{item.title}\n{item.content[:700]}")
+                judgment = judge_and_store(event_id, item)
+                if judgment.triage == "notify":
+                    stats["notify"] += 1
+                    await hub.push({
+                        "type": "notify",
+                        "event_id": event_id,
+                        "title": item.title,
+                        "take": judgment.take,
+                        "url": item.url,
+                        "score": judgment.score,
+                    })
+        except Exception as exc:
+            stats["errors"].append({"collector": collector.name, "error": str(exc)})
+            print(f"[ingest] {collector.name} failed: {exc}")
+    return stats
+
+
+_GUARD_STATE: dict[str, float] = {}
+
+
+async def run_system_guard() -> dict:
+    """SystemGuard 主动传感器：磁盘紧张 / 负载过高 / 已知服务掉线 → 实时推送。"""
+    import shutil
+    import os
+    from .agent import services
+
+    cfg = settings().get("guard", {})
+    disk_warn = float(cfg.get("disk_used_pct", 90))
+    load_warn = float(cfg.get("load_per_core", 2.5))
+    alerts = []
+
+    total, used, _ = shutil.disk_usage("/")
+    disk_pct = used / total * 100
+    if disk_pct >= disk_warn and _GUARD_STATE.get("disk", 0) < disk_warn:
+        alerts.append({"title": "磁盘空间紧张", "take": f"/ 已用 {disk_pct:.0f}%，建议清理。问我「磁盘为什么满了」。"})
+    _GUARD_STATE["disk"] = disk_pct
+
+    try:
+        l1 = os.getloadavg()[0]
+        per_core = l1 / (os.cpu_count() or 1)
+        if per_core >= load_warn and _GUARD_STATE.get("load", 0) < load_warn:
+            alerts.append({"title": "CPU 负载偏高", "take": f"每核负载 {per_core:.1f}。问我「现在哪个进程最吃 CPU」。"})
+        _GUARD_STATE["load"] = per_core
+    except OSError:
+        pass
+
+    for s in services.status_all():
+        key = f"svc:{s['name']}"
+        was_online = _GUARD_STATE.get(key, 1)
+        if not s["online"] and was_online and s["name"] != "cortex":
+            alerts.append({"title": f"服务掉线：{s['name']}", "take": f"{s['name']} (:{s['port']}) 离线了。"})
+        _GUARD_STATE[key] = 1.0 if s["online"] else 0.0
+
+    for a in alerts:
+        await hub.push({"type": "notify", "source": "SystemGuard", **a})
+    return {"alerts": len(alerts), "disk_pct": round(disk_pct, 1)}
+
+
+def run_reflection() -> dict:
+    """每晚把近期事件归纳成长期记忆。"""
+    from .memory.reflect import reflect
+    result = reflect(hours=int(settings().get("schedule", {}).get("reflect_hours", 24)))
+    print(f"[reflect] {result}")
+    return result
+
+
+def setup_scheduler() -> AsyncIOScheduler:
+    cfg = settings().get("schedule", {})
+    sched = AsyncIOScheduler()
+    sched.add_job(run_ingest_cycle, "interval", minutes=int(cfg.get("ingest_minutes", 30)), id="ingest", replace_existing=True)
+    sched.add_job(run_system_guard, "interval", minutes=int(cfg.get("guard_minutes", 5)), id="guard", replace_existing=True)
+    sched.add_job(run_reflection, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=0, id="reflect", replace_existing=True)
+    sched.add_job(lambda: print("[briefing] ready"), "cron",
+                  hour=int(cfg.get("briefing_hour", 8)),
+                  minute=int(cfg.get("briefing_minute", 0)),
+                  id="briefing", replace_existing=True)
+    return sched

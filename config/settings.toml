@@ -1,0 +1,46 @@
+[server]
+port = 8787
+host = "127.0.0.1"
+
+[embeddings]
+model = "nomic-embed-text"
+# nomic-embed-text is typically 768 dimensions. If your embedding model differs, update this.
+dimension = 768
+# If Ollama is unavailable, Cortex still stores events and uses text fallback recall.
+allow_fallback = true
+
+[judge]
+ignore_below = 0.35
+notify_above = 0.75
+# fallback_judge is used when models.toml has no real model credentials or the API call fails.
+fallback_judge = true
+
+[schedule]
+ingest_minutes = 30
+guard_minutes = 5
+briefing_hour = 8
+briefing_minute = 0
+reflect_hour = 23
+reflect_hours = 24
+
+# SystemGuard 主动告警阈值
+[guard]
+disk_used_pct = 90
+load_per_core = 2.5
+
+# 本地服务（name 下可配 port / start 启动命令 / log 日志文件）
+[services.cortex]
+port = 8787
+
+[services.ollama]
+port = 11434
+start = "ollama serve"
+
+[services.leomoney]
+port = 3210
+
+[services.leonote]
+port = 3000
+
+[services.leoapi]
+port = 8080
