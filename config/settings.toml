@@ -23,6 +23,10 @@ briefing_minute = 0
 reflect_hour = 23
 reflect_hours = 24
 
+[intelligence]
+# Personal Intelligence Hub 自动扫描频率。手动扫描仍可在前端随时触发。
+scan_minutes = 60
+
 # SystemGuard 主动告警阈值
 [guard]
 disk_used_pct = 90

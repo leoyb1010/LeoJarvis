@@ -1,8 +1,8 @@
-"""记忆反思 Reflection（M2）。
+"""记忆反思（M2）。
 
-定期把零散的 events 归纳成"值得长期记住"的 memories：偏好、模式、结论。
+定期把零散的 events 归纳成“待确认长期记忆”：偏好、模式、结论。
 有 LLM 时让模型归纳；无 LLM 时退化为基于频次的确定性归纳，保证闭环不依赖外部接口。
-反思结论本身也作为 insight 事件回写 events（记忆系统自我观察）。
+候选结论需要用户确认后才会变成 active 记忆。
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from .. import db
 from ..config import settings
 from .profile import profile_text
 
-_REFLECT_SYSTEM = """你是 Leo 的私人记忆官。下面是 Leo 近期的事件流（资讯、判断、对话、agent 动作、日记）。
-请归纳出"值得长期记住"的结论——Leo 的偏好、关注点、反复出现的模式、需要跟进的事。
+_REFLECT_SYSTEM = """你是 Leo 的私人记忆官。下面是 Leo 近期的事件流（资讯、判断、对话、agent 动作、个人记事）。
+请归纳出“可能值得长期记住、但必须由 Leo 确认”的候选结论：Leo 的偏好、关注点、反复出现的模式、需要跟进的事。
 不要复述事件，要提炼。每条要具体、可复用。
 只输出 JSON 数组，每个元素：
 {"type":"semantic|episodic","subject":"实体或主题","statement":"一句话结论","salience":0.0-1.0}
@@ -84,9 +84,15 @@ def reflect(hours: int = 24) -> dict:
         )
         created += 1
 
-    # 反思自我记录
+    # 反思自我记录。实际长期记忆需用户在前端确认后才 active。
     db.insert_event(source="reflection", kind="insight", domain="business",
-                    title=f"反思：归纳出 {created} 条记忆",
-                    content=f"{'LLM' if used_llm else '规则'}反思 {len(rows)} 条事件 -> {created} 条长期记忆",
+                    title=f"反思：生成 {created} 条待确认记忆",
+                    content=f"{'LLM' if used_llm else '规则'}反思 {len(rows)} 条事件 -> {created} 条待确认记忆",
                     meta={"used_llm": used_llm, "created": created})
-    return {"ok": True, "created": created, "used_llm": used_llm, "events": len(rows)}
+    return {
+        "ok": True,
+        "created": created,
+        "used_llm": used_llm,
+        "events": len(rows),
+        "note": f"已生成 {created} 条待确认记忆，确认前不会写入长期记忆。",
+    }

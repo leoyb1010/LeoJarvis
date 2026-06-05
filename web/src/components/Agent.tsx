@@ -15,12 +15,13 @@ const SUGGESTIONS = [
   "看看我磁盘为什么快满了",
   "本地服务都还活着吗",
   "扫描一下当前电脑状态",
-  "列出在管的子 agent",
+  "扫描一下今天的情报",
+  "把我刚才的想法写进个人记事",
 ];
 
 const enter = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { ease: "easeOut" as const } };
 
-export function Agent() {
+function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose?: () => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,13 +57,23 @@ export function Agent() {
   }
 
   return (
-    <div>
-      <div className="page-head">
-        <h1>🧠 中枢对话 <span className="gradient-text">对话即指挥</span></h1>
-        <p>直接吩咐它，它会调工具在你机器上动手。低风险自动执行，高风险弹卡片等你点头。</p>
-      </div>
+    <div className={compact ? "agent-console compact" : "agent-console"}>
+      {compact ? (
+        <div className="floating-agent-head">
+          <div>
+            <b>Jarvis</b>
+            <span>Command center · pending actions stay here</span>
+          </div>
+          <button className="icon-btn" onClick={onClose}>Close</button>
+        </div>
+      ) : (
+        <div className="page-head">
+          <h1>中枢对话</h1>
+          <p>直接吩咐它，它会调工具在你机器上动手。低风险自动执行，高风险弹卡片等你点头。</p>
+        </div>
+      )}
 
-      <div className="chat-wrap">
+      <div className={compact ? "chat-wrap floating-chat-wrap" : "chat-wrap"}>
         <div className="chat" ref={scroller}>
           {turns.length === 0 && (
             <motion.div className="empty" {...enter}>对 Cortex 说点什么，或点下面的快捷指令试试。</motion.div>
@@ -89,11 +100,11 @@ export function Agent() {
                 return <motion.pre key={i} className="toolResult" {...enter}>{turn.text}</motion.pre>;
               return (
                 <motion.div key={i} className="card approve-card" {...enter}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>⚠️ 待你确认</div>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>待你确认</div>
                   {turn.actions.map((a) => (
                     <div key={a.id}>
-                      <div className="meta" style={{ color: "var(--text-dim)", fontSize: 13 }}>
-                        工具 <code style={{ color: "var(--accent-3)" }}>{a.tool}</code> · {a.reason}
+                      <div className="meta" style={{ color: "var(--muted)", fontSize: 13 }}>
+                        工具 <code style={{ color: "var(--accent)" }}>{a.tool}</code> · {a.reason}
                       </div>
                       <pre>{JSON.stringify(a.args, null, 2)}</pre>
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -116,12 +127,45 @@ export function Agent() {
         </div>
 
         <div className="composer">
-          <input value={input} placeholder="对 Cortex 说点什么…"
+          <input value={input} placeholder="Ask Jarvis..."
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)} />
-          <button className="btn primary" onClick={() => send(input)} disabled={busy}>发送</button>
+          <button className="btn primary" onClick={() => send(input)} disabled={busy}>Send</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function Agent() {
+  return <AgentConsole />;
+}
+
+export function FloatingAgent() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`floating-agent ${open ? "open" : ""}`}>
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            className="floating-agent-panel"
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+          >
+            <AgentConsole compact onClose={() => setOpen(false)} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+      <button
+        className="agent-fab"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Close Jarvis" : "Open Jarvis"}
+      >
+        <span>Jarvis</span>
+        <b>{open ? "Close" : "Command"}</b>
+      </button>
     </div>
   );
 }

@@ -35,9 +35,12 @@ TOOL_BASE_RISK = {
     "list_services": "auto",
     "disk_hotspots": "auto",
     "recall_memory": "auto",
+    "write_personal_note": "auto",
     "write_journal": "auto",
     "read_file": "auto",
     "run_shell": "dynamic",     # 由命令内容决定
+    "intelligence_scan": "auto",
+    "github_radar": "auto",
     "restart_service": "confirm",
     "write_file": "confirm",
     "service_logs": "auto",
@@ -46,6 +49,7 @@ TOOL_BASE_RISK = {
     "spawn_agent": "confirm",
     "stop_agent": "confirm",
     "search_journal": "auto",
+    "search_personal_notes": "auto",
 }
 
 

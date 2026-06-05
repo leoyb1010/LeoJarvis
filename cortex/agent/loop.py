@@ -22,20 +22,51 @@ MAX_STEPS = 8
 _PENDING: dict[str, dict] = {}
 
 
+def _escape_ctrl_in_strings(s: str) -> str:
+    """把 JSON 字符串值里的裸换行/制表符转义，修复模型在 final 里直接换行导致的解析失败。"""
+    out: list[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if esc:
+            out.append(ch)
+            esc = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            out.append(ch)
+            continue
+        if in_str and ch == "\n":
+            out.append("\\n")
+        elif in_str and ch == "\r":
+            out.append("\\r")
+        elif in_str and ch == "\t":
+            out.append("\\t")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _parse_action(raw: str) -> dict:
     """从模型输出里抽取 JSON 动作，容错。"""
     raw = raw.strip()
     start, end = raw.find("{"), raw.rfind("}")
     if start >= 0 and end > start:
         chunk = raw[start:end + 1]
-        try:
-            return json.loads(chunk)
-        except json.JSONDecodeError:
-            # 去掉可能的尾随逗号再试
+        for candidate in (chunk, _escape_ctrl_in_strings(chunk),
+                          re.sub(r",\s*}", "}", _escape_ctrl_in_strings(chunk))):
             try:
-                return json.loads(re.sub(r",\s*}", "}", chunk))
+                return json.loads(candidate)
             except json.JSONDecodeError:
-                pass
+                continue
+        # 正则兜底：直接抠出 final 文本
+        m = re.search(r'"final"\s*:\s*"(.+?)"\s*}\s*$', chunk, re.S)
+        if m:
+            return {"final": m.group(1).replace("\\n", "\n").replace('\\"', '"')}
     return {"final": raw or "（我没有产生有效回复）"}
 
 
@@ -62,7 +93,7 @@ def run_agent(messages: list[dict]) -> dict:
             raw = chat("agent", convo, temperature=0.2)
         except Exception as ex:  # noqa: BLE001
             return {
-                "reply": f"⚠️ 还没法思考：{ex}\n请在 config/models.toml 配置一个可用的 LLM 接口"
+                "reply": f"还没法思考：{ex}\n请在 config/models.toml 配置一个可用的模型接口"
                          f"（routing.agent 或 routing.default）。",
                 "steps": steps, "pending_actions": [],
             }

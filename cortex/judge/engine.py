@@ -17,6 +17,7 @@ class Judgment:
     take: str
     triage: str
     reasons: list[str]
+    analysis: dict | None = None
 
 
 def _profile_thresholds() -> tuple[float, float]:
@@ -70,7 +71,17 @@ def judge(item) -> Judgment:
             triage = "digest"
         if triage not in {"notify", "digest", "ignore"}:
             triage = "digest"
-        return Judgment(score, str(data.get("take", "")), triage, list(data.get("reasons", [])))
+        analysis = {
+            "title_zh": str(data.get("title_zh") or "").strip(),
+            "summary": str(data.get("summary") or "").strip(),
+            "take": str(data.get("take") or "").strip(),
+            "why": str(data.get("why") or "").strip(),
+            "relation": str(data.get("relation") or "").strip(),
+            "next_step": str(data.get("next_step") or "").strip(),
+        }
+        analysis = {k: v for k, v in analysis.items() if v}
+        take = analysis.get("take") or str(data.get("take", ""))
+        return Judgment(score, take, triage, list(data.get("reasons", [])), analysis or None)
     except Exception:
         if not settings().get("judge", {}).get("fallback_judge", True):
             raise
@@ -80,5 +91,5 @@ def judge(item) -> Judgment:
 def judge_and_store(event_id: str, item) -> Judgment:
     result = judge(item)
     db.insert_judgment(event_id=event_id, score=result.score, take=result.take,
-                       triage=result.triage, reasons=result.reasons)
+                       triage=result.triage, reasons=result.reasons, analysis=result.analysis)
     return result

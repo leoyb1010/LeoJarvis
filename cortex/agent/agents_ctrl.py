@@ -105,8 +105,8 @@ def stop_agent(agent_id: str) -> str:
     except OSError:
         try:
             os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
+        except OSError as exc:
+            row["stop_error"] = str(exc)
     row["status"] = "stopped"
     _save(rows)
     return f"已停止 agent [{agent_id}] {row['name']}。"

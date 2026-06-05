@@ -1,9 +1,79 @@
+# ============ 资讯来源（多源、多类别）============
+# category 用于情报中心分区：AI科技 / 财经 / 中文科技 / 综合资讯 / X社媒
+# domain：business（业务相关）/ life（生活相关）
+
 [[rss]]
-name = "machine-learning"
-url = "https://hnrss.org/frontpage"
+name = "TechCrunch"
+url = "https://techcrunch.com/feed/"
 domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "The Verge"
+url = "https://www.theverge.com/rss/index.xml"
+domain = "business"
+category = "AI科技"
 fulltext = false
 limit = 10
+
+[[rss]]
+name = "Hacker News"
+url = "https://hnrss.org/best"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "36氪"
+url = "https://36kr.com/feed"
+domain = "business"
+category = "中文科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "少数派"
+url = "https://sspai.com/feed"
+domain = "life"
+category = "中文科技"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "阮一峰的网络日志"
+url = "https://www.ruanyifeng.com/blog/atom.xml"
+domain = "life"
+category = "中文科技"
+fulltext = false
+limit = 6
+
+[[rss]]
+name = "华尔街日报·市场"
+url = "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 12
+
+# X / 社媒监控：经 RSSHub 转 RSS。公共实例常被限流，建议自建后改成你的实例地址。
+[[rss]]
+name = "X · sama"
+url = "https://rsshub.app/twitter/user/sama"
+domain = "business"
+category = "X社媒"
+fulltext = false
+limit = 6
+
+[[rss]]
+name = "X · karpathy"
+url = "https://rsshub.app/twitter/user/karpathy"
+domain = "business"
+category = "X社媒"
+fulltext = false
+limit = 6
 
 [leomoney]
 base_url = "http://localhost:3210"
@@ -17,3 +87,22 @@ limit = 20
 
 [calendar]
 ics_url = ""
+
+[github_radar]
+enabled = true
+min_stars = 300
+max_queries = 10
+max_results_per_query = 8
+# 搜索最近仍活跃、且不是太老的项目，用于发现 star 增长很快的新项目。
+pushed_days = 45
+created_days = 730
+queries = [
+  "AI agent local-first",
+  "personal AI assistant",
+  "desktop AI assistant",
+  "ollama agent",
+  "MCP agent",
+  "AI workflow automation",
+  "browser automation AI",
+  "personal intelligence",
+]

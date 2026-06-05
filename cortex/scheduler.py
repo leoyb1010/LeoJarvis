@@ -52,6 +52,15 @@ async def run_ingest_cycle() -> dict:
     return stats
 
 
+async def run_intelligence_cycle() -> dict:
+    """Personal Intelligence Hub：RSS / 网页变化 / GitHub 项目雷达。"""
+    from .intelligence.scanner import run_intelligence_scan
+
+    result = await run_intelligence_scan()
+    print(f"[intelligence] {result}")
+    return result
+
+
 _GUARD_STATE: dict[str, float] = {}
 
 
@@ -79,7 +88,7 @@ async def run_system_guard() -> dict:
             alerts.append({"title": "CPU 负载偏高", "take": f"每核负载 {per_core:.1f}。问我「现在哪个进程最吃 CPU」。"})
         _GUARD_STATE["load"] = per_core
     except OSError:
-        pass
+        _GUARD_STATE["load_unavailable"] = 1.0
 
     for s in services.status_all():
         key = f"svc:{s['name']}"
@@ -103,8 +112,16 @@ def run_reflection() -> dict:
 
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = settings().get("schedule", {})
+    intel_cfg = settings().get("intelligence", {})
     sched = AsyncIOScheduler()
     sched.add_job(run_ingest_cycle, "interval", minutes=int(cfg.get("ingest_minutes", 30)), id="ingest", replace_existing=True)
+    sched.add_job(
+        run_intelligence_cycle,
+        "interval",
+        minutes=int(intel_cfg.get("scan_minutes", 60)),
+        id="intelligence",
+        replace_existing=True,
+    )
     sched.add_job(run_system_guard, "interval", minutes=int(cfg.get("guard_minutes", 5)), id="guard", replace_existing=True)
     sched.add_job(run_reflection, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=0, id="reflect", replace_existing=True)
     sched.add_job(lambda: print("[briefing] ready"), "cron",

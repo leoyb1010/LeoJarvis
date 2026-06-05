@@ -1,0 +1,20 @@
+# 复制为 models.toml 并填入你自己的接口。models.toml 已被 .gitignore 排除。
+[[model]]
+name = "primary"
+model_id = "your-model-id"
+base_url = "https://your-openai-compatible-endpoint.example"
+api_key = "replace-with-your-key"
+tags = ["agent", "reflect", "plan"]
+
+[[model]]
+name = "cheap"
+model_id = "your-cheaper-model-id"
+base_url = "https://your-openai-compatible-endpoint.example"
+api_key = "replace-with-your-key"
+tags = ["judge", "cheap"]
+
+[routing]
+agent = "primary"
+reflect = "primary"
+judge = "cheap"
+default = "primary"

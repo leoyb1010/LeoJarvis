@@ -25,6 +25,7 @@ class RSSCollector(Collector):
                     except Exception:
                         content = content or "正文抓取失败，保留摘要。"
                 title = getattr(entry, "title", "") or "（无标题）"
+                published = getattr(entry, "published", "") or getattr(entry, "updated", "")
                 items.append(RawItem(
                     source=f"rss:{feed.get('name', 'unnamed')}",
                     domain=feed.get("domain", "business"),
@@ -32,5 +33,11 @@ class RSSCollector(Collector):
                     title=title,
                     content=content or title,
                     url=link,
+                    meta={
+                        "category": feed.get("category", "综合资讯"),
+                        "feed_name": feed.get("name", "RSS"),
+                        "original_title": title,
+                        "published": published,
+                    },
                 ))
         return items
