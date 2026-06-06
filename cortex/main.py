@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .api.routes import router
-from .config import settings
+from .config import ROOT, settings
 from .scheduler import setup_scheduler
 
 _sched = None
+_WEB_DIST = ROOT / "web" / "dist"
 
 
 @asynccontextmanager
@@ -48,6 +52,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+
+
+# ---------- 生产前端：把构建好的静态资源挂到同一进程，单端口稳定上线 ----------
+# 开发时用 vite(5173)；上线只跑后端 8787，由它直接吐 web/dist，避免 dev server 挂掉。
+if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
+    app.mount("/assets", StaticFiles(directory=str(_WEB_DIST / "assets")), name="assets")
+
+    @app.get("/")
+    def _serve_index() -> FileResponse:
+        return FileResponse(str(_WEB_DIST / "index.html"))
+
+    @app.get("/{full_path:path}")
+    def _spa_fallback(full_path: str) -> FileResponse:
+        # 真实存在的静态文件直接返回，其余路径回退到 index.html（前端路由）。
+        candidate = _WEB_DIST / full_path
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(_WEB_DIST / "index.html"))
 
 
 def run() -> None:

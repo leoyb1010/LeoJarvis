@@ -100,7 +100,7 @@ curl http://127.0.0.1:8787/health
 
 ## 前端启动
 
-另开一个终端：
+开发模式（热更新，端口 5173）：
 
 ```bash
 cd /Users/leoyuan/Desktop/leoworkspace/cortex/web
@@ -109,6 +109,18 @@ npm run dev
 ```
 
 打开 `http://127.0.0.1:5173`。
+
+## 上线 / 部署（推荐）
+
+开发用的 vite dev server(5173) 不适合长期运行，容易挂。上线时用一键脚本：
+构建前端并由后端**单进程、单端口(8787)**同源托管，稳定不掉。
+
+```bash
+bash scripts/deploy.sh
+```
+
+完成后打开 `http://127.0.0.1:8787`（前端与 API 同源，无需再开 5173）。
+配合下方 launchd 常驻，进程退出会自动拉起。
 
 ## 配置
 

@@ -1,4 +1,7 @@
-const BASE = "http://127.0.0.1:8787";
+// 同源部署（后端 8787 直接吐 dist）时走相对地址；vite dev(5173) 时回退到后端 8787。
+const BASE = (typeof window !== "undefined" && window.location.port !== "5173")
+  ? ""
+  : "http://127.0.0.1:8787";
 
 async function readJson<T>(res: Response, label: string): Promise<T> {
   if (!res.ok) throw new Error(`${label}失败：${res.status}`);
@@ -567,7 +570,11 @@ export async function runReflect(): Promise<{ created: number; used_llm?: boolea
 }
 
 export function connectNotify(onMsg: (m: any) => void) {
-  const ws = new WebSocket("ws://127.0.0.1:8787/ws/notify");
+  // 同源部署用当前 host；dev(5173) 回退到后端 8787。
+  const wsBase = (typeof window !== "undefined" && window.location.port !== "5173")
+    ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`
+    : "ws://127.0.0.1:8787";
+  const ws = new WebSocket(`${wsBase}/ws/notify`);
   ws.onmessage = (event) => onMsg(JSON.parse(event.data));
   const timer = window.setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send("ping");
