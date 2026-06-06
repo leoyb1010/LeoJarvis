@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getCockpitOverview,
+  getRemoteCockpit,
+  listRemoteLeoJarvis,
   upgradeAiTool,
   type AiToolStatus,
   type BriefingItem,
   type CockpitGithubCard,
   type CockpitOverview,
   type LocalNotificationApp,
+  type RemoteLeoJarvisConnection,
   type ServiceRow,
 } from "../api";
 import { PageSkeleton } from "./Skeleton";
@@ -128,7 +131,7 @@ function AppIcon({ app, size = 36 }: { app: LocalNotificationApp; size?: number 
 }
 
 function statusTone(status: string): "ok" | "warn" | "bad" | "neutral" {
-  if (status === "有新通知") return "ok";
+  if (status === "有新通知" || status === "已读取邮件") return "ok";
   if (status === "无新通知") return "neutral";
   if (status === "未授权" || status === "未配置") return "warn";
   return "neutral";
@@ -146,25 +149,38 @@ export function Dashboard() {
   const [showHealthDetail, setShowHealthDetail] = useState(false);
   const [upgradingTool, setUpgradingTool] = useState("");
   const [upgradeResult, setUpgradeResult] = useState("");
+  const [remotes, setRemotes] = useState<RemoteLeoJarvisConnection[]>([]);
+  const [activeDevice, setActiveDevice] = useState("local");
+  const [deviceError, setDeviceError] = useState("");
 
   useEffect(() => {
     let alive = true;
-    const load = () =>
-      getCockpitOverview()
+    const load = () => {
+      setDeviceError("");
+      const dataPromise = activeDevice === "local"
+        ? getCockpitOverview()
+        : getRemoteCockpit(activeDevice).then((res) => {
+            if (!res.ok || !res.data) throw new Error(res.error || "远程 LeoJarvis 未连接");
+            return res.data;
+          });
+      dataPromise
         .then((res) => {
           if (!alive) return;
           setData(res);
           setSamples((prev) => {
+            const key = activeDevice === "local" ? "cortex-dashboard-samples" : `cortex-dashboard-samples-${activeDevice}`;
             const next = [...prev.filter((row) => row.ts !== res.generated_at), sampleFrom(res)].slice(-40);
-            storeSamples(next);
+            try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* optional */ }
             return next;
           });
         })
-        .catch((err) => { if (alive) setError(String(err)); });
+        .catch((err) => { if (alive) { setError(String(err)); setDeviceError(String(err)); } });
+    };
+    listRemoteLeoJarvis().then((rows) => { if (alive) setRemotes(rows); }).catch(() => {});
     load();
     const t = window.setInterval(load, 8000);
     return () => { alive = false; window.clearInterval(t); };
-  }, []);
+  }, [activeDevice]);
 
   const series = useMemo(() => ({
     health: samples.map((s) => s.health),
@@ -265,6 +281,19 @@ export function Dashboard() {
 
   return (
     <div className="dash">
+      <div className="dash-device-switch card">
+        <div>
+          <span className="kicker">Device Switch</span>
+          <b>{activeDevice === "local" ? "本机 LeoJarvis" : remotes.find((r) => r.id === activeDevice)?.name || "远程 LeoJarvis"}</b>
+          <small>{activeDevice === "local" ? "127.0.0.1:8787" : remotes.find((r) => r.id === activeDevice)?.host}</small>
+        </div>
+        <select value={activeDevice} onChange={(e) => { setActiveDevice(e.target.value); setData(null); setSamples([]); }}>
+          <option value="local">本机 LeoJarvis</option>
+          {remotes.map((r) => <option key={r.id} value={r.id}>{r.name || r.host}{r.connected ? " · 已连接" : " · SSH"}</option>)}
+        </select>
+        {deviceError ? <em>{deviceError}</em> : <em>{activeDevice === "local" ? "本机实时驾驶舱" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
+      </div>
+
       {/* 本机状态：扁平指标块 */}
       <SectionTitle
         title="本机状态"
@@ -425,6 +454,19 @@ export function Dashboard() {
             <div><span>已安装</span><b>{activeApp.installed ? "是" : "否"}</b></div>
             <div><span>检测时间</span><b>{fmtTime(activeApp.checked_at, false)}</b></div>
             <p className="modal-note">{activeApp.detail}</p>
+            {activeApp.id === "mail" && activeApp.recent?.length ? (
+              <div className="modal-info-block">
+                <span>最近读取到的邮件</span>
+                <ul className="mail-recent-list">
+                  {activeApp.recent.slice(0, 6).map((mail, i) => (
+                    <li key={`${mail.ts || i}-${mail.title || i}`}>
+                      <b>{mail.title || "（无主题邮件）"}</b>
+                      <em>{mail.source || "Apple Mail"} · {fmtTime(mail.ts)}</em>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {activeApp.mechanism ? (
               <div className="modal-info-block">
                 <span>如何看到通知</span>
@@ -447,6 +489,7 @@ export function Dashboard() {
         {activeSignal ? (
           <div className="modal-rich">
             <p className="lead">{activeSignal.take}</p>
+            {activeSignal.detail ? <div className="modal-detail"><span>有用详情</span><p>{activeSignal.detail}</p></div> : null}
             <div className="modal-grid">
               <div><span>为什么重要</span><p>{activeSignal.why_important || "已通过情报评分进入驾驶舱。"}</p></div>
               <div><span>和我的关系</span><p>{activeSignal.relation || "与你的关注项、历史偏好相关。"}</p></div>

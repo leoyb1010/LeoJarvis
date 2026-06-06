@@ -1,6 +1,37 @@
 # ============ 资讯来源（多源、多类别）============
-# category 用于情报中心分区：AI科技 / 财经 / 中文科技 / 综合资讯 / X社媒
+# category 用于情报中心分区：AI科技 / 财经 / 中文科技 / 综合资讯 / 出海创业
 # domain：business（业务相关）/ life（生活相关）
+#
+# 说明：
+# - 这里是「精选基线源」。你可以在设置页继续增删，或一键导入 OPML
+#   （Karpathy 推荐的 92 个 HN 高赞博客、BestBlogs 的 375 个中文公众号等）。
+# - X / Twitter 监控不在这里配置，统一在设置页「X 监控」里管理
+#   （settings -> x_monitor：可填 @handle 走 RSSHub，或直接粘贴 rss.app 生成的 feed）。
+
+# ---------- AI / 科技 · 深度长文（低 slop） ----------
+[[rss]]
+name = "Simon Willison"
+url = "https://simonwillison.net/atom/everything/"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "Hacker News · Best"
+url = "https://hnrss.org/best"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "Hacker News · Frontpage"
+url = "https://hnrss.org/frontpage"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 10
 
 [[rss]]
 name = "TechCrunch"
@@ -8,7 +39,7 @@ url = "https://techcrunch.com/feed/"
 domain = "business"
 category = "AI科技"
 fulltext = false
-limit = 12
+limit = 10
 
 [[rss]]
 name = "The Verge"
@@ -16,16 +47,58 @@ url = "https://www.theverge.com/rss/index.xml"
 domain = "business"
 category = "AI科技"
 fulltext = false
-limit = 10
+limit = 8
 
 [[rss]]
-name = "Hacker News"
-url = "https://hnrss.org/best"
+name = "Daring Fireball"
+url = "https://daringfireball.net/feeds/main"
 domain = "business"
 category = "AI科技"
 fulltext = false
+limit = 8
+
+[[rss]]
+name = "Gwern"
+url = "https://gwern.substack.com/feed"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 6
+
+[[rss]]
+name = "Pluralistic (Cory Doctorow)"
+url = "https://pluralistic.net/feed/"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 6
+
+[[rss]]
+name = "Jeff Geerling"
+url = "https://www.jeffgeerling.com/blog.xml"
+domain = "life"
+category = "AI科技"
+fulltext = false
+limit = 6
+
+# ---------- 财经 / 全球新闻 ----------
+[[rss]]
+name = "华尔街日报 · 市场"
+url = "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "Reuters · World"
+url = "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"
+domain = "business"
+category = "财经"
+fulltext = false
 limit = 10
 
+# ---------- 中文科技 / 出海 / 生产力 ----------
 [[rss]]
 name = "36氪"
 url = "https://36kr.com/feed"
@@ -50,34 +123,7 @@ category = "中文科技"
 fulltext = false
 limit = 6
 
-[[rss]]
-name = "华尔街日报·市场"
-url = "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
-domain = "business"
-category = "财经"
-fulltext = false
-limit = 12
-
-# X / 社媒监控：经 RSSHub 转 RSS。公共实例常被限流，建议自建后改成你的实例地址。
-[[rss]]
-name = "X · sama"
-url = "https://rsshub.app/twitter/user/sama"
-domain = "business"
-category = "X社媒"
-fulltext = false
-limit = 6
-
-[[rss]]
-name = "X · karpathy"
-url = "https://rsshub.app/twitter/user/karpathy"
-domain = "business"
-category = "X社媒"
-fulltext = false
-limit = 6
-
-[leomoney]
-base_url = "http://localhost:3210"
-
+# ---------- 采集器：本地邮件 / 日历 ----------
 [email]
 enabled = false
 host = "imap.example.com"

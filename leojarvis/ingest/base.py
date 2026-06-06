@@ -16,6 +16,8 @@ class RawItem:
 
     @property
     def dedup_key(self) -> str:
+        if isinstance(self.meta, dict) and self.meta.get("dedup_key"):
+            return str(self.meta["dedup_key"])
         base = self.url or (self.source + self.title + self.content[:120])
         return hashlib.sha256(base.encode("utf-8")).hexdigest()
 

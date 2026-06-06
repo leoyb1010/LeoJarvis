@@ -29,15 +29,15 @@ struct DeviceSummary: Decodable {
 }
 
 @main
-struct CortexMenuBarApp: App {
-    @StateObject private var model = CortexHealthModel()
+struct LeoJarvisMenuBarApp: App {
+    @StateObject private var model = LeoJarvisHealthModel()
 
     var body: some Scene {
-        MenuBarExtra("Cortex", systemImage: model.symbolName) {
+        MenuBarExtra("LeoJarvis", systemImage: model.symbolName) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(model.summary?.device_name ?? "Cortex")
+                        Text(model.summary?.device_name ?? "LeoJarvis")
                             .font(.headline)
                         Text(model.summary?.model ?? "Local Mac")
                             .font(.caption)
@@ -96,7 +96,7 @@ struct CortexMenuBarApp: App {
 }
 
 @MainActor
-final class CortexHealthModel: ObservableObject {
+final class LeoJarvisHealthModel: ObservableObject {
     @Published var summary: DeviceSummary?
     @Published var error: String?
 

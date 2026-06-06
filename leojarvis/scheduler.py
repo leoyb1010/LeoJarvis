@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from . import db
+from . import db, user_settings
 from .config import settings
 from .ingest.calendar_ingest import CalendarCollector
 from .ingest.email_ingest import EmailCollector
-from .ingest.leomoney import LeomoneyCollector
 from .ingest.rss import RSSCollector
 from .judge.engine import judge_and_store
 from .memory.store import remember_event
 from .notify.hub import hub
 
-COLLECTORS = [RSSCollector(), LeomoneyCollector(), EmailCollector(), CalendarCollector()]
+COLLECTORS = [EmailCollector(), CalendarCollector(), RSSCollector()]
 
 
 async def run_ingest_cycle() -> dict:
@@ -34,6 +33,18 @@ async def run_ingest_cycle() -> dict:
                 if event_id is None:
                     continue
                 stats["inserted"] += 1
+                # 本地 Apple Mail 只读取标题/发件人/邮箱，不让首次导入几十封旧邮件阻塞手动采集。
+                # 这里同时跳过向量记忆与 LLM judge：两者都会在首次导入历史邮件时拖慢 /ingest/run。
+                # 真正需要推送的 IMAP 未读邮件仍会走 remember + judge。
+                if str(item.source).startswith("email:Apple Mail"):
+                    db.insert_judgment(
+                        event_id=event_id,
+                        score=0.52,
+                        take=f"邮件：{item.title}。{item.content.splitlines()[0] if item.content else ''}",
+                        triage="digest",
+                        reasons=["Apple Mail 本地邮箱记录"],
+                    )
+                    continue
                 remember_event(event_id, f"{item.title}\n{item.content[:700]}")
                 judgment = judge_and_store(event_id, item)
                 if judgment.triage == "notify":
@@ -70,7 +81,7 @@ async def run_system_guard() -> dict:
     import os
     from .agent import services
 
-    cfg = settings().get("guard", {})
+    cfg = user_settings.effective("guard")
     disk_warn = float(cfg.get("disk_used_pct", 90))
     load_warn = float(cfg.get("load_per_core", 2.5))
     alerts = []
@@ -93,7 +104,7 @@ async def run_system_guard() -> dict:
     for s in services.status_all():
         key = f"svc:{s['name']}"
         was_online = _GUARD_STATE.get(key, 1)
-        if not s["online"] and was_online and s["name"] != "cortex":
+        if not s["online"] and was_online and s["name"] != "leojarvis":
             alerts.append({"title": f"服务掉线：{s['name']}", "take": f"{s['name']} (:{s['port']}) 离线了。"})
         _GUARD_STATE[key] = 1.0 if s["online"] else 0.0
 
@@ -105,14 +116,14 @@ async def run_system_guard() -> dict:
 def run_reflection() -> dict:
     """每晚把近期事件归纳成长期记忆。"""
     from .memory.reflect import reflect
-    result = reflect(hours=int(settings().get("schedule", {}).get("reflect_hours", 24)))
+    result = reflect(hours=int(user_settings.effective("schedule").get("reflect_hours", 24)))
     print(f"[reflect] {result}")
     return result
 
 
 def setup_scheduler() -> AsyncIOScheduler:
-    cfg = settings().get("schedule", {})
-    intel_cfg = settings().get("intelligence", {})
+    cfg = user_settings.effective("schedule")
+    intel_cfg = user_settings.effective("intelligence")
     sched = AsyncIOScheduler()
     sched.add_job(run_ingest_cycle, "interval", minutes=int(cfg.get("ingest_minutes", 30)), id="ingest", replace_existing=True)
     sched.add_job(

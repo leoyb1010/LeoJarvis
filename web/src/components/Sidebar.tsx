@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 
-export type ViewId = "dashboard" | "system" | "devices" | "intelligence" | "notes" | "memory";
+export type ViewId = "dashboard" | "system" | "intelligence" | "notes" | "memory" | "settings";
 
 const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
   {
@@ -12,8 +12,7 @@ const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
   {
     title: "运维",
     items: [
-      { id: "system", label: "系统状态" },
-      { id: "devices", label: "设备健康" },
+      { id: "system", label: "系统与设备" },
     ],
   },
   {
@@ -21,6 +20,7 @@ const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
     items: [
       { id: "intelligence", label: "情报简报" },
       { id: "notes", label: "个人记事" },
+      { id: "settings", label: "设置" },
     ],
   },
 ];
@@ -46,9 +46,9 @@ export function Sidebar({
         {collapsed ? "›" : "‹"}
       </button>
       <div className="brand">
-          <div className="logo leo-logo" aria-hidden="true"><span>C</span></div>
+          <div className="logo leo-logo" aria-hidden="true"><img src="/brand-mark.png" alt="" /></div>
         <div>
-          <div className="name">Cortex</div>
+          <div className="name">LeoJarvis</div>
           <div className="sub">本地个人系统</div>
         </div>
       </div>

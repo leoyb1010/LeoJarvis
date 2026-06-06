@@ -44,3 +44,11 @@ def profile() -> dict:
 @lru_cache
 def sources() -> dict:
     return _load("sources.toml")
+
+
+def clear_config_cache() -> None:
+    """Reload TOML-backed config after the settings page changes user-facing options."""
+    settings.cache_clear()
+    models.cache_clear()
+    profile.cache_clear()
+    sources.cache_clear()

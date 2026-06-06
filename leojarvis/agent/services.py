@@ -12,10 +12,8 @@ import subprocess
 from ..config import settings
 
 _DEFAULTS = {
-    "cortex": {"port": 8787, "desc": "Cortex 本地中枢：对话、工具总线与全景驾驶舱后端"},
+    "leojarvis": {"port": 8787, "desc": "LeoJarvis 本地中枢：对话、工具总线与全景驾驶舱后端"},
     "ollama": {"port": 11434, "start": "ollama serve", "desc": "本地大模型运行时，为判断/嵌入/对话提供推理"},
-    "leomoney": {"port": 3210, "desc": "个人记账与资产服务，作为财务情报来源"},
-    "leonote": {"port": 3000, "desc": "个人笔记服务，记事与知识沉淀"},
     "leoapi": {"port": 8080, "desc": "个人 API 网关 / 自建后端服务"},
 }
 

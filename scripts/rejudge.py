@@ -6,8 +6,8 @@ import sys
 import time
 from types import SimpleNamespace
 
-from cortex import db
-from cortex.judge.engine import judge_and_store
+from leojarvis import db
+from leojarvis.judge.engine import judge_and_store
 
 
 def main(hours: int = 96) -> None:

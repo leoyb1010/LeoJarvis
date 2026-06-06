@@ -22,7 +22,7 @@ from ..memory.profile import profile_terms
 from ..memory.store import remember_event
 from ..notify.hub import hub
 
-USER_AGENT = "Cortex-Intelligence/0.1 (+https://github.com/leoyb1010/cortex)"
+USER_AGENT = "LeoJarvis-Intelligence/0.1 (+https://github.com/leoyb1010/LeoJarvis)"
 
 
 def _now_iso() -> str:

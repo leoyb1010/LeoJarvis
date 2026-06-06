@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from .. import db
+from .. import db, user_settings
 from ..agent.loop import approve_action, run_agent
 from ..agent.tools import TOOLBUS
 from ..briefing.builder import build_today
@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("/health")
 def health() -> dict:
-    return {"ok": True, "ts": int(time.time()), "service": "cortex"}
+    return {"ok": True, "ts": int(time.time()), "service": "leojarvis"}
 
 
 class DeviceHeartbeatIn(BaseModel):
@@ -36,6 +36,209 @@ class DeviceHeartbeatIn(BaseModel):
     services: dict = Field(default_factory=dict)
     risks: list[dict] = Field(default_factory=list)
     privacy: str = ""
+
+
+class RemoteDeviceIn(BaseModel):
+    host: str
+    name: str = ""
+    user: str = ""
+    port: int = 22
+    enabled: bool = True
+
+
+class RemoteLeoJarvisIn(BaseModel):
+    name: str = ""
+    host: str
+    user: str = ""
+    ssh_port: int = 22
+    remote_port: int = 8787
+    local_port: int | None = None
+    enabled: bool = True
+
+
+class SettingsIn(BaseModel):
+    settings: dict = Field(default_factory=dict)
+
+
+@router.get("/settings")
+def get_settings() -> dict:
+    return user_settings.load()
+
+
+@router.patch("/settings")
+def patch_settings(req: SettingsIn) -> dict:
+    return user_settings.patch(req.settings)
+
+
+class OpmlImportIn(BaseModel):
+    opml: str = ""
+    category: str = "OPML导入"
+    domain: str = Field(default="business", pattern="^(business|life)$")
+    limit: int = 8
+
+
+def _parse_opml(text: str) -> list[dict]:
+    """Extract feeds from OPML XML. Each outline with an xmlUrl becomes a feed.
+    The nearest ancestor outline's text is used as the category when present."""
+    import xml.etree.ElementTree as ET
+
+    feeds: list[dict] = []
+    try:
+        root = ET.fromstring(text)
+    except Exception:
+        return feeds
+
+    def walk(node, parent_label: str = "") -> None:
+        for child in list(node):
+            if not child.tag.endswith("outline"):
+                walk(child, parent_label)
+                continue
+            xml_url = child.attrib.get("xmlUrl") or child.attrib.get("xmlurl")
+            label = child.attrib.get("title") or child.attrib.get("text") or ""
+            if xml_url:
+                feeds.append({
+                    "name": label or xml_url,
+                    "url": xml_url.strip(),
+                    "category": parent_label or "OPML导入",
+                    "_label": label,
+                })
+            # a grouping outline (no xmlUrl) sets the category for its children
+            walk(child, label if not xml_url else parent_label)
+
+    walk(root)
+    return feeds
+
+
+@router.post("/settings/rss/import-opml")
+def import_opml(req: OpmlImportIn) -> dict:
+    """Parse an OPML document and merge its feeds into user RSS sources (dedup by URL)."""
+    parsed = _parse_opml(req.opml or "")
+    current = user_settings.load().get("rss", {}) or {}
+    existing = list(current.get("sources", []) or [])
+    seen = {str(f.get("url", "")).strip() for f in existing if isinstance(f, dict)}
+    added = 0
+    for feed in parsed:
+        url = feed["url"]
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        existing.append({
+            "name": feed["name"][:80],
+            "url": url,
+            "domain": req.domain,
+            "category": feed.get("category") or req.category,
+            "fulltext": False,
+            "limit": int(req.limit),
+            "enabled": True,
+        })
+        added += 1
+    user_settings.patch({"rss": {"sources": existing}})
+    return {"ok": True, "parsed": len(parsed), "added": added, "total": len(existing)}
+
+
+@router.get("/settings/tuning")
+def get_tuning() -> dict:
+    """当前生效的阈值/节奏（settings.toml 叠加用户 overrides），供设置页展示与编辑。"""
+    return {
+        "judge": user_settings.effective("judge"),
+        "schedule": user_settings.effective("schedule"),
+        "guard": user_settings.effective("guard"),
+        "intelligence": user_settings.effective("intelligence"),
+        "overrides": user_settings.load().get("overrides", {}),
+    }
+
+
+@router.get("/settings/diagnostics")
+def settings_diagnostics() -> dict:
+    from ..agent import sysinfo
+    from ..ingest.email_ingest import _apple_mail_db, _apple_mail_items, _email_accounts
+    apple_items = _apple_mail_items(limit=5, unread_only=False)
+    return {
+        "settings_path": str(user_settings.SETTINGS_PATH),
+        "email_accounts": [
+            {"name": a.get("name") or a.get("user") or a.get("username"), "host": a.get("host") or a.get("imap_host") or a.get("provider"), "enabled": a.get("enabled", True)}
+            for a in _email_accounts()
+        ],
+        "apple_mail": {
+            "db": str(_apple_mail_db() or ""),
+            "recent_count_sample": len(apple_items),
+            "sample": [{"title": i.title, "source": i.source, "from": i.meta.get("from")} for i in apple_items[:3]],
+        },
+        "notifications": sysinfo.local_notifications(),
+        "ai_tools": sysinfo.ai_tool_status(max_age=0, block=True),
+    }
+
+
+@router.get("/devices/ssh")
+def list_ssh_devices() -> list[dict]:
+    from .. import remote_status
+    return remote_status.configured_hosts()
+
+
+@router.post("/devices/ssh")
+def add_ssh_device(req: RemoteDeviceIn) -> dict:
+    from .. import remote_status
+    return {"ok": True, "device": remote_status.add_host(host=req.host, name=req.name, user=req.user, port=req.port, enabled=req.enabled)}
+
+
+@router.delete("/devices/ssh/{device_id}")
+def remove_ssh_device(device_id: str) -> dict:
+    from .. import remote_status
+    return remote_status.remove_host(device_id)
+
+
+@router.post("/devices/ssh/probe")
+def probe_ssh_devices() -> dict:
+    from .. import remote_status
+    return remote_status.probe_all()
+
+
+@router.get("/remote-cortex")
+def remote_cortex_list() -> list[dict]:
+    from .. import remote_cortex
+    return remote_cortex.list_connections()
+
+
+@router.post("/remote-cortex")
+def remote_cortex_add(req: RemoteLeoJarvisIn) -> dict:
+    from .. import remote_cortex
+    return {"ok": True, "connection": remote_cortex.add_connection(**req.model_dump())}
+
+
+@router.delete("/remote-cortex/{connection_id}")
+def remote_cortex_remove(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.remove_connection(connection_id)
+
+
+@router.post("/remote-cortex/{connection_id}/connect")
+def remote_cortex_connect(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.connect(connection_id)
+
+
+@router.post("/remote-cortex/{connection_id}/disconnect")
+def remote_cortex_disconnect(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.disconnect(connection_id)
+
+
+@router.get("/remote-cortex/{connection_id}/cockpit")
+def remote_cortex_cockpit(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.fetch(connection_id, "/cockpit/overview")
+
+
+@router.get("/remote-cortex/{connection_id}/system")
+def remote_cortex_system(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.fetch(connection_id, "/system/overview")
+
+
+@router.get("/remote-cortex/{connection_id}/health")
+def remote_cortex_health(connection_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.fetch(connection_id, "/health")
 
 
 @router.get("/device/summary")
@@ -129,6 +332,12 @@ def system_ai_tools() -> list[dict]:
 def system_ai_tool_upgrade(tool_id: str) -> dict:
     from ..agent import sysinfo
     return sysinfo.ai_tool_upgrade(tool_id)
+
+
+@router.get("/system/dev-tools")
+def system_dev_tools() -> dict:
+    from ..agent import sysinfo
+    return sysinfo.dev_toolchain_status()
 
 
 @router.get("/system/notifications")

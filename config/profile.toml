@@ -1,4 +1,4 @@
-projects = ["Cortex 个人助理", "leonote", "leomoney"]
+projects = ["LeoJarvis 个人助理", "leonote", "leomoney"]
 holdings = ["NVDA", "BTC", "ETH", "SPY"]
 people = ["你关注的几个博主/投资人/同行"]
 topics = ["AI Agent", "本地大模型", "美股", "加密", "个人生产力"]

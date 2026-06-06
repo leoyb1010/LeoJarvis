@@ -1,7 +1,11 @@
-// 同源部署（后端 8787 直接吐 dist）时走相对地址；vite dev(5173) 时回退到后端 8787。
-const BASE = (typeof window !== "undefined" && window.location.port !== "5173")
-  ? ""
-  : "http://127.0.0.1:8787";
+// 后端 API：统一走 /api 前缀，避免和单页应用前端路由（如 /settings）冲突。
+// 如果页面由后端 8787 托管，使用同源 /api；如果是 Vite/preview/其它端口，回退到 8787/api。
+const BASE = (() => {
+  if (typeof window === "undefined") return "http://127.0.0.1:8787/api";
+  const explicit = localStorage.getItem("cortex-api-base");
+  if (explicit) return explicit.replace(/\/$/, "");
+  return window.location.port === "8787" ? "/api" : "http://127.0.0.1:8787/api";
+})();
 
 function apiUrl(path: string) {
   if (BASE) return new URL(path, BASE);
@@ -9,8 +13,18 @@ function apiUrl(path: string) {
 }
 
 async function readJson<T>(res: Response, label: string): Promise<T> {
-  if (!res.ok) throw new Error(`${label}失败：${res.status}`);
-  return res.json();
+  const contentType = res.headers.get("content-type") || "";
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${label}失败：${res.status} ${text.slice(0, 160)}`);
+  if (!contentType.includes("application/json")) {
+    const preview = text.trim().slice(0, 120).replace(/\s+/g, " ");
+    throw new Error(`${label}失败：接口返回的不是 JSON，而是 ${contentType || "未知类型"}。请确认后端 8787 已重启并且前端 API 指向 127.0.0.1:8787。返回预览：${preview}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    throw new Error(`${label}失败：JSON 解析错误 ${String(err)}；返回预览：${text.slice(0, 120)}`);
+  }
 }
 
 export type BriefingItem = {
@@ -31,6 +45,7 @@ export type BriefingItem = {
   why_important?: string;
   relation?: string;
   next_step?: string;
+  detail?: string;
   tags?: string[];
   ts?: number;
 };
@@ -112,6 +127,109 @@ export async function getDevices(): Promise<DeviceSummary[]> {
 
 export async function sendSelfHeartbeat(): Promise<{ ok: boolean; device: DeviceSummary }> {
   return readJson(await fetch(`${BASE}/devices/self-heartbeat`, { method: "POST" }), "上报本机心跳");
+}
+
+export async function addSshDevice(input: { host: string; name?: string; user?: string; port?: number; enabled?: boolean }) {
+  return readJson<any>(await fetch(`${BASE}/devices/ssh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "添加 SSH 设备");
+}
+
+export async function probeSshDevices() {
+  return readJson<any>(await fetch(`${BASE}/devices/ssh/probe`, { method: "POST" }), "探测 SSH 设备");
+}
+
+export type RemoteLeoJarvisConnection = {
+  id: string;
+  name: string;
+  host: string;
+  user?: string;
+  ssh_port: number;
+  remote_port: number;
+  local_port: number;
+  enabled: boolean;
+  connected?: boolean;
+  last_error?: string;
+};
+
+export async function listRemoteLeoJarvis(): Promise<RemoteLeoJarvisConnection[]> {
+  return readJson(await fetch(`${BASE}/remote-cortex`), "读取远程 LeoJarvis");
+}
+
+export async function addRemoteLeoJarvis(input: Partial<RemoteLeoJarvisConnection> & { host: string }) {
+  return readJson<{ ok: boolean; connection: RemoteLeoJarvisConnection }>(await fetch(`${BASE}/remote-cortex`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "添加远程 LeoJarvis");
+}
+
+export async function connectRemoteLeoJarvis(id: string) {
+  return readJson<{ ok: boolean; connection?: RemoteLeoJarvisConnection; error?: string }>(await fetch(`${BASE}/remote-cortex/${id}/connect`, { method: "POST" }), "连接远程 LeoJarvis");
+}
+
+export async function disconnectRemoteLeoJarvis(id: string) {
+  return readJson<{ ok: boolean }>(await fetch(`${BASE}/remote-cortex/${id}/disconnect`, { method: "POST" }), "断开远程 LeoJarvis");
+}
+
+export async function getRemoteCockpit(id: string): Promise<{ ok: boolean; connection?: RemoteLeoJarvisConnection; data?: CockpitOverview; error?: string }> {
+  return readJson(await fetch(`${BASE}/remote-cortex/${id}/cockpit`), "读取远程驾驶舱");
+}
+
+export type RssSource = { name?: string; url?: string; category?: string; domain?: string; limit?: number; enabled?: boolean };
+
+export type LeoJarvisSettings = {
+  notifications: { enabled: boolean; apps: Record<string, boolean> };
+  system: { show_status_bar: boolean; show_raw_details: boolean; refresh_seconds: number };
+  email: { enabled: boolean; accounts: any[]; apple_mail_fallback?: boolean; apple_mail_limit?: number; apple_mail_unread_only?: boolean };
+  gmail: { enabled: boolean; user: string; app_password: string; host?: string; port?: number; mailbox?: string };
+  rss: { sources: RssSource[] };
+  x_monitor: { enabled: boolean; rsshub_base: string; users: string[] };
+  remote_devices: any[];
+  remote_cortex: RemoteLeoJarvisConnection[];
+  overrides?: Record<string, Record<string, any>>;
+};
+
+export type Tuning = {
+  judge: { ignore_below?: number; notify_above?: number };
+  schedule: { ingest_minutes?: number; guard_minutes?: number; briefing_hour?: number; reflect_hour?: number; reflect_hours?: number };
+  guard: { disk_used_pct?: number; load_per_core?: number };
+  intelligence: { scan_minutes?: number };
+  overrides: Record<string, Record<string, any>>;
+};
+
+export async function getSettings(): Promise<LeoJarvisSettings> {
+  return readJson(await fetch(`${BASE}/settings`), "读取设置");
+}
+
+export async function patchSettings(settings: Partial<LeoJarvisSettings>): Promise<LeoJarvisSettings> {
+  return readJson(await fetch(`${BASE}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings }),
+  }), "保存设置");
+}
+
+export async function getSettingsDiagnostics() {
+  return readJson<any>(await fetch(`${BASE}/settings/diagnostics`), "读取设置诊断");
+}
+
+export async function getTuning(): Promise<Tuning> {
+  return readJson(await fetch(`${BASE}/settings/tuning`), "读取阈值/节奏");
+}
+
+export async function importOpml(opml: string, opts: { category?: string; domain?: string; limit?: number } = {}) {
+  return readJson<{ ok: boolean; parsed: number; added: number; total: number }>(await fetch(`${BASE}/settings/rss/import-opml`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opml, category: opts.category || "OPML导入", domain: opts.domain || "business", limit: opts.limit ?? 8 }),
+  }), "导入 OPML");
+}
+
+export async function removeSshDevice(id: string) {
+  return readJson<{ ok: boolean }>(await fetch(`${BASE}/devices/ssh/${id}`, { method: "DELETE" }), "删除 SSH 设备");
 }
 
 // ---------- 全景驾驶舱 ----------
@@ -219,6 +337,7 @@ export type LocalNotificationApp = {
   detail?: string;
   mechanism?: string;
   setup?: string;
+  recent?: { title?: string; source?: string; ts?: number }[];
   checked_at: number;
 };
 
@@ -466,6 +585,17 @@ export async function getAiTools(): Promise<AiToolStatus[]> {
 }
 export async function upgradeAiTool(id: string): Promise<{ ok: boolean; tool?: string; command?: string; output?: string; error?: string }> {
   return readJson(await fetch(`${BASE}/system/ai-tools/${id}/upgrade`, { method: "POST" }), "升级 AI 工具");
+}
+
+export type DevTool = { id: string; name: string; category: string; installed: boolean; path: string | null; version: string; launch: string; checked_at: number };
+export type DevToolchain = {
+  generated_at: number;
+  summary: { installed: number; total: number };
+  categories: Record<string, DevTool[]>;
+  tools: DevTool[];
+};
+export async function getDevTools(): Promise<DevToolchain> {
+  return readJson(await fetch(`${BASE}/system/dev-tools`), "读取本机开发工具链");
 }
 
 export type AgentRow = {

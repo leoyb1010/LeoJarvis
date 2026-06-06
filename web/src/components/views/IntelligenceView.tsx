@@ -234,8 +234,11 @@ export function IntelligenceView() {
 
       {briefing?.summary?.today_focus ? (
         <section className="brief-focus">
-          <div className="panel-title">今日重点</div>
-          <p>{briefing.summary.today_focus}</p>
+          <div className="brief-focus-copy">
+            <div className="panel-title">今日重点</div>
+            <p>{briefing.summary.today_focus}</p>
+            <small>{briefing.summary.why_it_matters}</small>
+          </div>
           <div className="focus-row">
             {(briefing?.focus || []).slice(0, 5).map((item) => (
               <button key={item.event_id} onClick={() => setActiveSignal(item)}>
@@ -339,6 +342,7 @@ export function IntelligenceView() {
         {activeSignal ? (
           <div className="modal-rich">
             <p className="lead">{activeSignal.take}</p>
+            {activeSignal.detail ? <div className="modal-detail"><span>有用详情</span><p>{activeSignal.detail}</p></div> : null}
             <div className="modal-grid">
               <div><span>为什么重要</span><p>{activeSignal.why_important || "该信息已通过情报评分进入简报。"}</p></div>
               <div><span>和我有什么关系</span><p>{activeSignal.relation || "与你配置的关注项、历史偏好相关。"}</p></div>

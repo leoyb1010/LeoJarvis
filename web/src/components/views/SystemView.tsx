@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
+  addSshDevice,
+  getDevices,
+  getDevTools,
   getServices,
   getSystemOverview,
+  probeSshDevices,
+  sendSelfHeartbeat,
   upgradeAiTool,
   type AiToolStatus,
+  type DeviceSummary,
+  type DevToolchain,
   type ServiceRow,
   type SystemModule,
   type SystemOverview,
@@ -113,23 +120,73 @@ function ToolCard({ tool, onOpen }: { tool: AiToolStatus; onOpen: (t: AiToolStat
   );
 }
 
+function pct(value?: number | null) {
+  return value == null ? "—" : `${Math.round(value)}%`;
+}
+
+function ageLabel(seconds?: number) {
+  if (seconds == null) return "刚刚";
+  if (seconds < 60) return `${seconds}s 前`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m 前`;
+  return `${Math.round(seconds / 3600)}h 前`;
+}
+
+function deviceTone(device: DeviceSummary) {
+  if (!device.online) return "offline";
+  if (device.status === "异常" || device.health < 65) return "bad";
+  if (device.status === "注意" || device.health < 82) return "warn";
+  return "good";
+}
+
+function DeviceCard({ device }: { device: DeviceSummary }) {
+  const t = deviceTone(device);
+  return (
+    <article className={`device-card ${t}`}>
+      <div className="device-card-head">
+        <div>
+          <span className="device-kicker">{device.role || "mac"} · {device.model || device.host_name || "Mac"}</span>
+          <h3>{device.device_name}</h3>
+          <p>{device.host_name || device.device_id}</p>
+        </div>
+        <div className="device-score"><b>{Math.round(device.health || 0)}</b><span>{device.online ? device.status : "离线"}</span></div>
+      </div>
+      <div className="device-metrics">
+        <div><span>CPU</span><b>{pct(device.metrics.cpu_load_pct)}</b><em>{device.metrics.cpu_load ?? "—"} / {device.metrics.cpu_cores || "?"} 核</em></div>
+        <div><span>RAM</span><b>{pct(device.metrics.ram_used_pct)}</b><em>{device.metrics.ram_total_gb ? `${device.metrics.ram_used_gb ?? "—"}G / ${device.metrics.ram_total_gb}G` : "内存"}</em></div>
+        <div><span>SSD</span><b>{pct(device.metrics.ssd_used_pct)}</b><em>{device.metrics.ssd_free_gb != null ? `剩余 ${device.metrics.ssd_free_gb}G` : "磁盘"}</em></div>
+      </div>
+      <div className="device-risks">
+        {(device.risks || []).slice(0, 2).map((risk) => <span className={risk.level === "异常" ? "bad" : risk.level === "注意" ? "warn" : "good"} key={`${risk.title}-${risk.advice}`}><b>{risk.level}</b>{risk.title}</span>)}
+        {(device.risks || []).length === 0 ? <span className="good"><b>健康</b>暂无风险项</span> : null}
+      </div>
+      <div className="device-foot"><span>{device.online ? "在线" : "离线"}</span><span>心跳 {ageLabel(device.age_seconds)}</span></div>
+    </article>
+  );
+}
+
 export function SystemView() {
   const [data, setData] = useState<SystemOverview | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
+  const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTool, setActiveTool] = useState<AiToolStatus | null>(null);
   const [upgradingTool, setUpgradingTool] = useState("");
   const [upgradeResult, setUpgradeResult] = useState("");
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
+  const [ssh, setSsh] = useState({ name: "", host: "", user: "" });
+  const [sshBusy, setSshBusy] = useState(false);
+  const [devTools, setDevTools] = useState<DevToolchain | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [overview, serviceRows] = await Promise.all([getSystemOverview(), getServices()]);
+      const [overview, serviceRows, deviceRows] = await Promise.all([getSystemOverview(), getServices(), getDevices()]);
       setData(overview);
       setServices(serviceRows);
+      setDevices(deviceRows);
+      getDevTools().then(setDevTools).catch(() => {});
     } catch (err) {
       setError(String(err));
     } finally {
@@ -163,6 +220,34 @@ export function SystemView() {
     }
   }
 
+  async function addRemote() {
+    if (!ssh.host.trim()) return;
+    setSshBusy(true);
+    try {
+      await addSshDevice({ ...ssh, port: 22, enabled: true });
+      await probeSshDevices();
+      setSsh({ name: "", host: "", user: "" });
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSshBusy(false);
+    }
+  }
+
+  async function refreshDevices() {
+    setSshBusy(true);
+    try {
+      await sendSelfHeartbeat();
+      await probeSshDevices();
+      setDevices(await getDevices());
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSshBusy(false);
+    }
+  }
+
   if (error && !data) return <div className="error">{error}</div>;
 
   return (
@@ -170,8 +255,8 @@ export function SystemView() {
       <div className="page-head">
         <div>
           <div className="kicker">SystemGuard</div>
-          <h1>系统状态</h1>
-          <p>按磁盘、CPU、内存、网络、本地服务和 AI 开发工具拆开展示。默认只给判断和建议，原始命令输出收进高级详情。</p>
+          <h1>系统与设备</h1>
+          <p>系统状态和设备健康已合并：先看本机资源、服务与 AI 开发工具，再看本机/远端 Mac 的健康卡。远端设备可通过 SSH 授权后直接采集只读摘要。</p>
           {data ? (
             <div className="risk-strip-inline">
               {data.risks.slice(0, 4).map((risk) => (
@@ -196,6 +281,23 @@ export function SystemView() {
             {data.modules.map((module, index) => <ModuleCard module={module} index={index} key={module.id} />)}
           </div>
 
+          <div className="panel-title" style={{ marginTop: 24 }}>设备健康 / SSH 远端</div>
+          <div className="ssh-add-card card">
+            <div>
+              <b>添加远程机器</b>
+              <span>先在目标机器授权本机 SSH key，然后填 host/user。只读取 CPU、磁盘、健康摘要。</span>
+            </div>
+            <input placeholder="名称" value={ssh.name} onChange={(e) => setSsh({ ...ssh, name: e.target.value })} />
+            <input placeholder="host / IP" value={ssh.host} onChange={(e) => setSsh({ ...ssh, host: e.target.value })} />
+            <input placeholder="user" value={ssh.user} onChange={(e) => setSsh({ ...ssh, user: e.target.value })} />
+            <button className="btn sm primary" onClick={addRemote} disabled={sshBusy || !ssh.host.trim()}>{sshBusy ? "连接中" : "添加并探测"}</button>
+            <button className="btn sm ghost" onClick={refreshDevices} disabled={sshBusy}>刷新设备</button>
+          </div>
+          <div className="device-grid compact">
+            {devices.map((device) => <DeviceCard device={device} key={device.device_id} />)}
+            {devices.length === 0 ? <div className="empty">暂无设备心跳。</div> : null}
+          </div>
+
           <div className="panel-title" style={{ marginTop: 24 }}>本地服务状态</div>
           <div className="sys-service-grid">
             {services.length === 0 ? <div className="empty">暂无本地服务配置。</div> :
@@ -206,6 +308,29 @@ export function SystemView() {
           <div className="sys-tool-grid">
             {data.ai_tools.map((tool) => <ToolCard tool={tool} onOpen={setActiveTool} key={tool.id} />)}
           </div>
+
+          <div className="panel-title" style={{ marginTop: 24 }}>
+            本机编程 / CLI 工具链
+            {devTools ? <span className="tag" style={{ marginLeft: 10 }}>{devTools.summary.installed}/{devTools.summary.total} 已安装</span> : null}
+          </div>
+          {!devTools ? <div className="empty">检测中…</div> : (
+            <div className="devtool-cats">
+              {Object.entries(devTools.categories).map(([cat, tools]) => (
+                <section className="card devtool-cat" key={cat}>
+                  <div className="devtool-cat-title">{cat}</div>
+                  <div className="devtool-list">
+                    {tools.map((t) => (
+                      <div className={`devtool-row ${t.installed ? "on" : "off"}`} key={t.id} title={t.path || "未检测到"}>
+                        <span className={`dot ${t.installed ? "good" : "bad"}`} />
+                        <b>{t.name}</b>
+                        <em>{t.installed ? t.version : "未安装"}</em>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
 
           <div className="intel-grid-2" style={{ marginTop: 24 }}>
             <section className="card">

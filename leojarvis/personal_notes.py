@@ -224,7 +224,7 @@ def import_url(url: str) -> dict:
     if not re.match(r"^https?://", cleaned_url):
         cleaned_url = "https://" + cleaned_url
     with httpx.Client(timeout=15, follow_redirects=True, trust_env=False) as client:
-        res = client.get(cleaned_url, headers={"User-Agent": "Cortex-Notes-Importer/0.1"})
+        res = client.get(cleaned_url, headers={"User-Agent": "LeoJarvis-Notes-Importer/0.1"})
         res.raise_for_status()
         html = res.text
     extracted = trafilatura.extract(html, include_comments=False, include_tables=False) or ""

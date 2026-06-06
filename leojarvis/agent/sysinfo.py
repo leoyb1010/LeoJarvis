@@ -20,7 +20,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from ..config import DATA_DIR, settings
+from .. import user_settings
+from ..config import DATA_DIR, settings, sources
 
 _ICON_CACHE_DIR = DATA_DIR / "app_icons"
 _ICON_CACHE_DIR.mkdir(exist_ok=True)
@@ -117,7 +118,7 @@ def weather(latitude: float | None = None, longitude: float | None = None, city:
         "&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai&forecast_days=1"
     )
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "cortex/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "leojarvis/1.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         cur = payload.get("current", {})
@@ -148,10 +149,8 @@ def weather(latitude: float | None = None, longitude: float | None = None, city:
 
 # 默认监控的本地服务：名字 -> 端口。可在 settings.toml 的 [services] 覆盖。
 _DEFAULT_SERVICES = {
-    "cortex": 8787,
+    "leojarvis": 8787,
     "ollama": 11434,
-    "leomoney": 3210,
-    "leonote": 3000,
     "leoapi": 8080,
 }
 
@@ -457,6 +456,26 @@ def _cmd_version(path: str, args: list[str] | None = None) -> str:
     return out.splitlines()[0][:160] if out else "已安装，版本读取失败"
 
 
+def _candidate_paths(cmd: str) -> list[str]:
+    paths = [shutil.which(cmd)]
+    for base in (
+        "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+        str(Path.home() / ".local/bin"), str(Path.home() / ".npm-global/bin"),
+        str(Path.home() / ".bun/bin"), str(Path.home() / ".cargo/bin"),
+    ):
+        paths.append(str(Path(base) / cmd))
+    seen: set[str] = set()
+    return [p for p in paths if p and not (p in seen or seen.add(p))]
+
+
+def _which_any(commands: list[str]) -> str | None:
+    for cmd in commands:
+        for path in _candidate_paths(cmd):
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+    return None
+
+
 # npm 最新版查询要走网络（每个包 ~800ms），缓存 30 分钟，避免驾驶舱每 8 秒轮询时阻塞。
 _NPM_LATEST_CACHE: dict[str, tuple[float, str]] = {}
 # 整个 AI 工具状态（含 pgrep / --version / npm）变化很慢。采用 stale-while-revalidate：
@@ -628,11 +647,7 @@ def _probe_ai_tools() -> list[dict]:
     ]
     rows = []
     for tool in tools:
-        found = None
-        for cmd in tool["commands"]:
-            found = shutil.which(cmd)
-            if found:
-                break
+        found = _which_any(tool["commands"])
         running = []
         for cmd in tool["commands"]:
             out = _run(["pgrep", "-fl", cmd], timeout=3)
@@ -666,6 +681,109 @@ def _probe_ai_tools() -> list[dict]:
             "advice": "可直接使用；如需更新，可在详情里一键复制升级命令。" if found else f"未检测到命令，可按官方方式安装后使用 `{tool['launch']}` 启动。",
         })
     return rows
+
+
+# ---------- 本机编程 / CLI 工具链探测 ----------
+# (id, 名称, 候选命令, 版本参数, 分类)
+_DEV_TOOLCHAIN: list[tuple] = [
+    # 语言运行时
+    ("python", "Python", ["python3", "python"], ["--version"], "语言运行时"),
+    ("node", "Node.js", ["node"], ["--version"], "语言运行时"),
+    ("deno", "Deno", ["deno"], ["--version"], "语言运行时"),
+    ("bun", "Bun", ["bun"], ["--version"], "语言运行时"),
+    ("go", "Go", ["go"], ["version"], "语言运行时"),
+    ("rust", "Rust", ["rustc"], ["--version"], "语言运行时"),
+    ("java", "Java", ["java"], ["-version"], "语言运行时"),
+    ("ruby", "Ruby", ["ruby"], ["--version"], "语言运行时"),
+    ("php", "PHP", ["php"], ["--version"], "语言运行时"),
+    ("swift", "Swift", ["swift"], ["--version"], "语言运行时"),
+    ("gcc", "GCC/Clang", ["clang", "gcc"], ["--version"], "语言运行时"),
+    # 包管理 / 构建
+    ("pip", "pip", ["pip3", "pip"], ["--version"], "包管理/构建"),
+    ("uv", "uv", ["uv"], ["--version"], "包管理/构建"),
+    ("pipx", "pipx", ["pipx"], ["--version"], "包管理/构建"),
+    ("conda", "conda", ["conda"], ["--version"], "包管理/构建"),
+    ("npm", "npm", ["npm"], ["--version"], "包管理/构建"),
+    ("pnpm", "pnpm", ["pnpm"], ["--version"], "包管理/构建"),
+    ("yarn", "Yarn", ["yarn"], ["--version"], "包管理/构建"),
+    ("cargo", "Cargo", ["cargo"], ["--version"], "包管理/构建"),
+    ("brew", "Homebrew", ["brew"], ["--version"], "包管理/构建"),
+    ("make", "Make", ["make"], ["--version"], "包管理/构建"),
+    ("cmake", "CMake", ["cmake"], ["--version"], "包管理/构建"),
+    # 版本控制 / 容器 / 基础设施
+    ("git", "Git", ["git"], ["--version"], "版本控制/容器"),
+    ("gh", "GitHub CLI", ["gh"], ["--version"], "版本控制/容器"),
+    ("docker", "Docker", ["docker"], ["--version"], "版本控制/容器"),
+    ("kubectl", "kubectl", ["kubectl"], ["version", "--client", "--output=yaml"], "版本控制/容器"),
+    ("terraform", "Terraform", ["terraform"], ["--version"], "版本控制/容器"),
+]
+
+_DEV_TOOLS_CACHE: dict = {"ts": 0.0, "data": None}
+_DEV_TOOLS_LOCK = threading.Lock()
+_DEV_TOOLS_TTL = 300.0
+
+_VER_RE = re.compile(r"\d+\.\d+(?:\.\d+)?(?:[._-]?\w+)?")
+
+
+def _short_version(raw: str) -> str:
+    if not raw:
+        return ""
+    m = _VER_RE.search(raw)
+    return m.group(0) if m else raw.split("\n")[0][:40]
+
+
+def _probe_dev_toolchain() -> list[dict]:
+    rows: list[dict] = []
+    for tid, name, commands, args, category in _DEV_TOOLCHAIN:
+        found = _which_any(commands)
+        version = ""
+        if found:
+            raw = _cmd_version(found, args)
+            version = _short_version(raw)
+        rows.append({
+            "id": tid,
+            "name": name,
+            "category": category,
+            "installed": bool(found),
+            "path": found or None,
+            "version": version or ("已安装" if found else ""),
+            "launch": commands[0],
+            "checked_at": int(time.time()),
+        })
+    return rows
+
+
+def dev_toolchain_status(*, max_age: float = _DEV_TOOLS_TTL, block: bool = False) -> dict:
+    """本机编程语言 / 包管理 / CLI 工具链清单（含版本）。结果缓存 5 分钟。
+
+    返回 {generated_at, summary, categories:{分类:[工具…]}, tools:[…]}。
+    """
+    now = time.time()
+    cached = _DEV_TOOLS_CACHE.get("data")
+    fresh = cached is not None and now - float(_DEV_TOOLS_CACHE.get("ts", 0)) < max_age
+    if cached is None or (block and not fresh):
+        with _DEV_TOOLS_LOCK:
+            cached = _probe_dev_toolchain()
+            _DEV_TOOLS_CACHE["data"] = cached
+            _DEV_TOOLS_CACHE["ts"] = time.time()
+    elif not fresh and not _DEV_TOOLS_LOCK.locked():
+        def _bg() -> None:
+            with _DEV_TOOLS_LOCK:
+                _DEV_TOOLS_CACHE["data"] = _probe_dev_toolchain()
+                _DEV_TOOLS_CACHE["ts"] = time.time()
+        threading.Thread(target=_bg, daemon=True).start()
+
+    tools = cached or []
+    categories: dict[str, list[dict]] = {}
+    for t in tools:
+        categories.setdefault(t["category"], []).append(t)
+    installed = [t for t in tools if t["installed"]]
+    return {
+        "generated_at": int(time.time()),
+        "summary": {"installed": len(installed), "total": len(tools)},
+        "categories": categories,
+        "tools": tools,
+    }
 
 
 def ai_tool_upgrade(tool_id: str) -> dict:
@@ -765,19 +883,84 @@ def _notification_counts(hours: int = 24) -> tuple[dict[str, int], str]:
                         return {str(r["bundle"]): int(r["count"]) for r in rows}, "ok"
         except sqlite3.OperationalError as ex:
             if "not authorized" in str(ex).lower() or "unable to open" in str(ex).lower():
-                return {}, "需要授予 Cortex 终端或 Python 完全磁盘访问权限"
+                return {}, "需要授予 LeoJarvis 终端或 Python 完全磁盘访问权限"
         except OSError:
-            return {}, "需要授予 Cortex 终端或 Python 完全磁盘访问权限"
+            return {}, "需要授予 LeoJarvis 终端或 Python 完全磁盘访问权限"
         except Exception:
             continue
     return {}, "未找到可读取的 macOS 通知数据库"
 
 
+def _recent_mail_events(limit: int = 8) -> list[dict]:
+    try:
+        from .. import db
+        since = int((time.time() - 24 * 3600) * 1000)
+        with db.conn() as c:
+            rows = c.execute(
+                """
+                SELECT title, source, content, ts
+                FROM events
+                WHERE ts>=? AND (kind='email' OR source LIKE 'email:%')
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (since, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+_GMAIL_CACHE: dict = {"ts": 0.0, "value": None}
+_GMAIL_LOCK = threading.Lock()
+_GMAIL_TTL = 120.0
+
+
+def _gmail_unread_cached() -> int | None:
+    """Cache Gmail IMAP unread for _GMAIL_TTL seconds so the dashboard poll
+    (every few seconds) never blocks on a network login."""
+    now = time.time()
+    if now - _GMAIL_CACHE["ts"] < _GMAIL_TTL:
+        return _GMAIL_CACHE["value"]
+    if not _GMAIL_LOCK.acquire(blocking=False):
+        return _GMAIL_CACHE["value"]
+    try:
+        from ..ingest.email_ingest import gmail_unread_count
+        val = gmail_unread_count()
+        _GMAIL_CACHE["value"] = val
+        _GMAIL_CACHE["ts"] = now
+        return val
+    except Exception:
+        return _GMAIL_CACHE["value"]
+    finally:
+        _GMAIL_LOCK.release()
+
+
 def local_notifications() -> dict:
     cfg = settings()
+    app_settings = user_settings.load().get("notifications", {})
     email_cfg = cfg.get("email", {}) if isinstance(cfg, dict) else {}
-    mail_configured = bool(email_cfg.get("enabled") and email_cfg.get("imap_host") and email_cfg.get("username"))
+    source_email_cfg = sources().get("email", {})
+    ui_email = user_settings.load().get("email", {})
+    gmail_cfg = user_settings.load().get("gmail", {}) or {}
+    apple_unread = None
+    try:
+        from ..ingest.email_ingest import _apple_mail_db, apple_mail_unread_count
+        apple_mail_ready = bool(ui_email.get("apple_mail_fallback", True) and _apple_mail_db())
+        if apple_mail_ready:
+            apple_unread = apple_mail_unread_count()
+    except Exception:
+        apple_mail_ready = False
+    mail_configured = bool(
+        (email_cfg.get("enabled") and (email_cfg.get("imap_host") or email_cfg.get("host")) and (email_cfg.get("username") or email_cfg.get("user")))
+        or (source_email_cfg.get("enabled") and (source_email_cfg.get("imap_host") or source_email_cfg.get("host")) and (source_email_cfg.get("username") or source_email_cfg.get("user")))
+        or (ui_email.get("enabled") and ui_email.get("accounts"))
+        or apple_mail_ready
+    )
     counts, db_state = _notification_counts()
+    mail_events = _recent_mail_events()
+    mail_event_count = len(mail_events)
+    gmail_unread = _gmail_unread_cached() if gmail_cfg.get("enabled") else None
     targets = [
         {
             "id": "wechat",
@@ -817,7 +1000,7 @@ def local_notifications() -> dict:
         },
         {
             "id": "mail",
-            "name": "邮件",
+            "name": "本机邮件",
             "apps": ["Mail"],
             "bundle_hints": ["com.apple.mail"],
             "processes": ["MacOS/Mail"],
@@ -825,13 +1008,47 @@ def local_notifications() -> dict:
             "configured": mail_configured,
             "category": "邮件",
         },
+        {
+            "id": "gmail",
+            "name": "Gmail",
+            "apps": [],
+            "bundle_hints": [],
+            "processes": [],
+            "configured": bool(gmail_cfg.get("enabled") and (gmail_cfg.get("app_password") or gmail_cfg.get("password")) and gmail_cfg.get("user")),
+            "category": "邮件",
+        },
     ]
     apps = []
+    app_enabled = app_settings.get("apps", {}) if isinstance(app_settings, dict) else {}
     for app in targets:
+        if app_settings.get("enabled", True) is False or app_enabled.get(app["id"], True) is False:
+            continue
         running, detail = _is_running(app["processes"], exclude=app.get("exclude"))
         count = sum(v for bundle, v in counts.items() if any(h.lower() in bundle.lower() for h in app["bundle_hints"]))
         installed = _find_app(app["apps"]) is not None
-        if not installed:
+        # 邮件类用「真实未读数」，不再用最近导入的事件条数（那会误显示成未读）。
+        if app["id"] == "mail":
+            installed = installed or apple_mail_ready
+            count = apple_unread if apple_unread is not None else 0
+        elif app["id"] == "gmail":
+            installed = True  # Gmail 是云端账户，不依赖本机安装
+            count = gmail_unread if gmail_unread is not None else 0
+
+        if app["id"] == "mail":
+            if not apple_mail_ready and not app["configured"]:
+                status = "未配置"
+            elif apple_unread is None:
+                status = "未授权"
+            else:
+                status = "有新通知" if count > 0 else "无新通知"
+        elif app["id"] == "gmail":
+            if not app["configured"]:
+                status = "未配置"
+            elif gmail_unread is None:
+                status = "未授权"
+            else:
+                status = "有新通知" if count > 0 else "无新通知"
+        elif not installed:
             status = "未安装"
         elif not app["configured"]:
             status = "未配置"
@@ -840,12 +1057,25 @@ def local_notifications() -> dict:
         else:
             status = "有新通知" if count > 0 else "无新通知"
         # 隐私优先：只取应用级计数，绝不读取通知标题/正文/联系人，避免触发账号风控。
-        if status == "有新通知":
+        if app["id"] == "mail":
+            if apple_unread is None:
+                detail_text = "需要给运行 LeoJarvis 的终端授予「完全磁盘访问」，并在系统「邮件」App 登录邮箱后，才能读取本机未读数。"
+            else:
+                detail_text = (f"本机邮件当前有 {count} 封未读（直接读取 Apple Mail 本地 Envelope Index 的 read=0，"
+                               f"已排除垃圾箱/已发送）。最近 24 小时新到 {mail_event_count} 封进入事件流。")
+        elif app["id"] == "gmail":
+            if not app["configured"]:
+                detail_text = "Gmail 未配置：在设置页填入 Gmail 地址与 IMAP 应用专用密码（App Password）即可读取未读数。"
+            elif gmail_unread is None:
+                detail_text = "Gmail 连接失败：请检查应用专用密码、是否开启 IMAP，以及网络是否可达 imap.gmail.com。"
+            else:
+                detail_text = f"Gmail（{gmail_cfg.get('user','')}）当前有 {count} 封未读（IMAP UNSEEN 计数，仅数字，不读取正文）。"
+        elif status == "有新通知":
             detail_text = f"{app['name']} 有 {count} 条未读通知（仅应用级计数，未读取任何内容）。"
         elif status == "无新通知":
             detail_text = f"{app['name']} 最近 24 小时没有新通知。"
         elif status == "未授权":
-            detail_text = "需要在「系统设置 → 隐私与安全性 → 完全磁盘访问」中，把运行 Cortex 的终端（或 Python）加入并勾选，重启后端后即可读取应用级计数。"
+            detail_text = "需要在「系统设置 → 隐私与安全性 → 完全磁盘访问」中，把运行 LeoJarvis 的终端（或 Python）加入并勾选，重启后端后即可读取应用级计数。"
         elif status == "未安装":
             detail_text = f"未在本机检测到 {app['name']}。"
         elif status == "未配置":
@@ -855,16 +1085,20 @@ def local_notifications() -> dict:
 
         # 机制说明：解释「即时通讯通知是如何看到的」，让用户清楚没有抓取/登录风险。
         if app["id"] == "mail":
-            mechanism = "邮件未读数读取本机 macOS 通知数据库的应用级计数，不连接你的邮箱服务器、不读邮件内容。"
-            setup = ("启用方式：① 在系统「邮件」App 里登录邮箱并开启通知；"
-                     "② 系统设置 → 通知 → 邮件 → 允许通知；"
-                     "③ 给运行 Cortex 的终端授予「完全磁盘访问」。"
-                     "若要主动拉取未读邮件，可在 config/settings.toml 的 [email] 填 imap_host / username / password 并 enabled=true。")
+            mechanism = "本机邮件未读数直接来自 Apple Mail 本地 Envelope Index（read=0，已排除垃圾箱/已发送），与「邮件」App 角标一致。LeoJarvis 不登录邮箱、不读取正文。"
+            setup = ("启用方式：① 在系统「邮件」App 里登录邮箱；"
+                     "② 设置页打开「读取 Apple Mail 本地邮箱」；"
+                     "③ 给运行 LeoJarvis 的终端授予「完全磁盘访问」后重启后端。")
+        elif app["id"] == "gmail":
+            mechanism = "Gmail 是独立云端账户：通过 IMAP 只做 UNSEEN 未读计数（仅数字），不下载邮件正文。与本机邮件分开统计，互不影响。"
+            setup = ("启用方式：① Gmail 开启两步验证后生成「应用专用密码」(App Password)；"
+                     "② 在设置页 Gmail 区填入邮箱地址与该密码；"
+                     "③ 保存后即可读取未读数（默认服务器 imap.gmail.com:993）。")
         else:
             mechanism = (f"{app['name']} 的未读数来自 macOS 系统通知中心的应用级计数（仅数字），"
-                         "Cortex 不登录该应用、不读取消息内容、不模拟客户端，因此不会触发账号风控。")
+                         "LeoJarvis 不登录该应用、不读取消息内容、不模拟客户端，因此不会触发账号风控。")
             setup = ("启用方式：在 macOS「系统设置 → 通知」中允许该应用发送通知，"
-                     "并给运行 Cortex 的终端授予「完全磁盘访问」，即可读取其未读计数。")
+                     "并给运行 LeoJarvis 的终端授予「完全磁盘访问」，即可读取其未读计数。")
 
         apps.append({
             "id": app["id"],
@@ -881,6 +1115,7 @@ def local_notifications() -> dict:
             "detail": detail_text,
             "mechanism": mechanism,
             "setup": setup,
+            "recent": [{"title": r.get("title"), "source": r.get("source"), "ts": r.get("ts")} for r in mail_events] if app["id"] == "mail" else [],
             "checked_at": int(time.time()),
         })
     return {

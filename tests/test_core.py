@@ -3,10 +3,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from cortex import db
-from cortex.ingest.base import RawItem
-from cortex.judge.engine import judge_and_store
-from cortex.main import app
+from leojarvis import db
+from leojarvis.ingest.base import RawItem
+from leojarvis.judge.engine import judge_and_store
+from leojarvis.main import app
 
 
 def test_health_endpoint():

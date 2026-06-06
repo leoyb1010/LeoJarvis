@@ -114,7 +114,7 @@ export function DevicesView() {
     <div className="devices-view">
       <div className="page-head devices-head">
         <div>
-          <div className="kicker">Cortex Fleet</div>
+          <div className="kicker">LeoJarvis Fleet</div>
           <h1>设备健康</h1>
           <p>每台 Mac 只上报健康摘要：CPU、RAM、SSD、温控、电源、网络、服务在线率和风险项。不上传原始命令输出、进程命令行或通知内容。</p>
         </div>
@@ -134,7 +134,7 @@ export function DevicesView() {
       </div>
       <div className="device-grid">
         {(rest.length ? rest : sorted.slice(local ? 1 : 0)).map((device) => <DeviceCard device={device} key={device.device_id} />)}
-        {rest.length === 0 && sorted.length <= 1 ? <div className="empty">还没有其他 Mac 上报。把其它机器的 Cortex 指向这个 Hub 后会显示在这里。</div> : null}
+        {rest.length === 0 && sorted.length <= 1 ? <div className="empty">还没有其他 Mac 上报。把其它机器的 LeoJarvis 指向这个 Hub 后会显示在这里。</div> : null}
       </div>
     </div>
   );

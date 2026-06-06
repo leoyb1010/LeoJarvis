@@ -181,7 +181,7 @@ def json_dumps(data: dict) -> str:
 TOOLBUS = ToolBus()
 TOOLBUS.register(Tool("system_status", "扫描本机磁盘、CPU 负载、内存压力和占用最高的进程。",
                       {}, _t_system_status))
-TOOLBUS.register(Tool("list_services", "检查已知本地服务（ollama / leonote / leomoney / leoapi / cortex 等）是否在线。",
+TOOLBUS.register(Tool("list_services", "检查已知本地服务（ollama / leoapi / leojarvis 等）是否在线。",
                       {}, _t_list_services))
 TOOLBUS.register(Tool("disk_hotspots", "找出某目录下最占空间的子目录，用于排查磁盘为什么满。",
                       {"path": "要排查的目录，默认 ~"}, _t_disk_hotspots))

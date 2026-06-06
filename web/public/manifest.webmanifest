@@ -1,10 +1,12 @@
 {
-  "name": "Cortex Device Health",
-  "short_name": "Cortex",
-  "description": "Cortex 多设备健康看板",
+  "name": "LeoJarvis",
+  "short_name": "LeoJarvis",
+  "description": "LeoJarvis 本地个人 AI 助理与多设备健康看板",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
-  "icons": []
+  "background_color": "#0b0f1a",
+  "theme_color": "#0b0f1a",
+  "icons": [
+    { "src": "/brand-mark.png", "sizes": "500x500", "type": "image/png", "purpose": "any" }
+  ]
 }

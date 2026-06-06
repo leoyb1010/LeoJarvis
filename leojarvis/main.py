@@ -44,7 +44,7 @@ def _warm_caches() -> None:
     threading.Thread(target=_warm, daemon=True).start()
 
 
-app = FastAPI(title="Cortex", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="LeoJarvis", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -52,6 +52,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+# API 前缀别名：避免将来新增前端路由名与 API 名冲突；旧的无前缀接口继续兼容。
+app.include_router(router, prefix="/api")
 
 
 # ---------- 生产前端：把构建好的静态资源挂到同一进程，单端口稳定上线 ----------
@@ -76,7 +78,7 @@ def run() -> None:
     import uvicorn
 
     cfg = settings().get("server", {})
-    uvicorn.run("cortex.main:app", host=cfg.get("host", "127.0.0.1"),
+    uvicorn.run("leojarvis.main:app", host=cfg.get("host", "127.0.0.1"),
                 port=int(cfg.get("port", 8787)), reload=False)
 
 

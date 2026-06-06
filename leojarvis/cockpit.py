@@ -62,7 +62,7 @@ def _source_distribution(events: list[dict]) -> list[dict]:
             "journal": "旧记录",
             "agent": "中枢对话",
             "reflection": "记忆反思",
-            "test": "测试数据",
+            "email": "邮件",
         }.get(raw, raw)
 
     counts = Counter(label(e.get("source")) for e in events)
@@ -78,6 +78,7 @@ def _source_label(source: str | None) -> str:
         "journal": "旧记录",
         "agent": "中枢对话",
         "reflection": "记忆反思",
+        "email": "邮件",
         "test": "测试数据",
     }.get(raw, raw)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .. import db
+from .. import db, user_settings
 from ..config import settings
 from ..memory.profile import profile_terms, profile_text
 from ..memory.store import recall
@@ -21,7 +21,7 @@ class Judgment:
 
 
 def _profile_thresholds() -> tuple[float, float]:
-    cfg = settings().get("judge", {})
+    cfg = user_settings.effective("judge")
     return float(cfg.get("ignore_below", 0.35)), float(cfg.get("notify_above", 0.75))
 
 

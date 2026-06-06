@@ -54,6 +54,8 @@ def _is_github(row: dict) -> bool:
 def _source_label(source: str | None) -> str:
     if not source:
         return "未知来源"
+    if source.startswith("email:"):
+        return "Apple Mail" if "Apple Mail" in source else "邮箱"
     if source.startswith("rss:"):
         return "RSS 资讯"
     if source.startswith("intel:"):
@@ -79,6 +81,8 @@ def _source_label(source: str | None) -> str:
 def _next_step(row: dict, priority: str) -> str:
     if _is_github(row):
         return "打开项目页，判断是否需要加入情报关注项或记录到个人记事。"
+    if str(row.get("source") or "").startswith("email:"):
+        return "在 Apple Mail 里处理这封邮件；如不想展示已读邮件，可在设置里打开“只读未读”。"
     if priority == "高优先":
         return "优先阅读原文，并用“重要/没用”反馈更新判断偏好。"
     if priority == "中优先":
@@ -94,6 +98,8 @@ def _relation(row: dict, reasons: list[str], memories: list[str]) -> str:
             context="简报个性化关联",
             max_chars=180,
         )
+    if str(row.get("source") or "").startswith("email:"):
+        return "来自你本机 Apple Mail 已授权邮箱，已进入 LeoJarvis 今日邮件摘要。"
     return to_chinese(
         f"它来自你配置的情报源或关注项，当前评分 {row.get('score', 0):.2f}，值得按优先级处理。",
         context="简报个性化关联",
@@ -120,6 +126,21 @@ def _tags(row: dict, meta: dict, reasons: list[str]) -> list[str]:
     return chinese_tags(raw)[:6]
 
 
+def _detail_from(row: dict, analysis: dict, reasons: list[str], fallback: str) -> str:
+    parts = []
+    for key in ("detail", "impact", "evidence", "background"):
+        value = analysis.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    content = str(row.get("content") or "").strip()
+    if content and content not in " ".join(parts):
+        parts.append(content[:900])
+    if reasons:
+        parts.append("判断依据：" + "；".join(str(r) for r in reasons[:4]))
+    text = "\n\n".join(dict.fromkeys(parts)) or fallback
+    return to_chinese(text, context="简报详情", max_chars=760)
+
+
 def _briefing_item(row: dict, memories: list[str]) -> dict:
     meta = _loads(row.get("meta"), {})
     reasons = _loads(row.get("reasons"), [])
@@ -130,6 +151,8 @@ def _briefing_item(row: dict, memories: list[str]) -> dict:
     if _is_github(row):
         repo_name = meta.get("repo") or (row.get("title") or "").replace(" · GitHub 项目雷达", "")
         title = f"{repo_name} · GitHub 项目雷达"
+    elif str(row.get("source") or "").startswith("email:"):
+        title = row.get("title") or "（无主题邮件）"
     else:
         # 优先用判断器产出的中文标题，没有再回退到翻译，避免英文标题外泄
         title = analysis.get("title_zh") or to_chinese(row.get("title") or "未命名信息", context="简报标题", max_chars=120)
@@ -141,6 +164,7 @@ def _briefing_item(row: dict, memories: list[str]) -> dict:
     why = analysis.get("why") or _why(row, reasons)
     relation = analysis.get("relation") or _relation(row, reasons, memories)
     next_step = analysis.get("next_step") or _next_step(row, priority)
+    detail = _detail_from(row, analysis, reasons, take)
     item_tags = _tags(row, meta, reasons)
     velocity = meta.get("velocity") if isinstance(meta.get("velocity"), dict) else {}
     return {
@@ -155,6 +179,7 @@ def _briefing_item(row: dict, memories: list[str]) -> dict:
         "kind": row.get("kind"),
         "score": round(float(row.get("score") or 0), 3),
         "take": take or "暂无摘要。",
+        "detail": detail,
         "triage": row.get("triage") or "digest",
         "priority": priority,
         "reasons": [to_chinese(str(r), context="简报判断原因", max_chars=100) for r in reasons[:4]],
@@ -200,6 +225,13 @@ def _group_items(items: list[dict]) -> list[dict]:
             "items": rows[:4],
         })
     return sorted(out, key=lambda g: (-g["top_score"], -g["count"], g["name"]))[:8]
+
+
+def _today_focus_text(items: list[dict]) -> str:
+    if not items:
+        return "今天还没有足够高价值的情报进入焦点。可以先运行采集或调整 RSS / X 监控源。"
+    top = items[:3]
+    return "今日重点：" + "；".join(f"{it.get('priority', '观察')}｜{it.get('title')}" for it in top)
 
 
 def build_today() -> dict:
@@ -255,8 +287,8 @@ def build_today() -> dict:
             "tags": [{"name": k, "count": v} for k, v in tags.most_common(12)],
         },
         "summary": {
-            "today_focus": "今日简报按重要性、来源和与你的关系排序，已自动去重并降噪。",
-            "why_it_matters": "高优先内容会进入驾驶舱与资讯简报，反馈会先生成待确认记忆候选。",
-            "next_action": "先处理高优先卡片，再把有价值的信息确认进长期记忆或写入个人记事。",
+            "today_focus": _today_focus_text(items),
+            "why_it_matters": "只保留有信号的内容：优先级、证据、与你的关系和下一步被拆开呈现，避免重复套话。",
+            "next_action": "先看高优先焦点，再把有价值的信息写入个人记事或反馈为重要。",
         },
     }

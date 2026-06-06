@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.leo.cortex</string>
+  <key>Label</key><string>com.leo.leojarvis</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/leoyuan/Desktop/leoworkspace/cortex/.venv/bin/python</string>
     <string>-m</string>
-    <string>cortex.main</string>
+    <string>leojarvis.main</string>
   </array>
   <key>WorkingDirectory</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex</string>
   <key>RunAtLoad</key><true/>
