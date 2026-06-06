@@ -10,6 +10,10 @@
     <string>leojarvis.main</string>
   </array>
   <key>WorkingDirectory</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/leoyuan/.nvm/versions/node/v24.15.0/bin</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex/data/stdout.log</string>

@@ -123,6 +123,14 @@ def connect(connection_id: str) -> dict[str, Any]:
 
     local_port = int(row.get("local_port") or _free_port())
     row["local_port"] = local_port
+    existing_err = _probe_local_health(local_port)
+    if not existing_err:
+        row["connected"] = True
+        row["last_error"] = ""
+        row["updated_at"] = int(time.time())
+        _save(rows)
+        return {"ok": True, "connection": row}
+
     cmd = [
         "ssh", "-N",
         "-o", "BatchMode=yes",
