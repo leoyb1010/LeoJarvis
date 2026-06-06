@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import socket
@@ -274,6 +276,76 @@ def _battery_info() -> dict:
         "advice": "继续观察即可。" if level == "健康" else "建议接入电源，避免长任务中断。",
         "metrics": {"percent": pct, "plugged": plugged},
     }
+
+
+def local_device_identity() -> dict:
+    cfg = settings().get("device", {}) if isinstance(settings(), dict) else {}
+    host = socket.gethostname().split(".")[0]
+    model = _run(["sysctl", "-n", "hw.model"], timeout=3)
+    model = model if model and "执行失败" not in model else platform.machine()
+    seed = str(cfg.get("id") or f"{host}:{model}:{Path.home()}")
+    device_id = str(cfg.get("id") or f"mac-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}")
+    return {
+        "device_id": device_id,
+        "device_name": str(cfg.get("name") or host or "This Mac"),
+        "host_name": host,
+        "model": model,
+        "role": str(cfg.get("role") or "mac"),
+    }
+
+
+def _module_by_id(status: dict, module_id: str) -> dict:
+    return next((m for m in status.get("modules", []) if m.get("id") == module_id), {})
+
+
+def device_summary() -> dict:
+    """Privacy-safe summary for mobile dashboards and menu-bar clients."""
+    from . import services as service_mod
+
+    identity = local_device_identity()
+    status = structured_status()
+    service_rows = service_mod.status_all()
+    disk = _module_by_id(status, "disk")
+    cpu = _module_by_id(status, "cpu")
+    memory = _module_by_id(status, "memory")
+    thermal = _module_by_id(status, "thermal")
+    battery = _module_by_id(status, "battery")
+    network = _module_by_id(status, "network")
+    risks = status.get("risks", [])[:6]
+    online = sum(1 for s in service_rows if s.get("online"))
+    summary = {
+        **identity,
+        "generated_at": int(time.time()),
+        "last_seen_ts": int(time.time()),
+        "health": status.get("score", 0),
+        "status": "异常" if any(r.get("level") == "异常" for r in risks) else "注意" if any(r.get("level") == "注意" for r in risks) else "健康",
+        "metrics": {
+            "cpu_load": cpu.get("metrics", {}).get("load_1"),
+            "cpu_load_pct": cpu.get("metrics", {}).get("load_pct"),
+            "cpu_cores": cpu.get("metrics", {}).get("cores"),
+            "ram_used_pct": memory.get("metrics", {}).get("used_pct"),
+            "ram_used_gb": memory.get("metrics", {}).get("used_gb"),
+            "ram_total_gb": memory.get("metrics", {}).get("total_gb"),
+            "ssd_used_pct": disk.get("metrics", {}).get("used_pct"),
+            "ssd_free_gb": disk.get("metrics", {}).get("free_gb"),
+            "thermal_pressure": thermal.get("metrics", {}).get("thermal_pressure"),
+            "battery_percent": battery.get("metrics", {}).get("percent"),
+            "battery_plugged": battery.get("metrics", {}).get("plugged"),
+            "network_latency_ms": network.get("metrics", {}).get("latency_ms"),
+        },
+        "modules": {
+            "disk": {"level": disk.get("level"), "value": disk.get("value"), "summary": disk.get("summary")},
+            "cpu": {"level": cpu.get("level"), "value": cpu.get("value"), "summary": cpu.get("summary")},
+            "memory": {"level": memory.get("level"), "value": memory.get("value"), "summary": memory.get("summary")},
+            "thermal": {"level": thermal.get("level"), "value": thermal.get("value"), "summary": thermal.get("summary")},
+            "battery": {"level": battery.get("level"), "value": battery.get("value"), "summary": battery.get("summary")},
+            "network": {"level": network.get("level"), "value": network.get("value"), "summary": network.get("summary")},
+        },
+        "services": {"online": online, "total": len(service_rows)},
+        "risks": risks,
+        "privacy": "只包含设备健康摘要；不包含原始命令输出、进程命令行、通知内容或个人数据。",
+    }
+    return summary
 
 
 def _level(ok: bool, warn: bool = False) -> str:

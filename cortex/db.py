@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS github_repo_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_github_repo_snapshots_repo_ts ON github_repo_snapshots(repo_full_name, observed_ts);
 CREATE INDEX IF NOT EXISTS idx_github_repo_snapshots_observed ON github_repo_snapshots(observed_ts);
+
+CREATE TABLE IF NOT EXISTS device_heartbeats (
+  device_id TEXT PRIMARY KEY,
+  device_name TEXT NOT NULL,
+  host_name TEXT,
+  model TEXT,
+  role TEXT DEFAULT 'mac',
+  summary_json TEXT NOT NULL,
+  last_seen_ts INTEGER NOT NULL,
+  created_ts INTEGER,
+  updated_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_device_heartbeats_seen ON device_heartbeats(last_seen_ts);
 """
 
 
@@ -187,6 +200,9 @@ def init_db() -> None:
         judgment_cols = {r["name"] for r in c.execute("PRAGMA table_info(judgments)").fetchall()}
         if "analysis" not in judgment_cols:
             c.execute("ALTER TABLE judgments ADD COLUMN analysis TEXT")
+        device_cols = {r["name"] for r in c.execute("PRAGMA table_info(device_heartbeats)").fetchall()}
+        if "role" not in device_cols:
+            c.execute("ALTER TABLE device_heartbeats ADD COLUMN role TEXT DEFAULT 'mac'")
 
 
 def now_ms() -> int:
@@ -281,3 +297,57 @@ def update_memory_status(memory_id: str, status: str) -> bool:
             (status, now_ms(), memory_id),
         )
     return cur.rowcount > 0
+
+
+def upsert_device_heartbeat(summary: dict[str, Any]) -> dict[str, Any]:
+    init_db()
+    ts = int(summary.get("last_seen_ts") or summary.get("generated_at") or time.time())
+    now = now_ms()
+    device_id = str(summary.get("device_id") or "").strip()
+    if not device_id:
+        raise ValueError("device_id required")
+    device_name = str(summary.get("device_name") or device_id)
+    host_name = str(summary.get("host_name") or "")
+    model = str(summary.get("model") or "")
+    role = str(summary.get("role") or "mac")
+    payload = json.dumps(summary, ensure_ascii=False)
+    with conn() as c:
+        exists = c.execute("SELECT created_ts FROM device_heartbeats WHERE device_id=?", (device_id,)).fetchone()
+        created = exists["created_ts"] if exists else now
+        c.execute(
+            """INSERT INTO device_heartbeats(device_id,device_name,host_name,model,role,summary_json,last_seen_ts,created_ts,updated_ts)
+               VALUES(?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(device_id) DO UPDATE SET
+                 device_name=excluded.device_name,
+                 host_name=excluded.host_name,
+                 model=excluded.model,
+                 role=excluded.role,
+                 summary_json=excluded.summary_json,
+                 last_seen_ts=excluded.last_seen_ts,
+                 updated_ts=excluded.updated_ts""",
+            (device_id, device_name, host_name, model, role, payload, ts, created, now),
+        )
+    return summary
+
+
+def list_device_heartbeats(limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM device_heartbeats ORDER BY last_seen_ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            data = json.loads(r["summary_json"] or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        data.setdefault("device_id", r["device_id"])
+        data.setdefault("device_name", r["device_name"])
+        data.setdefault("host_name", r["host_name"])
+        data.setdefault("model", r["model"])
+        data.setdefault("role", r["role"])
+        data.setdefault("last_seen_ts", r["last_seen_ts"])
+        out.append(data)
+    return out

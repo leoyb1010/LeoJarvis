@@ -21,6 +21,58 @@ def health() -> dict:
     return {"ok": True, "ts": int(time.time()), "service": "cortex"}
 
 
+class DeviceHeartbeatIn(BaseModel):
+    device_id: str
+    device_name: str = ""
+    host_name: str = ""
+    model: str = ""
+    role: str = "mac"
+    generated_at: int | None = None
+    last_seen_ts: int | None = None
+    health: int | float = 0
+    status: str = "未知"
+    metrics: dict = Field(default_factory=dict)
+    modules: dict = Field(default_factory=dict)
+    services: dict = Field(default_factory=dict)
+    risks: list[dict] = Field(default_factory=list)
+    privacy: str = ""
+
+
+@router.get("/device/summary")
+def device_summary() -> dict:
+    from ..agent import sysinfo
+    return sysinfo.device_summary()
+
+
+@router.post("/devices/self-heartbeat")
+def device_self_heartbeat() -> dict:
+    from ..agent import sysinfo
+    summary = sysinfo.device_summary()
+    db.upsert_device_heartbeat(summary)
+    return {"ok": True, "device": summary}
+
+
+@router.post("/devices/heartbeat")
+def device_heartbeat(req: DeviceHeartbeatIn) -> dict:
+    summary = req.model_dump()
+    db.upsert_device_heartbeat(summary)
+    return {"ok": True, "device": summary}
+
+
+@router.get("/devices")
+def devices(limit: int = 50) -> list[dict]:
+    from ..agent import sysinfo
+    local = sysinfo.device_summary()
+    db.upsert_device_heartbeat(local)
+    rows = db.list_device_heartbeats(limit=limit)
+    now = int(time.time())
+    for row in rows:
+        age = max(0, now - int(row.get("last_seen_ts") or row.get("generated_at") or now))
+        row["age_seconds"] = age
+        row["online"] = age < 180
+    return sorted(rows, key=lambda r: (not r.get("online"), -(float(r.get("health") or 0)), -int(r.get("last_seen_ts") or 0)))
+
+
 # ---------- Agent 中枢 ----------
 
 class ChatMessage(BaseModel):

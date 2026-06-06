@@ -1,0 +1,10 @@
+{
+  "name": "Cortex Device Health",
+  "short_name": "Cortex",
+  "description": "Cortex 多设备健康看板",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": []
+}

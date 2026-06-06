@@ -70,6 +70,50 @@ export async function runIngest() {
   return readJson<any>(await fetch(`${BASE}/ingest/run`, { method: "POST" }), "采集资讯");
 }
 
+export type DeviceSummary = {
+  device_id: string;
+  device_name: string;
+  host_name?: string;
+  model?: string;
+  role?: string;
+  generated_at?: number;
+  last_seen_ts?: number;
+  age_seconds?: number;
+  online?: boolean;
+  health: number;
+  status: string;
+  metrics: {
+    cpu_load?: number | null;
+    cpu_load_pct?: number | null;
+    cpu_cores?: number | null;
+    ram_used_pct?: number | null;
+    ram_used_gb?: number | null;
+    ram_total_gb?: number | null;
+    ssd_used_pct?: number | null;
+    ssd_free_gb?: number | null;
+    thermal_pressure?: number | null;
+    battery_percent?: number | null;
+    battery_plugged?: boolean | null;
+    network_latency_ms?: number | null;
+  };
+  modules?: Record<string, { level?: string; value?: string; summary?: string }>;
+  services: { online: number; total: number };
+  risks: { title: string; advice: string; level: string }[];
+  privacy?: string;
+};
+
+export async function getDeviceSummary(): Promise<DeviceSummary> {
+  return readJson(await fetch(`${BASE}/device/summary`), "读取本机设备摘要");
+}
+
+export async function getDevices(): Promise<DeviceSummary[]> {
+  return readJson(await fetch(`${BASE}/devices`), "读取设备健康列表");
+}
+
+export async function sendSelfHeartbeat(): Promise<{ ok: boolean; device: DeviceSummary }> {
+  return readJson(await fetch(`${BASE}/devices/self-heartbeat`, { method: "POST" }), "上报本机心跳");
+}
+
 // ---------- 全景驾驶舱 ----------
 
 export type CockpitOverview = {

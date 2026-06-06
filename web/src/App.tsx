@@ -8,11 +8,13 @@ import { StatusBar } from "./components/StatusBar";
 import { SystemView } from "./components/views/SystemView";
 import { PersonalNotesView } from "./components/views/PersonalNotesView";
 import { IntelligenceView } from "./components/views/IntelligenceView";
+import { DevicesView } from "./components/views/DevicesView";
 import { MemoryView } from "./components/MemoryView";
 
 const VIEWS: Record<ViewId, ComponentType> = {
   dashboard: Dashboard,
   system: SystemView,
+  devices: DevicesView,
   intelligence: IntelligenceView,
   memory: MemoryView,
   notes: PersonalNotesView,

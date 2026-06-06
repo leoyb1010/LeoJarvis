@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 
-export type ViewId = "dashboard" | "system" | "intelligence" | "notes" | "memory";
+export type ViewId = "dashboard" | "system" | "devices" | "intelligence" | "notes" | "memory";
 
 const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
   {
@@ -13,6 +13,7 @@ const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
     title: "运维",
     items: [
       { id: "system", label: "系统状态" },
+      { id: "devices", label: "设备健康" },
     ],
   },
   {
