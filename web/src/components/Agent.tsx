@@ -143,6 +143,13 @@ export function Agent() {
 
 export function FloatingAgent() {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const openCommand = () => setOpen(true);
+    window.addEventListener("leojarvis:open-command", openCommand);
+    return () => window.removeEventListener("leojarvis:open-command", openCommand);
+  }, []);
+
   return (
     <div className={`floating-agent ${open ? "open" : ""}`}>
       <AnimatePresence>

@@ -20,8 +20,13 @@ const VIEWS: Record<ViewId, ComponentType> = {
   settings: SettingsView,
 };
 
+function viewFromHash(): ViewId {
+  const raw = window.location.hash.replace(/^#\/?/, "").trim();
+  return (raw in VIEWS ? raw : "dashboard") as ViewId;
+}
+
 export default function App() {
-  const [view, setView] = useState<ViewId>("dashboard");
+  const [view, setView] = useState<ViewId>(() => viewFromHash());
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("cortex-theme") as "dark" | "light") || "light",
   );
@@ -32,6 +37,19 @@ export default function App() {
     localStorage.setItem("cortex-theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    const onHash = () => setView(viewFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  function navigate(next: ViewId) {
+    setView(next);
+    if (window.location.hash.replace(/^#\/?/, "") !== next) {
+      window.history.replaceState(null, "", `#${next}`);
+    }
+  }
+
   const View = VIEWS[view];
 
   return (
@@ -39,7 +57,7 @@ export default function App() {
       <NotifyToast />
       <Sidebar
         active={view}
-        onNavigate={setView}
+        onNavigate={navigate}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         collapsed={sidebarCollapsed}

@@ -1,0 +1,6 @@
+{
+  "version": "0.1.0",
+  "notes": "LeoJarvis macOS App release notes.",
+  "dmg_url": "https://example.com/LeoJarvis-0.1.0-arm64.dmg",
+  "sha256": "replace-with-dmg-sha256"
+}
