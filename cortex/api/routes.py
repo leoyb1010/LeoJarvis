@@ -73,6 +73,12 @@ def system_ai_tools() -> list[dict]:
     return sysinfo.ai_tool_status()
 
 
+@router.post("/system/ai-tools/{tool_id}/upgrade")
+def system_ai_tool_upgrade(tool_id: str) -> dict:
+    from ..agent import sysinfo
+    return sysinfo.ai_tool_upgrade(tool_id)
+
+
 @router.get("/system/notifications")
 def system_notifications() -> dict:
     from ..agent import sysinfo

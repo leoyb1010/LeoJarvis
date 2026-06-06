@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   getServices,
   getSystemOverview,
+  upgradeAiTool,
   type AiToolStatus,
   type ServiceRow,
   type SystemModule,
@@ -26,6 +27,8 @@ const MODULE_ICON: Record<string, string> = {
   cpu: "M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3M6 6h12v12H6z M9 9h6v6H9z",
   memory: "M4 8h16v8H4z M7 8v8 M11 8v8 M15 8v8",
   network: "M12 4a8 8 0 0 0 0 16 M12 4a8 8 0 0 1 0 16 M4 12h16",
+  thermal: "M12 3v10 M9 13a3 3 0 1 0 6 0 M10 3h4 M10 7h4",
+  battery: "M3 8h16v8H3z M20 11h1v2h-1 M6 11h8",
 };
 
 function moduleProgress(module: SystemModule) {
@@ -116,6 +119,8 @@ export function SystemView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTool, setActiveTool] = useState<AiToolStatus | null>(null);
+  const [upgradingTool, setUpgradingTool] = useState("");
+  const [upgradeResult, setUpgradeResult] = useState("");
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
 
   const load = async () => {
@@ -142,6 +147,21 @@ export function SystemView() {
     if (!services.length) return 0;
     return Math.round((services.filter((s) => s.online).length / services.length) * 100);
   }, [services]);
+
+  async function doUpgradeTool(tool: AiToolStatus) {
+    if (!tool.can_upgrade) return;
+    setUpgradingTool(tool.id);
+    setUpgradeResult("");
+    try {
+      const res = await upgradeAiTool(tool.id);
+      setUpgradeResult(`${res.ok ? "升级完成" : "升级失败"}：${res.command || tool.upgrade_command || ""}\n${res.output || res.error || ""}`);
+      await load();
+    } catch (err) {
+      setUpgradeResult(String(err));
+    } finally {
+      setUpgradingTool("");
+    }
+  }
 
   if (error && !data) return <div className="error">{error}</div>;
 
@@ -211,17 +231,21 @@ export function SystemView() {
         </>
       )}
 
-      <Modal open={!!activeTool} onClose={() => setActiveTool(null)} kicker="编程 / Agent 工具" title={activeTool?.name}>
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker="编程 / Agent 工具" title={activeTool?.name}
+        footer={activeTool?.can_upgrade ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
         {activeTool ? (
           <div className="modal-kv">
             <div><span>安装状态</span><b>{activeTool.installed ? "已安装" : "未安装"}</b></div>
             <div><span>当前版本</span><b>{activeTool.current_version}</b></div>
             <div><span>最新版本</span><b>{activeTool.latest_version}</b></div>
             <div><span>更新</span><b>{activeTool.update_state}</b></div>
+            <div><span>包管理器</span><b>{activeTool.package_manager || "—"}</b></div>
             <div><span>运行状态</span><b>{activeTool.running ? "运行中" : "未运行"}</b></div>
             <div><span>启动命令</span><b><code>{activeTool.launch}</code></b></div>
+            {activeTool.upgrade_command ? <div><span>升级命令</span><b><code>{activeTool.upgrade_command}</code></b></div> : null}
             {activeTool.path ? <p className="modal-note"><code>{activeTool.path}</code></p> : null}
             <p className="modal-note">{activeTool.advice} · 检测 {fmtTime(activeTool.checked_at)}</p>
+            {upgradeResult ? <pre className="toolResult">{upgradeResult}</pre> : null}
           </div>
         ) : null}
       </Modal>

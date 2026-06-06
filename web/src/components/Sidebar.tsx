@@ -45,7 +45,7 @@ export function Sidebar({
         {collapsed ? "›" : "‹"}
       </button>
       <div className="brand">
-          <div className="logo leo-logo">Leo</div>
+          <div className="logo leo-logo" aria-hidden="true"><span>C</span></div>
         <div>
           <div className="name">Cortex</div>
           <div className="sub">本地个人系统</div>

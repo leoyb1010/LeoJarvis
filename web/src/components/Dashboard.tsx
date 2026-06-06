@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getCockpitOverview,
+  upgradeAiTool,
   type AiToolStatus,
   type BriefingItem,
   type CockpitGithubCard,
@@ -16,6 +17,8 @@ type MetricSample = {
   health: number;
   disk: number;
   load: number;
+  loadPct: number;
+  ram: number;
   service: number;
   intel: number;
   memory: number;
@@ -32,6 +35,8 @@ function sampleFrom(data: CockpitOverview): MetricSample {
     health: data.health.score,
     disk: Number(data.health.system.disk_pct || 0),
     load: Number(data.health.system.load || 0),
+    loadPct: Number(data.health.system.load_pct || 0),
+    ram: Number(data.health.system.memory_used_pct || 0),
     service: percent(data.health.services_online, data.health.services_total || 1),
     intel: data.intelligence.events,
     memory: data.memory.pending + data.memory.later,
@@ -62,7 +67,7 @@ function fmtTime(ts?: number, ms = true) {
   return new Date(ms ? ts : ts * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
-// 扁平极简趋势线：只有一条描边，无渐变、无填充。
+// 微型趋势线：保留克制，但加入低噪网格底，避免六格像生硬折线。
 function Trend({ values, tone = "accent" }: { values: number[]; tone?: string }) {
   const w = 200;
   const h = 40;
@@ -89,9 +94,9 @@ type Stat = {
   values: number[];
 };
 
-function StatBlock({ stat }: { stat: Stat }) {
+function StatBlock({ stat, onClick }: { stat: Stat; onClick?: () => void }) {
   return (
-    <article className={`dash-stat dash-${stat.tone}`}>
+    <button className={`dash-stat dash-${stat.tone} ${onClick ? "clickable" : ""}`} onClick={onClick} type="button">
       <div className="dash-stat-row">
         <span className="dash-stat-label">{stat.label}</span>
         <span className="dash-stat-dot" />
@@ -102,7 +107,7 @@ function StatBlock({ stat }: { stat: Stat }) {
       </div>
       <Trend values={stat.values} tone={stat.tone === "neutral" ? "accent" : stat.tone} />
       <div className="dash-stat-hint">{stat.hint}</div>
-    </article>
+    </button>
   );
 }
 
@@ -138,6 +143,9 @@ export function Dashboard() {
   const [activeRepo, setActiveRepo] = useState<CockpitGithubCard | null>(null);
   const [activeTool, setActiveTool] = useState<AiToolStatus | null>(null);
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
+  const [showHealthDetail, setShowHealthDetail] = useState(false);
+  const [upgradingTool, setUpgradingTool] = useState("");
+  const [upgradeResult, setUpgradeResult] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -162,6 +170,8 @@ export function Dashboard() {
     health: samples.map((s) => s.health),
     disk: samples.map((s) => s.disk),
     load: samples.map((s) => s.load),
+    loadPct: samples.map((s) => s.loadPct),
+    ram: samples.map((s) => s.ram),
     service: samples.map((s) => s.service),
     intel: samples.map((s) => s.intel),
     memory: samples.map((s) => s.memory),
@@ -175,31 +185,58 @@ export function Dashboard() {
   const repos = data.intelligence.top_repos || [];
   const runtime = data.runtime;
   const diskPct = Number(data.health.system.disk_pct || 0);
+  const ramPct = Number(data.health.system.memory_used_pct || 0);
   const load = Number(data.health.system.load || 0);
+  const loadPct = Number(data.health.system.load_pct || 0);
+  const cores = data.health.system.cores || 1;
   const servicePct = percent(data.health.services_online, data.health.services_total || 1);
   const memoryPending = data.memory.pending + data.memory.later;
   const newNotif = notifications.reduce((s, a) => s + (a.has_new ? Math.max(1, a.count) : 0), 0);
+
+  async function doUpgradeTool(tool: AiToolStatus) {
+    if (!tool.can_upgrade) return;
+    setUpgradingTool(tool.id);
+    setUpgradeResult("");
+    try {
+      const res = await upgradeAiTool(tool.id);
+      setUpgradeResult(`${res.ok ? "升级完成" : "升级失败"}：${res.command || tool.upgrade_command || ""}\n${res.output || res.error || ""}`);
+      const next = await getCockpitOverview();
+      setData(next);
+    } catch (err) {
+      setUpgradeResult(String(err));
+    } finally {
+      setUpgradingTool("");
+    }
+  }
 
   const stats: Stat[] = [
     {
       label: "综合健康",
       value: String(data.health.score),
-      hint: data.health.score >= 80 ? "系统状态平稳" : data.health.score >= 60 ? "存在需要关注项" : "需要立即处理",
+      hint: data.health.score >= 80 ? "系统状态平稳" : `${data.health.attention_items?.length || 0} 个关注项，点击查看`,
       tone: data.health.score >= 80 ? "ok" : data.health.score >= 60 ? "warn" : "bad",
       values: series.health,
     },
     {
       label: "CPU 负载",
-      value: load.toFixed(2),
-      hint: "一分钟平均",
-      tone: load >= 8 ? "bad" : load >= 4 ? "warn" : "ok",
-      values: series.load,
+      value: `${load.toFixed(2)}`,
+      hint: `${loadPct.toFixed(0)}% / ${cores} 核 · 1分钟平均`,
+      tone: loadPct >= 120 ? "bad" : loadPct >= 80 ? "warn" : "ok",
+      values: series.loadPct,
     },
     {
-      label: "磁盘占用",
+      label: "RAM 使用",
+      value: ramPct ? String(ramPct.toFixed(0)) : "—",
+      unit: ramPct ? "%" : undefined,
+      hint: ramPct ? "内存压力与可用页估算" : "等待系统返回",
+      tone: ramPct >= 90 ? "bad" : ramPct >= 78 ? "warn" : "ok",
+      values: series.ram,
+    },
+    {
+      label: "SSD 占用",
       value: String(diskPct),
       unit: "%",
-      hint: "系统盘",
+      hint: "系统盘空间",
       tone: diskPct >= 88 ? "bad" : diskPct >= 75 ? "warn" : "ok",
       values: series.disk,
     },
@@ -231,10 +268,10 @@ export function Dashboard() {
       {/* 本机状态：扁平指标块 */}
       <SectionTitle
         title="本机状态"
-        meta={`健康 ${data.health.score} · CPU ${load.toFixed(2)} · 磁盘 ${diskPct}% · 更新 ${fmtTime(data.generated_at, false)}`}
+        meta={`健康 ${data.health.score} · CPU ${load.toFixed(2)} (${loadPct.toFixed(0)}%) · RAM ${ramPct ? `${ramPct.toFixed(0)}%` : "—"} · SSD ${diskPct}% · 更新 ${fmtTime(data.generated_at, false)}`}
       />
       <div className="dash-stats">
-        {stats.map((stat) => <StatBlock stat={stat} key={stat.label} />)}
+        {stats.map((stat) => <StatBlock stat={stat} key={stat.label} onClick={stat.label === "综合健康" ? () => setShowHealthDetail(true) : undefined} />)}
       </div>
 
       {/* 运行态势：本机服务 + 编程/Agent 工具 + 子智能体 */}
@@ -307,21 +344,25 @@ export function Dashboard() {
       {topBriefing.length === 0 ? (
         <div className="empty">暂无足够高价值的信息进入驾驶舱。</div>
       ) : (
-        <div className="dash-feed">
-          {topBriefing.map((item) => (
-            <button className="dash-feed-card" key={item.event_id} onClick={() => setActiveSignal(item)}>
-              <div className="dash-feed-top">
-                <span className={`dash-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
-                <em>{item.source}</em>
-              </div>
-              <b>{item.title}</b>
-              <p>{item.take}</p>
-              <div className="dash-feed-foot">
-                <span>{item.domain_label || "情报"}</span>
-                <span>{fmtTime(item.ts)}</span>
-              </div>
-            </button>
-          ))}
+        <div className="dash-intel-layout">
+          <button className="dash-intel-hero" onClick={() => setActiveSignal(topBriefing[0])}>
+            <span className={`dash-pri pri-${topBriefing[0].priority || "观察"}`}>{topBriefing[0].priority || "观察"}</span>
+            <h3>{topBriefing[0].title}</h3>
+            <p>{topBriefing[0].take}</p>
+            <div><em>{topBriefing[0].source}</em><em>{fmtTime(topBriefing[0].ts)}</em></div>
+          </button>
+          <div className="dash-intel-rail">
+            {topBriefing.slice(1).map((item) => (
+              <button className="dash-feed-card compact" key={item.event_id} onClick={() => setActiveSignal(item)}>
+                <div className="dash-feed-top">
+                  <span className={`dash-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
+                  <em>{item.source}</em>
+                </div>
+                <b>{item.title}</b>
+                <p>{item.take}</p>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -330,18 +371,18 @@ export function Dashboard() {
       {repos.length === 0 ? (
         <div className="empty">暂无达到驾驶舱阈值的 GitHub 项目。</div>
       ) : (
-        <div className="dash-feed">
-          {repos.map((repo) => (
-            <button className="dash-feed-card" key={repo.name} onClick={() => setActiveRepo(repo)}>
-              <div className="dash-feed-top">
-                <span className="dash-pri pri-高优先">{repo.priority || "高优先"}</span>
-                <em>{repo.language || "项目"}</em>
+        <div className="dash-repo-board">
+          {repos.map((repo, index) => (
+            <button className={`dash-repo-card ${index === 0 ? "hero" : ""}`} key={repo.name} onClick={() => setActiveRepo(repo)}>
+              <div className="dash-repo-meta">
+                <span>{repo.language || "项目"}</span>
+                <b>{repo.speed ? `+${repo.speed}/天` : "观察"}</b>
               </div>
-              <b>{repo.name}</b>
+              <h3>{repo.name}</h3>
               <p>{repo.summary}</p>
-              <div className="dash-feed-foot">
+              <div className="dash-repo-foot">
                 <span>{repo.stars ? `${repo.stars.toLocaleString()} 星` : "星标观察中"}</span>
-                <span>{repo.speed ? `+${repo.speed}/天` : "观察"}</span>
+                <span>{repo.priority || "高优先"}</span>
               </div>
             </button>
           ))}
@@ -349,6 +390,27 @@ export function Dashboard() {
       )}
 
       {/* ===== 详情弹层 ===== */}
+      <Modal open={showHealthDetail} onClose={() => setShowHealthDetail(false)} kicker="综合健康" title={`健康值 ${data.health.score}`}>
+        <div className="modal-rich">
+          <p className="lead">健康值是 SSD 空间、CPU 负载、RAM 压力、本地服务在线率和待确认记忆共同计算的综合分，不是单独的 CPU 数字。</p>
+          <div className="health-attention-list">
+            {(data.health.attention_items || []).length === 0 ? (
+              <div className="modal-info-block"><span>当前无关注项</span><p>系统盘、负载、服务和记忆队列都处于可接受区间。</p></div>
+            ) : (data.health.attention_items || []).map((item) => (
+              <div className={`health-attention ${item.level === "异常" ? "bad" : "warn"}`} key={`${item.label}-${item.detail}`}>
+                <b>{item.label}</b><em>{item.level}</em><p>{item.detail}</p>
+              </div>
+            ))}
+          </div>
+          <div className="modal-meta">
+            <span>CPU {load.toFixed(2)} / {cores} 核</span>
+            <span>RAM {ramPct ? `${ramPct.toFixed(0)}%` : "—"}</span>
+            <span>SSD {diskPct}%</span>
+            <span>服务 {data.health.services_online}/{data.health.services_total}</span>
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={!!activeApp} onClose={() => setActiveApp(null)} kicker={activeApp?.category} title={activeApp ? (
         <span className="modal-app-title">
           {activeApp.icon ? <img src={activeApp.icon} alt="" width={28} height={28} /> : null}
@@ -422,17 +484,21 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeTool} onClose={() => setActiveTool(null)} kicker="编程 / Agent 工具" title={activeTool?.name}>
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker="编程 / Agent 工具" title={activeTool?.name}
+        footer={activeTool?.can_upgrade ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
         {activeTool ? (
           <div className="modal-kv">
             <div><span>安装状态</span><b>{activeTool.installed ? "已安装" : "未安装"}</b></div>
             <div><span>当前版本</span><b>{activeTool.current_version}</b></div>
             <div><span>最新版本</span><b>{activeTool.latest_version}</b></div>
             <div><span>更新</span><b>{activeTool.update_state}</b></div>
+            <div><span>包管理器</span><b>{activeTool.package_manager || "—"}</b></div>
             <div><span>运行状态</span><b>{activeTool.running ? "运行中" : "未运行"}</b></div>
             <div><span>启动命令</span><b><code>{activeTool.launch}</code></b></div>
+            {activeTool.upgrade_command ? <div><span>升级命令</span><b><code>{activeTool.upgrade_command}</code></b></div> : null}
             {activeTool.path ? <p className="modal-note"><code>{activeTool.path}</code></p> : null}
             <p className="modal-note">{activeTool.advice}</p>
+            {upgradeResult ? <pre className="toolResult">{upgradeResult}</pre> : null}
           </div>
         ) : null}
       </Modal>

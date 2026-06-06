@@ -33,9 +33,9 @@ function repoVelocity(repo: GithubRadarRepo) {
 }
 
 // 资讯块：紧凑、可点击，详情通过悬浮卡片呈现，不直接跳来源。
-function SignalBlock({ item, onOpen }: { item: BriefingItem; onOpen: (i: BriefingItem) => void }) {
+function SignalBlock({ item, onOpen, featured = false }: { item: BriefingItem; onOpen: (i: BriefingItem) => void; featured?: boolean }) {
   return (
-    <button className={`sig-block tri-${item.triage}`} onClick={() => onOpen(item)}>
+    <button className={`sig-block tri-${item.triage} ${featured ? "featured" : ""}`} onClick={() => onOpen(item)}>
       <div className="sig-top">
         <span className={`sig-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
         <b>{item.score.toFixed(2)}</b>
@@ -50,9 +50,9 @@ function SignalBlock({ item, onOpen }: { item: BriefingItem; onOpen: (i: Briefin
   );
 }
 
-function RepoBlock({ repo, onOpen }: { repo: CockpitGithubCard; onOpen: (r: CockpitGithubCard) => void }) {
+function RepoBlock({ repo, onOpen, featured = false }: { repo: CockpitGithubCard; onOpen: (r: CockpitGithubCard) => void; featured?: boolean }) {
   return (
-    <button className="sig-block repo" onClick={() => onOpen(repo)}>
+    <button className={`sig-block repo ${featured ? "featured" : ""}`} onClick={() => onOpen(repo)}>
       <div className="sig-top">
         <span className="sig-pri pri-高优先">{repo.priority || "高优先"}</span>
         <b>{repo.speed ? `+${repo.speed}/天` : "观察"}</b>
@@ -253,19 +253,25 @@ export function IntelligenceView() {
         <ChipFilter label="标签" rows={briefing?.filters?.tags || []} active={tagFilter} onChange={setTagFilter} />
       </div>
 
-      <div className="panel-title">最近 24 小时高价值简报</div>
-      {items.length === 0 ? <div className="empty">当前筛选没有高价值简报条目。</div> : (
-        <div className="sig-grid">
-          {items.map((item) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} />)}
-        </div>
-      )}
+      <div className="briefing-layout">
+        <section>
+          <div className="panel-title">最近 24 小时高价值简报</div>
+          {items.length === 0 ? <div className="empty">当前筛选没有高价值简报条目。</div> : (
+            <div className="sig-grid editorial">
+              {items.map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
+            </div>
+          )}
+        </section>
 
-      <div className="panel-title" style={{ marginTop: 28 }}>GitHub 高增速雷达</div>
-      {repos.length === 0 ? <div className="empty">暂无达到驾驶舱阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
-        <div className="sig-grid">
-          {repos.map((repo) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} />)}
-        </div>
-      )}
+        <section>
+          <div className="panel-title">GitHub 高增速雷达</div>
+          {repos.length === 0 ? <div className="empty">暂无达到驾驶舱阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
+            <div className="repo-ladder">
+              {repos.map((repo, index) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} featured={index === 0} />)}
+            </div>
+          )}
+        </section>
+      </div>
 
       <div className="intel-grid-2" style={{ marginTop: 28 }}>
         <section className="card intel-panel">

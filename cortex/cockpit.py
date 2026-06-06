@@ -22,10 +22,16 @@ def chinese_tags(raw, *, allow_llm=False):
 
 def _parse_system(raw: str) -> dict:
     disk = re.search(r"\((\d+)%\)", raw)
-    load = re.search(r"负载\(1/5/15min\):\s*([\d.]+)", raw)
+    load = re.search(r"负载\(1/5/15min\):\s*([\d.]+)\s*/\s*([\d.]+)\s*/\s*([\d.]+).*CPU 核数 (\d+)", raw)
+    mem = re.search(r"内存:.*?(\d+)%", raw)
     disk_pct = int(disk.group(1)) if disk else None
     load_value = float(load.group(1)) if load else None
-    return {"raw": raw, "disk_pct": disk_pct, "load": load_value}
+    cores = int(load.group(4)) if load else None
+    mem_free = int(mem.group(1)) if mem else None
+    return {"raw": raw, "disk_pct": disk_pct, "load": load_value, "load_5": float(load.group(2)) if load else None,
+            "load_15": float(load.group(3)) if load else None, "cores": cores,
+            "load_pct": round(load_value / max(1, cores) * 100, 1) if load_value is not None and cores else None,
+            "memory_free_pct": mem_free, "memory_used_pct": 100 - mem_free if mem_free is not None else None}
 
 
 def _events(hours: int = 24, limit: int = 200) -> list[dict]:
@@ -196,14 +202,30 @@ def overview() -> dict:
     tools_running = sum(1 for t in ai_tools if t.get("running"))
     agents_running = sum(1 for a in agent_rows if a.get("status") == "running")
     health_score = 100
+    attention_items = []
     if system["disk_pct"] and system["disk_pct"] >= 90:
         health_score -= 22
-    if system["load"] and system["load"] >= 8:
+        attention_items.append({"label": "SSD 空间紧张", "level": "异常", "detail": f"系统盘已使用 {system['disk_pct']}%，建议清理缓存、下载和大型项目。"})
+    elif system["disk_pct"] and system["disk_pct"] >= 82:
+        health_score -= 10
+        attention_items.append({"label": "SSD 接近高水位", "level": "注意", "detail": f"系统盘已使用 {system['disk_pct']}%，低于 80% 会更稳。"})
+    if system["load_pct"] and system["load_pct"] >= 120:
         health_score -= 14
+        attention_items.append({"label": "CPU 负载偏高", "level": "异常", "detail": f"1 分钟负载 {system['load']}，约为核心数的 {system['load_pct']}%。"})
+    elif system["load_pct"] and system["load_pct"] >= 80:
+        health_score -= 7
+        attention_items.append({"label": "CPU 负载需观察", "level": "注意", "detail": f"1 分钟负载 {system['load']}，如持续偏高请看资源占用排行。"})
+    if system.get("memory_used_pct") and system["memory_used_pct"] >= 90:
+        health_score -= 10
+        attention_items.append({"label": "RAM 压力偏高", "level": "注意", "detail": f"内存使用约 {system['memory_used_pct']}%，建议关闭高占用应用。"})
     if service_rows:
-        health_score -= int((len(service_rows) - online) / len(service_rows) * 18)
+        offline = [s for s in service_rows if not s["online"]]
+        health_score -= int(len(offline) / len(service_rows) * 18)
+        for svc in offline[:4]:
+            attention_items.append({"label": f"{svc['name']} 离线", "level": "注意", "detail": f"127.0.0.1:{svc['port']} 未监听。"})
     if memory["pending"] > 10:
         health_score -= 8
+        attention_items.append({"label": "待确认记忆过多", "level": "注意", "detail": f"有 {memory['pending']} 条长期记忆候选需要人工确认。"})
     health_score = max(0, min(100, health_score))
 
     # 最近动态时间轴：跨来源（资讯 / X / 洞察 / 反思 等），刻意排除 GitHub 项目，
@@ -239,6 +261,7 @@ def overview() -> dict:
             "system": system,
             "services_online": online,
             "services_total": len(service_rows),
+            "attention_items": attention_items,
         },
         "services": service_rows,
         "notifications": notifications,

@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -176,6 +177,105 @@ def _run(cmd: list[str], timeout: float = 8.0) -> str:
         return f"(执行失败: {ex})"
 
 
+def _run_json(cmd: list[str], timeout: float = 8.0) -> dict:
+    out = _run(cmd, timeout=timeout)
+    try:
+        return json.loads(out) if out and "执行失败" not in out else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _bytes_to_gb(value: int | float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value) / (1024 ** 3), 1)
+
+
+def _memory_detail() -> dict:
+    """Return RAM pressure plus installed/used memory from vm_stat/sysctl."""
+    pressure = _memory_info()
+    total_bytes = 0
+    try:
+        raw_total = _run(["sysctl", "-n", "hw.memsize"], timeout=3)
+        total_bytes = int(raw_total.strip()) if raw_total.strip().isdigit() else 0
+    except Exception:  # noqa: BLE001
+        total_bytes = 0
+
+    page_size = 4096
+    vm = _run(["vm_stat"], timeout=4)
+    pages: dict[str, int] = {}
+    for line in vm.splitlines():
+        if "page size of" in line:
+            m = re.search(r"page size of (\d+) bytes", line)
+            if m:
+                page_size = int(m.group(1))
+            continue
+        if ":" not in line:
+            continue
+        key, raw = line.split(":", 1)
+        m = re.search(r"(\d+)", raw.replace(".", ""))
+        if m:
+            pages[key.strip()] = int(m.group(1))
+
+    free_pages = pages.get("Pages free", 0) + pages.get("Pages inactive", 0) + pages.get("Pages speculative", 0)
+    compressed_pages = pages.get("Pages occupied by compressor", 0)
+    wired_pages = pages.get("Pages wired down", 0)
+    app_pages = pages.get("Pages active", 0)
+    free_bytes = free_pages * page_size if free_pages else 0
+    used_bytes = max(0, total_bytes - free_bytes) if total_bytes else 0
+    used_pct = round(used_bytes / total_bytes * 100, 1) if total_bytes else None
+
+    return {
+        **pressure,
+        "total_gb": _bytes_to_gb(total_bytes),
+        "used_gb": _bytes_to_gb(used_bytes),
+        "free_gb": _bytes_to_gb(free_bytes),
+        "used_pct": used_pct,
+        "app_gb": _bytes_to_gb(app_pages * page_size),
+        "wired_gb": _bytes_to_gb(wired_pages * page_size),
+        "compressed_gb": _bytes_to_gb(compressed_pages * page_size),
+    }
+
+
+def _thermal_info() -> dict:
+    thermal = _run(["pmset", "-g", "therm"], timeout=4)
+    pressure_raw = _run(["sysctl", "-n", "machdep.xcpm.cpu_thermal_level"], timeout=3)
+    pressure = None
+    if pressure_raw.strip().isdigit():
+        pressure = int(pressure_raw.strip())
+    elif "CPU_Scheduler_Limit" in thermal:
+        m = re.search(r"CPU_Scheduler_Limit\s*=\s*(\d+)", thermal)
+        if m:
+            pressure = int(m.group(1))
+    level = _level(pressure is None or pressure <= 40, pressure is not None and pressure > 20)
+    value = "正常" if pressure is None else f"{pressure}%"
+    return {
+        "level": level,
+        "value": value,
+        "thermal_pressure": pressure,
+        "summary": "温控压力正常。" if level == "健康" else f"当前温控压力约 {value}，可能正在降频。",
+        "advice": "继续观察即可。" if level == "健康" else "检查高占用进程、外接显示器负载和散热环境。",
+        "raw": thermal,
+    }
+
+
+def _battery_info() -> dict:
+    raw = _run(["pmset", "-g", "batt"], timeout=4)
+    pct = None
+    m = re.search(r"(\d+)%", raw)
+    if m:
+        pct = int(m.group(1))
+    plugged = "AC Power" in raw or "charged" in raw.lower()
+    level = _level(pct is None or pct >= 25 or plugged, pct is not None and pct < 45 and not plugged)
+    return {
+        "level": level,
+        "value": f"{pct}%" if pct is not None else "未知",
+        "summary": ("外接电源" if plugged else "电池供电") + (f"，电量 {pct}%" if pct is not None else "。"),
+        "advice": "继续观察即可。" if level == "健康" else "建议接入电源，避免长任务中断。",
+        "metrics": {"percent": pct, "plugged": plugged},
+    }
+
+
 def _level(ok: bool, warn: bool = False) -> str:
     if not ok:
         return "异常"
@@ -341,9 +441,16 @@ def _ai_tools_placeholder() -> list[dict]:
         {"id": tid, "name": name, "installed": shutil.which(cmd) is not None,
          "path": shutil.which(cmd), "current_version": "检测中", "latest_version": "检测中",
          "update_state": "检测中", "running": False, "running_detail": [], "launch": cmd,
+         "package_manager": "检测中", "upgrade_command": "", "can_upgrade": False,
          "checked_at": int(time.time()), "advice": "正在检测本地 AI 开发工具…"}
         for tid, name, cmd in (("claude_code", "Claude Code", "claude"),
                                ("codex_cli", "Codex CLI", "codex"),
+                               ("gemini_cli", "Gemini CLI", "gemini"),
+                               ("cursor_cli", "Cursor CLI", "cursor"),
+                               ("opencode_cli", "OpenCode", "opencode"),
+                               ("aider_cli", "Aider", "aider"),
+                               ("crush_cli", "Crush", "crush"),
+                               ("ollama", "Ollama", "ollama"),
                                ("grok_build", "Grok Build", "grokbuild"))
     ]
 
@@ -370,6 +477,8 @@ def _probe_ai_tools() -> list[dict]:
             "name": "Claude Code",
             "commands": ["claude"],
             "package": "@anthropic-ai/claude-code",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g @anthropic-ai/claude-code@latest",
             "launch": "claude",
         },
         {
@@ -377,14 +486,72 @@ def _probe_ai_tools() -> list[dict]:
             "name": "Codex CLI",
             "commands": ["codex"],
             "package": "@openai/codex",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g @openai/codex@latest",
             "launch": "codex",
+        },
+        {
+            "id": "gemini_cli",
+            "name": "Gemini CLI",
+            "commands": ["gemini"],
+            "package": "@google/gemini-cli",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g @google/gemini-cli@latest",
+            "launch": "gemini",
+        },
+        {
+            "id": "cursor_cli",
+            "name": "Cursor CLI",
+            "commands": ["cursor"],
+            "package": None,
+            "package_manager": "manual",
+            "upgrade_command": "cursor --version",
+            "launch": "cursor",
+        },
+        {
+            "id": "opencode_cli",
+            "name": "OpenCode",
+            "commands": ["opencode"],
+            "package": "opencode-ai",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g opencode-ai@latest",
+            "launch": "opencode",
+        },
+        {
+            "id": "aider_cli",
+            "name": "Aider",
+            "commands": ["aider"],
+            "package": None,
+            "package_manager": "pipx",
+            "upgrade_command": "pipx upgrade aider-chat",
+            "launch": "aider",
+        },
+        {
+            "id": "crush_cli",
+            "name": "Crush",
+            "commands": ["crush"],
+            "package": "@charmland/crush",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g @charmland/crush@latest",
+            "launch": "crush",
         },
         {
             "id": "grok_build",
             "name": "Grok Build",
             "commands": ["grokbuild", "grok-build", "grok"],
             "package": "grok-build",
+            "package_manager": "npm",
+            "upgrade_command": "npm install -g grok-build@latest",
             "launch": "grokbuild",
+        },
+        {
+            "id": "ollama",
+            "name": "Ollama",
+            "commands": ["ollama"],
+            "package": None,
+            "package_manager": "brew",
+            "upgrade_command": "brew upgrade ollama",
+            "launch": "ollama",
         },
     ]
     rows = []
@@ -420,10 +587,34 @@ def _probe_ai_tools() -> list[dict]:
             "running": bool(running),
             "running_detail": running[:3],
             "launch": tool["launch"],
+            "package_manager": tool.get("package_manager", "manual"),
+            "upgrade_command": tool.get("upgrade_command", ""),
+            "can_upgrade": bool(found and tool.get("upgrade_command") and update_state in {"可能可更新", "已安装"}),
             "checked_at": int(time.time()),
-            "advice": "可直接使用。" if found else f"未检测到命令，可按官方方式安装后使用 `{tool['launch']}` 启动。",
+            "advice": "可直接使用；如需更新，可在详情里一键复制升级命令。" if found else f"未检测到命令，可按官方方式安装后使用 `{tool['launch']}` 启动。",
         })
     return rows
+
+
+def ai_tool_upgrade(tool_id: str) -> dict:
+    """Run a whitelisted upgrade command for an installed AI/dev CLI tool."""
+    rows = ai_tool_status(max_age=0, block=True)
+    target = next((r for r in rows if r.get("id") == tool_id), None)
+    if not target:
+        return {"ok": False, "error": "未知工具"}
+    command = str(target.get("upgrade_command") or "").strip()
+    if not command:
+        return {"ok": False, "error": "该工具没有可自动执行的升级命令"}
+    allowed_prefixes = (
+        "npm install -g ",
+        "brew upgrade ",
+        "pipx upgrade ",
+    )
+    if not command.startswith(allowed_prefixes):
+        return {"ok": False, "error": "升级命令不在安全白名单内", "command": command}
+    out = _run(command.split(), timeout=180)
+    _refresh_ai_tools()
+    return {"ok": "执行失败" not in out and "ERR!" not in out, "tool": target.get("name"), "command": command, "output": out[-4000:]}
 
 
 def _is_running(patterns: list[str], *, exclude: list[str] | None = None) -> tuple[bool, list[str]]:
@@ -640,12 +831,14 @@ def structured_status() -> dict:
     cores = os.cpu_count() or 1
     cpu_level = _level(l1 < cores * 1.2, l1 >= cores * 0.8)
     processes = _process_rows()
-    memory = _memory_info()
+    memory = _memory_detail()
     network = _network_info()
+    thermal = _thermal_info()
+    battery = _battery_info()
     modules = [
         {
             "id": "disk",
-            "name": "磁盘",
+            "name": "SSD",
             "level": disk_level,
             "value": f"{disk_pct:.1f}%",
             "summary": f"系统盘已用 {used / gb:.1f}G / {total / gb:.1f}G，剩余 {free / gb:.1f}G。",
@@ -654,21 +847,39 @@ def structured_status() -> dict:
         },
         {
             "id": "cpu",
-            "name": "CPU",
+            "name": "CPU 负载",
             "level": cpu_level,
-            "value": f"{l1:.2f}",
-            "summary": f"一分钟负载 {l1:.2f}，CPU 核数 {cores}。",
+            "value": f"{l1:.2f}/{cores}",
+            "summary": f"一分钟负载 {l1:.2f}，5/15 分钟为 {l5:.2f}/{l15:.2f}，CPU 核数 {cores}。",
             "advice": "负载正常。" if cpu_level == "健康" else "查看高占用进程，确认是否有构建或后台任务持续运行。",
-            "metrics": {"load_1": round(l1, 2), "load_5": round(l5, 2), "load_15": round(l15, 2), "cores": cores},
+            "metrics": {"load_1": round(l1, 2), "load_5": round(l5, 2), "load_15": round(l15, 2), "cores": cores, "load_pct": round(l1 / max(1, cores) * 100, 1)},
         },
         {
             "id": "memory",
-            "name": "内存",
+            "name": "RAM",
             "level": memory["level"],
-            "value": f"{memory['free_pct']}%" if memory["free_pct"] is not None else "未知",
-            "summary": memory["summary"],
+            "value": f"{memory['used_pct']}%" if memory.get("used_pct") is not None else (f"空闲 {memory['free_pct']}%" if memory.get("free_pct") is not None else "未知"),
+            "summary": (f"已用 {memory.get('used_gb')}G / {memory.get('total_gb')}G，空闲约 {memory.get('free_gb')}G。" if memory.get("total_gb") else memory["summary"]),
             "advice": memory["advice"],
-            "metrics": {"free_pct": memory["free_pct"]},
+            "metrics": {"free_pct": memory.get("free_pct"), "used_pct": memory.get("used_pct"), "total_gb": memory.get("total_gb"), "used_gb": memory.get("used_gb"), "free_gb": memory.get("free_gb"), "compressed_gb": memory.get("compressed_gb")},
+        },
+        {
+            "id": "thermal",
+            "name": "温控",
+            "level": thermal["level"],
+            "value": thermal["value"],
+            "summary": thermal["summary"],
+            "advice": thermal["advice"],
+            "metrics": {"thermal_pressure": thermal.get("thermal_pressure")},
+        },
+        {
+            "id": "battery",
+            "name": "电源",
+            "level": battery["level"],
+            "value": battery["value"],
+            "summary": battery["summary"],
+            "advice": battery["advice"],
+            "metrics": battery["metrics"],
         },
         {
             "id": "network",

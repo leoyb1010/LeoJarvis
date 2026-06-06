@@ -12,11 +12,11 @@ type Turn =
   | { kind: "result"; text: string };
 
 const SUGGESTIONS = [
-  "看看我磁盘为什么快满了",
-  "本地服务都还活着吗",
-  "扫描一下当前电脑状态",
-  "扫描一下今天的情报",
-  "把我刚才的想法写进个人记事",
+  "诊断磁盘和 RAM 压力",
+  "检查本地服务在线率",
+  "刷新本机健康报告",
+  "扫描今天的高价值情报",
+  "把这个想法写入个人记事",
 ];
 
 const enter = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { ease: "easeOut" as const } };
@@ -61,22 +61,22 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
       {compact ? (
         <div className="floating-agent-head">
           <div>
-            <b>中枢助手</b>
-            <span>对它下达指令，待确认的高风险动作会留在这里</span>
+            <b>Cortex Command</b>
+            <span>本机行动中枢 · 高风险动作会等待确认</span>
           </div>
           <button className="icon-btn" onClick={onClose}>关闭</button>
         </div>
       ) : (
         <div className="page-head">
-          <h1>中枢对话</h1>
-          <p>直接吩咐它，它会调工具在你机器上动手。低风险自动执行，高风险弹卡片等你点头。</p>
+          <h1>Command Center</h1>
+          <p>直接交代任务，它会调用本机工具执行。低风险自动完成，高风险动作先停在确认卡片里。</p>
         </div>
       )}
 
       <div className={compact ? "chat-wrap floating-chat-wrap" : "chat-wrap"}>
         <div className="chat" ref={scroller}>
           {turns.length === 0 && (
-            <motion.div className="empty" {...enter}>对 Cortex 说点什么，或点下面的快捷指令试试。</motion.div>
+            <motion.div className="empty" {...enter}>输入任务，或选择下方快捷动作。</motion.div>
           )}
           <AnimatePresence initial={false}>
             {turns.map((turn, i) => {
@@ -127,7 +127,7 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
         </div>
 
         <div className="composer">
-          <input value={input} placeholder="对中枢说点什么…"
+          <input value={input} placeholder="输入任务或问题…"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)} />
           <button className="btn primary" onClick={() => send(input)} disabled={busy}>发送</button>
@@ -163,8 +163,8 @@ export function FloatingAgent() {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "关闭中枢助手" : "打开中枢助手"}
       >
-        <span>中枢</span>
-        <b>{open ? "关闭" : "对话"}</b>
+        <span>Cortex</span>
+        <b>{open ? "Close" : "Command"}</b>
       </button>
     </div>
   );

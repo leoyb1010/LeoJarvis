@@ -3,6 +3,11 @@ const BASE = (typeof window !== "undefined" && window.location.port !== "5173")
   ? ""
   : "http://127.0.0.1:8787";
 
+function apiUrl(path: string) {
+  if (BASE) return new URL(path, BASE);
+  return new URL(path, window.location.origin);
+}
+
 async function readJson<T>(res: Response, label: string): Promise<T> {
   if (!res.ok) throw new Error(`${label}失败：${res.status}`);
   return res.json();
@@ -71,9 +76,10 @@ export type CockpitOverview = {
   generated_at: number;
   health: {
     score: number;
-    system: { raw: string; disk_pct?: number | null; load?: number | null };
+    system: { raw: string; disk_pct?: number | null; load?: number | null; load_5?: number | null; load_15?: number | null; cores?: number | null; load_pct?: number | null; memory_free_pct?: number | null; memory_used_pct?: number | null };
     services_online: number;
     services_total: number;
+    attention_items?: { label: string; level: string; detail: string }[];
   };
   services: ServiceRow[];
   notifications?: LocalNotifications;
@@ -115,7 +121,7 @@ export type Weather = {
 };
 
 export async function getWeather(lat?: number, lon?: number): Promise<Weather> {
-  const url = new URL(`${BASE}/system/weather`);
+  const url = apiUrl("/system/weather");
   if (lat != null) url.searchParams.set("lat", String(lat));
   if (lon != null) url.searchParams.set("lon", String(lon));
   return readJson(await fetch(url), "读取天气");
@@ -393,6 +399,9 @@ export type AiToolStatus = {
   running: boolean;
   running_detail: string[];
   launch: string;
+  package_manager?: string;
+  upgrade_command?: string;
+  can_upgrade?: boolean;
   checked_at: number;
   advice: string;
 };
@@ -410,6 +419,9 @@ export async function getSystemOverview(): Promise<SystemOverview> {
 }
 export async function getAiTools(): Promise<AiToolStatus[]> {
   return readJson(await fetch(`${BASE}/system/ai-tools`), "读取 AI 工具状态");
+}
+export async function upgradeAiTool(id: string): Promise<{ ok: boolean; tool?: string; command?: string; output?: string; error?: string }> {
+  return readJson(await fetch(`${BASE}/system/ai-tools/${id}/upgrade`, { method: "POST" }), "升级 AI 工具");
 }
 
 export type AgentRow = {
@@ -468,7 +480,7 @@ export type NoteInput = {
 };
 
 export async function getPersonalNotes(q = "", tag = "", status = "active"): Promise<PersonalNotesResponse> {
-  const url = new URL(`${BASE}/personal-notes`);
+  const url = apiUrl("/personal-notes");
   if (q) url.searchParams.set("q", q);
   if (tag) url.searchParams.set("tag", tag);
   if (status) url.searchParams.set("status", status);
