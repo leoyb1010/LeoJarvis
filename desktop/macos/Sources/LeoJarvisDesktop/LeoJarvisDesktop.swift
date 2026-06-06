@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        setupApplicationIcon()
         NotificationManager.shared.requestAuthorization()
         window = MainWindowController(service: service)
         setupStatusItem()
@@ -36,6 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
             Task { await self?.refreshStatus() }
         }
+    }
+
+    private func setupApplicationIcon() {
+        guard
+            let url = Bundle.main.url(forResource: "app-icon", withExtension: "png"),
+            let image = NSImage(contentsOf: url)
+        else { return }
+        NSApp.applicationIconImage = image
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -307,17 +316,18 @@ final class MainWindowController: NSWindowController, WKNavigationDelegate {
           html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif;background:#0f1412;color:#eff7f2}
           body{display:grid;place-items:center}
           .box{width:min(560px,86vw);padding:34px;border:1px solid rgba(83,255,165,.22);border-radius:22px;background:linear-gradient(145deg,rgba(255,255,255,.08),rgba(255,255,255,.03));box-shadow:0 30px 80px rgba(0,0,0,.35)}
-          .mark{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#16c784,#2e7dff);display:grid;place-items:center;font-weight:800;margin-bottom:18px}
+          .mark{width:64px;height:64px;border-radius:16px;display:block;margin-bottom:18px;box-shadow:0 16px 42px rgba(0,0,0,.32),inset 0 0 0 1px rgba(255,255,255,.08)}
+          .mark img{width:100%;height:100%;border-radius:16px;object-fit:cover;display:block}
           h1{margin:0 0 8px;font-size:30px}
           p{margin:0;color:#aebdb5;line-height:1.7}
           .bar{height:4px;background:rgba(255,255,255,.1);border-radius:999px;margin-top:24px;overflow:hidden}
           .bar i{display:block;height:100%;width:42%;background:#16c784;animation:move 1.2s infinite alternate}
           @keyframes move{to{transform:translateX(138%)}}
         </style>
-        <body><div class="box"><div class="mark">LJ</div><h1>LeoJarvis Desktop</h1><p>\(message)<br>如果长时间未恢复，可在菜单栏选择“重启服务”或“查看日志”。</p><div class="bar"><i></i></div></div></body>
+        <body><div class="box"><div class="mark"><img src="app-icon.png" alt=""></div><h1>LeoJarvis Desktop</h1><p>\(message)<br>如果长时间未恢复，可在菜单栏选择“重启服务”或“查看日志”。</p><div class="bar"><i></i></div></div></body>
         </html>
         """
-        webView.loadHTMLString(html, baseURL: nil)
+        webView.loadHTMLString(html, baseURL: Bundle.main.resourceURL)
     }
 }
 
@@ -811,6 +821,7 @@ private func launchAgentPlist(repoPath: String, pythonPath: String) -> String {
       </dict>
       <key>RunAtLoad</key><true/>
       <key>KeepAlive</key><true/>
+      <key>ThrottleInterval</key><integer>5</integer>
       <key>StandardOutPath</key><string>\(xmlEscape(stdout))</string>
       <key>StandardErrorPath</key><string>\(xmlEscape(stderr))</string>
     </dict>

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getCockpitOverview,
-  getDevices,
   getRemoteCockpit,
   listRemoteLeoJarvis,
   upgradeAiTool,
@@ -9,7 +8,6 @@ import {
   type BriefingItem,
   type CockpitGithubCard,
   type CockpitOverview,
-  type DeviceSummary,
   type LocalNotificationApp,
   type RemoteLeoJarvisConnection,
   type ServiceRow,
@@ -139,72 +137,6 @@ function statusTone(status: string): "ok" | "warn" | "bad" | "neutral" {
   return "neutral";
 }
 
-function pctText(v?: number | null) { return v == null ? "—" : `${Math.round(v)}%`; }
-
-function SshHealthPanel({ device }: { device: DeviceSummary }) {
-  const m = device.metrics || {};
-  const mods = (device.modules || {}) as any;
-  const top = Array.isArray(mods.top_processes) ? mods.top_processes : [];
-  const svcDetail = mods.services_detail && typeof mods.services_detail === "object" ? mods.services_detail : null;
-  const tone = !device.online ? "bad" : device.status === "异常" ? "bad" : device.status === "注意" ? "warn" : "ok";
-  const cells: [string, string, string][] = [
-    ["综合健康", String(Math.round(device.health || 0)), device.online ? device.status : "离线"],
-    ["CPU", pctText(m.cpu_load_pct), m.cpu_load != null ? `${m.cpu_load} / ${m.cpu_cores || "?"} 核` : "负载"],
-    ["RAM", pctText(m.ram_used_pct), m.ram_total_gb ? `${m.ram_used_gb ?? "—"}G / ${m.ram_total_gb}G` : "内存"],
-    ["SSD", pctText(m.ssd_used_pct), m.ssd_free_gb != null ? `剩余 ${m.ssd_free_gb}G` : "磁盘"],
-    ["运行时长", (mods as any).uptime_hours ? `${(mods as any).uptime_hours}h` : (m as any).uptime_hours ? `${(m as any).uptime_hours}h` : "—", "uptime"],
-    ["服务", `${device.services?.online ?? 0}/${device.services?.total ?? 0}`, "端口在线"],
-  ];
-  return (
-    <div className={`ssh-health ${tone}`}>
-      <div className="ssh-health-head">
-        <div>
-          <b>{device.device_name}</b>
-          <small>{device.host_name || device.device_id} · {(mods.os?.value) || device.model || "SSH 设备"}</small>
-        </div>
-        <span className={`pill ${tone}`}>{device.online ? device.status : "离线"} · {device.age_seconds != null ? `${Math.round(device.age_seconds)}s 前` : "刚刚"}</span>
-      </div>
-      <div className="dash-stats ssh-stats">
-        {cells.map(([label, value, hint]) => (
-          <div className="stat-block neutral" key={label}>
-            <span className="stat-label">{label}</span>
-            <b className="stat-value">{value}</b>
-            <em className="stat-hint">{hint}</em>
-          </div>
-        ))}
-      </div>
-      <div className="ssh-health-cols">
-        <section className="card">
-          <div className="panel-title">风险项</div>
-          {(device.risks || []).length === 0 ? <div className="empty">暂无风险项</div> :
-            (device.risks || []).map((r) => (
-              <div className={`ssh-risk ${r.level === "异常" ? "bad" : r.level === "注意" ? "warn" : "good"}`} key={`${r.title}-${r.advice}`}>
-                <b>{r.level}</b> {r.title} · <span>{r.advice}</span>
-              </div>
-            ))}
-        </section>
-        <section className="card">
-          <div className="panel-title">Top 进程</div>
-          {top.length === 0 ? <div className="empty">未采集到进程</div> :
-            top.map((p: any) => (
-              <div className="process-row" key={`${p.pid}-${p.command}`}>
-                <b>{p.command}</b><span>PID {p.pid}</span><em>CPU {p.cpu}% · MEM {p.mem}%</em>
-              </div>
-            ))}
-        </section>
-      </div>
-      {svcDetail ? (
-        <div className="ssh-ports">
-          {Object.entries(svcDetail).map(([name, ok]) => (
-            <span className={`port-pill ${ok ? "on" : "off"}`} key={name}>{name}</span>
-          ))}
-        </div>
-      ) : null}
-      <p className="settings-note">这是通过 SSH 读取的远程设备健康摘要（非完整驾驶舱）。要看对方的完整 LeoJarvis 驾驶舱，需在对方机器部署 LeoJarvis 并按「远程 LeoJarvis 实例」添加。</p>
-    </div>
-  );
-}
-
 export function Dashboard() {
   const [data, setData] = useState<CockpitOverview | null>(null);
   const [samples, setSamples] = useState<MetricSample[]>(() => readStoredSamples());
@@ -218,23 +150,13 @@ export function Dashboard() {
   const [upgradingTool, setUpgradingTool] = useState("");
   const [upgradeResult, setUpgradeResult] = useState("");
   const [remotes, setRemotes] = useState<RemoteLeoJarvisConnection[]>([]);
-  const [sshDevices, setSshDevices] = useState<DeviceSummary[]>([]);
   const [activeDevice, setActiveDevice] = useState("local");
   const [deviceError, setDeviceError] = useState("");
-
-  const isSshDevice = activeDevice.startsWith("ssh-");
 
   useEffect(() => {
     let alive = true;
     const load = () => {
       setDeviceError("");
-      // SSH 健康设备：不拉完整驾驶舱，只刷新设备健康摘要。
-      if (activeDevice.startsWith("ssh-")) {
-        getDevices()
-          .then((rows) => { if (alive) setSshDevices(rows.filter((d) => d.role === "ssh" || String(d.device_id).startsWith("ssh-"))); })
-          .catch((err) => { if (alive) setDeviceError(String(err)); });
-        return;
-      }
       const dataPromise = activeDevice === "local"
         ? getCockpitOverview()
         : getRemoteCockpit(activeDevice).then((res) => {
@@ -244,6 +166,8 @@ export function Dashboard() {
       dataPromise
         .then((res) => {
           if (!alive) return;
+          setError("");
+          setDeviceError("");
           setData(res);
           setSamples((prev) => {
             const key = activeDevice === "local" ? "cortex-dashboard-samples" : `cortex-dashboard-samples-${activeDevice}`;
@@ -255,7 +179,6 @@ export function Dashboard() {
         .catch((err) => { if (alive) { setError(String(err)); setDeviceError(String(err)); } });
     };
     listRemoteLeoJarvis().then((rows) => { if (alive) setRemotes(rows); }).catch(() => {});
-    getDevices().then((rows) => { if (alive) setSshDevices(rows.filter((d) => d.role === "ssh" || String(d.device_id).startsWith("ssh-"))); }).catch(() => {});
     load();
     const t = window.setInterval(load, 8000);
     return () => { alive = false; window.clearInterval(t); };
@@ -272,15 +195,31 @@ export function Dashboard() {
     memory: samples.map((s) => s.memory),
   }), [samples]);
 
-  const activeSsh = isSshDevice ? sshDevices.find((d) => d.device_id === activeDevice) : null;
+  const validRemotes = remotes.filter((r) => r.enabled !== false);
   const switchLabel = activeDevice === "local" ? "本机 LeoJarvis"
-    : remotes.find((r) => r.id === activeDevice)?.name
-    || sshDevices.find((d) => d.device_id === activeDevice)?.device_name
+    : validRemotes.find((r) => r.id === activeDevice)?.name
     || "远程设备";
   const switchSub = activeDevice === "local" ? "127.0.0.1:8787"
-    : remotes.find((r) => r.id === activeDevice)?.host
-    || sshDevices.find((d) => d.device_id === activeDevice)?.host_name
+    : validRemotes.find((r) => r.id === activeDevice)?.host
     || "";
+  const isLocalDevice = activeDevice === "local";
+  const deviceScope = isLocalDevice ? "本机" : "远端";
+  const statusTitle = isLocalDevice ? "本机状态" : "远程状态";
+  const serviceTitle = isLocalDevice ? "本机服务" : "远端服务";
+  const agentTitle = isLocalDevice ? "本机编程与 Agent" : "远端编程与 Agent";
+  const appsTitle = isLocalDevice ? "本机应用与邮件监控" : "远端应用与邮件监控";
+  const sourceMeta = isLocalDevice ? "127.0.0.1:8787" : switchSub;
+  const onDeviceChange = (value: string) => {
+    setActiveDevice(value);
+    setData(null);
+    setSamples([]);
+    setActiveApp(null);
+    setActiveSignal(null);
+    setActiveRepo(null);
+    setActiveTool(null);
+    setActiveService(null);
+    setUpgradeResult("");
+  };
   const deviceSwitch = (
     <div className="dash-device-switch card">
       <div>
@@ -288,25 +227,15 @@ export function Dashboard() {
         <b>{switchLabel}</b>
         <small>{switchSub}</small>
       </div>
-      <select value={activeDevice} onChange={(e) => { setActiveDevice(e.target.value); setData(null); setSamples([]); }}>
+      <select value={activeDevice} onChange={(e) => onDeviceChange(e.target.value)}>
         <option value="local">本机 LeoJarvis</option>
-        {remotes.length ? <optgroup label="远程 LeoJarvis 实例">{remotes.map((r) => <option key={r.id} value={r.id}>{r.name || r.host}{r.connected ? " · 已连接" : " · 未连接"}</option>)}</optgroup> : null}
-        {sshDevices.length ? <optgroup label="SSH 设备">{sshDevices.map((d) => <option key={d.device_id} value={d.device_id}>{d.device_name}{d.online ? " · 在线" : " · 离线"}</option>)}</optgroup> : null}
+        {validRemotes.length ? <optgroup label="远程 LeoJarvis 实例">{validRemotes.map((r) => <option key={r.id} value={r.id}>{r.name || r.host}{r.connected ? " · 已连接" : " · 未连接"}</option>)}</optgroup> : null}
       </select>
-      {deviceError ? <em>{deviceError}</em> : <em>{activeDevice === "local" ? "本机实时驾驶舱" : isSshDevice ? "通过 SSH 读取的设备健康摘要" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
+      {deviceError ? <em>{deviceError}</em> : <em>{isLocalDevice ? "本机实时驾驶舱" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
     </div>
   );
 
-  if (isSshDevice) {
-    return (
-      <div className="dash">
-        {deviceSwitch}
-        {activeSsh ? <SshHealthPanel device={activeSsh} /> : <div className="empty">该 SSH 设备还没有数据。去「系统与设备」点刷新/探测，或等待自动探测（每 5 分钟）。</div>}
-      </div>
-    );
-  }
-
-  if (error && !data) return <div className="error">{error}</div>;
+  if (error && !data) return <div className="dash">{deviceSwitch}<div className="error">{error}</div></div>;
   if (!data) return <PageSkeleton cards={8} />;
 
   const notifications = data.notifications?.apps || [];
@@ -324,6 +253,10 @@ export function Dashboard() {
 
   async function doUpgradeTool(tool: AiToolStatus) {
     if (!tool.can_upgrade) return;
+    if (!isLocalDevice) {
+      setUpgradeResult("当前展示的是远端工具状态。为了避免误操作，本机 App 不会直接对远端执行升级；请登录对应远端主机后再升级。");
+      return;
+    }
     setUpgradingTool(tool.id);
     setUpgradeResult("");
     try {
@@ -396,25 +329,23 @@ export function Dashboard() {
     <div className="dash">
       {deviceSwitch}
 
-      {/* 本机状态：扁平指标块 */}
       <SectionTitle
-        title="本机状态"
+        title={statusTitle}
         meta={`健康 ${data.health.score} · CPU ${load.toFixed(2)} (${loadPct.toFixed(0)}%) · RAM ${ramPct ? `${ramPct.toFixed(0)}%` : "—"} · SSD ${diskPct}% · 更新 ${fmtTime(data.generated_at, false)}`}
       />
       <div className="dash-stats">
         {stats.map((stat) => <StatBlock stat={stat} key={stat.label} onClick={stat.label === "综合健康" ? () => setShowHealthDetail(true) : undefined} />)}
       </div>
 
-      {/* 运行态势：本机服务 + 编程/Agent 工具 + 子智能体 */}
       <SectionTitle
         title="运行态势"
         meta={runtime
-          ? `服务 ${runtime.services_online}/${runtime.services_total} · 工具 ${runtime.tools_ready}/${runtime.tools_total} · 子智能体 ${runtime.agents_running}`
+          ? `${deviceScope} · 服务 ${runtime.services_online}/${runtime.services_total} · 工具 ${runtime.tools_ready}/${runtime.tools_total} · 子智能体 ${runtime.agents_running}`
           : undefined}
       />
       <div className="dash-runtime">
         <article className="dash-panel">
-          <div className="dash-panel-head"><b>本机服务</b><span>{data.health.services_online}/{data.health.services_total} 在线</span></div>
+          <div className="dash-panel-head"><b>{serviceTitle}</b><span>{data.health.services_online}/{data.health.services_total} 在线</span></div>
           <div className="dash-svc-list">
             {data.services.map((svc) => (
               <button className={`dash-svc ${svc.online ? "online" : "offline"}`} key={svc.name} onClick={() => setActiveService(svc)}>
@@ -428,7 +359,7 @@ export function Dashboard() {
         </article>
 
         <article className="dash-panel">
-          <div className="dash-panel-head"><b>编程与 Agent</b><span>{runtime?.tools_running ?? 0} 运行中</span></div>
+          <div className="dash-panel-head"><b>{agentTitle}</b><span>{runtime?.tools_running ?? 0} 运行中</span></div>
           <div className="dash-tool-list">
             {(runtime?.ai_tools || []).map((tool) => (
               <button className={`dash-tool ${tool.installed ? "on" : "off"} ${tool.running ? "running" : ""}`} key={tool.id} onClick={() => setActiveTool(tool)}>
@@ -449,10 +380,9 @@ export function Dashboard() {
         </article>
       </div>
 
-      {/* 应用与邮件：真实图标，点击查看详情 */}
       <SectionTitle
-        title="应用与邮件监控"
-        meta={`${newNotif} 个新通知信号 · 仅读取应用级计数，不抓取内容`}
+        title={appsTitle}
+        meta={`${deviceScope} ${sourceMeta} · ${newNotif} 个新通知信号 · 仅读取应用级计数，不抓取内容`}
       />
       <div className="dash-apps">
         {notifications.map((app) => (
@@ -629,8 +559,8 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker="编程 / Agent 工具" title={activeTool?.name}
-        footer={activeTool?.can_upgrade ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker={agentTitle} title={activeTool?.name}
+        footer={activeTool?.can_upgrade && isLocalDevice ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
         {activeTool ? (
           <div className="modal-kv">
             <div><span>安装状态</span><b>{activeTool.installed ? "已安装" : "未安装"}</b></div>
@@ -643,19 +573,20 @@ export function Dashboard() {
             {activeTool.upgrade_command ? <div><span>升级命令</span><b><code>{activeTool.upgrade_command}</code></b></div> : null}
             {activeTool.path ? <p className="modal-note"><code>{activeTool.path}</code></p> : null}
             <p className="modal-note">{activeTool.advice}</p>
+            {!isLocalDevice ? <p className="modal-note">当前为远端只读状态，本机 App 不会直接执行远端安装或升级命令。</p> : null}
             {upgradeResult ? <pre className="toolResult">{upgradeResult}</pre> : null}
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={!!activeService} onClose={() => setActiveService(null)} kicker="本机服务" title={activeService?.name}>
+      <Modal open={!!activeService} onClose={() => setActiveService(null)} kicker={serviceTitle} title={activeService?.name}>
         {activeService ? (
           <div className="modal-kv">
             <div><span>状态</span><b className={activeService.online ? "tone-ok" : "tone-bad"}>{activeService.online ? "在线" : "离线"}</b></div>
-            <div><span>端口</span><b>127.0.0.1:{activeService.port}</b></div>
+            <div><span>服务端口</span><b>{deviceScope} 127.0.0.1:{activeService.port}</b></div>
             <div><span>进程 PID</span><b>{activeService.pid || "—"}</b></div>
             <div><span>可自动重启</span><b>{activeService.can_restart ? "是" : "否"}</b></div>
-            <p className="modal-note">{activeService.desc || "本地服务"}</p>
+            <p className="modal-note">{activeService.desc || serviceTitle}</p>
           </div>
         ) : null}
       </Modal>

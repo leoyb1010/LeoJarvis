@@ -34,18 +34,34 @@ def _save(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def list_connections() -> list[dict[str, Any]]:
+def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
     rows = _rows()
     changed = False
     for row in rows:
         rid = row.get("id")
         proc = _TUNNELS.get(str(rid))
-        connected = bool(proc and proc.poll() is None)
-        if row.get("connected") != connected:
-            row["connected"] = connected
+        local_port = int(row.get("local_port") or 0)
+        health_err = _probe_local_health(local_port, timeout=0.8) if local_port else "missing local port"
+        connected = bool(proc and proc.poll() is None) or not bool(health_err)
+        if connected:
+            if row.get("connected") is not True or row.get("last_error"):
+                row["connected"] = True
+                row["last_error"] = ""
+                row["updated_at"] = int(time.time())
+                changed = True
+            continue
+        if row.get("connected") or not row.get("last_error"):
+            row["connected"] = False
+            row["last_error"] = health_err[:300]
+            row["updated_at"] = int(time.time())
             changed = True
     if changed:
         _save(rows)
+    if auto_connect:
+        for row in list(rows):
+            if row.get("enabled", True) and not row.get("connected"):
+                connect(str(row.get("id")))
+        rows = _rows()
     return rows
 
 
@@ -136,53 +152,72 @@ def connect(connection_id: str) -> dict[str, Any]:
         _save(rows)
         return {"ok": True, "connection": row}
 
-    cmd = [
-        "ssh", "-N",
-        "-o", "BatchMode=yes",
-        "-o", "ExitOnForwardFailure=yes",
-        "-o", "ServerAliveInterval=30",
-        "-o", "ConnectTimeout=10",
-        "-o", "StrictHostKeyChecking=accept-new",
-    ]
-    proxy = str(row.get("proxy_command") or "").strip()
-    if proxy:
-        cmd += ["-o", f"ProxyCommand={proxy}"]
-    for opt in _clean_options(row.get("ssh_options")):
-        cmd += ["-o", opt]
-    cmd += [
-        "-p", str(int(row.get("ssh_port") or 22)),
-        "-L", f"127.0.0.1:{local_port}:127.0.0.1:{int(row.get('remote_port') or 8787)}",
-        _target(row),
-    ]
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        err = ""
-        for _ in range(24):
-            if proc.poll() is not None:
-                err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
-                break
-            err = _probe_local_health(local_port, timeout=1.5)
-            if not err:
-                break
-            time.sleep(0.25)
-        if err:
-            if proc.poll() is None:
-                proc.terminate()
-            row["connected"] = False
-            row["last_error"] = err[:300]
+    def _ssh_cmd(port: int) -> list[str]:
+        cmd = [
+            "ssh", "-N",
+            "-o", "BatchMode=yes",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=accept-new",
+        ]
+        proxy = str(row.get("proxy_command") or "").strip()
+        if proxy:
+            cmd += ["-o", f"ProxyCommand={proxy}"]
+        for opt in _clean_options(row.get("ssh_options")):
+            cmd += ["-o", opt]
+        cmd += [
+            "-p", str(int(row.get("ssh_port") or 22)),
+            "-L", f"127.0.0.1:{port}:127.0.0.1:{int(row.get('remote_port') or 8787)}",
+            _target(row),
+        ]
+        return cmd
+
+    last_error = ""
+    for attempt in range(2):
+        try:
+            row["local_port"] = local_port
+            proc = subprocess.Popen(_ssh_cmd(local_port), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            err = ""
+            for _ in range(24):
+                if proc.poll() is not None:
+                    err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
+                    break
+                err = _probe_local_health(local_port, timeout=1.5)
+                if not err:
+                    break
+                time.sleep(0.25)
+            if err:
+                if proc.poll() is None:
+                    proc.terminate()
+                last_error = err[:300]
+                # 本地端口被占用但不是有效 LeoJarvis 隧道时，自动换空闲端口重建。
+                if attempt == 0 and ("Address already in use" in err or "cannot listen to port" in err):
+                    local_port = _free_port()
+                    continue
+                row["connected"] = False
+                row["last_error"] = last_error
+                _save(rows)
+                return {"ok": False, "error": last_error, "connection": row}
+            _TUNNELS[connection_id] = proc
+            row["connected"] = True
+            row["last_error"] = ""
+            row["updated_at"] = int(time.time())
             _save(rows)
-            return {"ok": False, "error": err[:300], "connection": row}
-        _TUNNELS[connection_id] = proc
-        row["connected"] = True
-        row["last_error"] = ""
-        row["updated_at"] = int(time.time())
-        _save(rows)
-        return {"ok": True, "connection": row}
-    except Exception as exc:
-        row["connected"] = False
-        row["last_error"] = str(exc)[:300]
-        _save(rows)
-        return {"ok": False, "error": row["last_error"], "connection": row}
+            return {"ok": True, "connection": row}
+        except Exception as exc:
+            last_error = str(exc)[:300]
+            if attempt == 0 and "Address already in use" in last_error:
+                local_port = _free_port()
+                continue
+            row["connected"] = False
+            row["last_error"] = last_error
+            _save(rows)
+            return {"ok": False, "error": row["last_error"], "connection": row}
+    row["connected"] = False
+    row["last_error"] = last_error or "ssh tunnel failed"
+    _save(rows)
+    return {"ok": False, "error": row["last_error"], "connection": row}
 
 
 def disconnect(connection_id: str) -> dict[str, Any]:
@@ -207,7 +242,7 @@ def _base_url(row: dict[str, Any]) -> str:
 
 
 def fetch(connection_id: str, path: str) -> dict[str, Any]:
-    rows = list_connections()
+    rows = list_connections(auto_connect=True)
     row = next((r for r in rows if r.get("id") == connection_id), None)
     if not row:
         return {"ok": False, "error": "未知远程 LeoJarvis"}
@@ -221,9 +256,34 @@ def fetch(connection_id: str, path: str) -> dict[str, Any]:
         with httpx.Client(timeout=12, trust_env=False) as client:
             res = client.get(_base_url(row) + path)
             res.raise_for_status()
+            if row.get("last_error") or row.get("connected") is not True:
+                row["connected"] = True
+                row["last_error"] = ""
+                row["updated_at"] = int(time.time())
+                _save([row if r.get("id") == connection_id else r for r in _rows()])
             return {"ok": True, "connection": row, "data": res.json()}
     except Exception as exc:
-        row["last_error"] = str(exc)[:300]
-        row["connected"] = False
-        _save([row if r.get("id") == connection_id else r for r in _rows()])
-        return {"ok": False, "error": row["last_error"], "connection": row}
+        first_error = str(exc)[:300]
+
+    # 隧道偶发断开时自动重连一次，再重试读取，避免 App 里手动切换远端失败。
+    row["last_error"] = first_error
+    row["connected"] = False
+    _save([row if r.get("id") == connection_id else r for r in _rows()])
+    reconnect = connect(connection_id)
+    if reconnect.get("ok"):
+        row = reconnect["connection"]
+        try:
+            with httpx.Client(timeout=16, trust_env=False) as client:
+                res = client.get(_base_url(row) + path)
+                res.raise_for_status()
+                row["connected"] = True
+                row["last_error"] = ""
+                row["updated_at"] = int(time.time())
+                _save([row if r.get("id") == connection_id else r for r in _rows()])
+                return {"ok": True, "connection": row, "data": res.json()}
+        except Exception as exc:
+            first_error = str(exc)[:300]
+    row["last_error"] = first_error
+    row["connected"] = False
+    _save([row if r.get("id") == connection_id else r for r in _rows()])
+    return {"ok": False, "error": row["last_error"], "connection": row}

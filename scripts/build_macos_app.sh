@@ -39,12 +39,32 @@ if [[ -f "${ROOT}/web/public/brand-mark.png" ]]; then
   cp "${ROOT}/web/public/brand-mark.png" "${APP}/Contents/Resources/brand-mark.png"
 fi
 
+if [[ -f "${ROOT}/web/public/app-icon.png" ]]; then
+  cp "${ROOT}/web/public/app-icon.png" "${APP}/Contents/Resources/app-icon.png"
+  ICONSET="${STAGING}/${APP_NAME}.iconset"
+  rm -rf "${ICONSET}"
+  mkdir -p "${ICONSET}"
+  sips -z 16 16 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_16x16.png" >/dev/null
+  sips -z 32 32 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_16x16@2x.png" >/dev/null
+  sips -z 32 32 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_32x32.png" >/dev/null
+  sips -z 64 64 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_32x32@2x.png" >/dev/null
+  sips -z 128 128 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_128x128.png" >/dev/null
+  sips -z 256 256 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_128x128@2x.png" >/dev/null
+  sips -z 256 256 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_256x256.png" >/dev/null
+  sips -z 512 512 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_256x256@2x.png" >/dev/null
+  sips -z 512 512 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_512x512.png" >/dev/null
+  sips -z 1024 1024 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_512x512@2x.png" >/dev/null
+  iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/LeoJarvis.icns"
+  rm -rf "${ICONSET}"
+fi
+
 INFO="${APP}/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Clear dict" "${INFO}" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.leo.leojarvis.desktop" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${APP_NAME}" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${APP_NAME}" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string ${APP_NAME}" "${INFO}"
+/usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string LeoJarvis" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${VERSION}" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VERSION}" "${INFO}"
@@ -56,8 +76,15 @@ INFO="${APP}/Contents/Info.plist"
 
 echo "==> Create DMG"
 cp -R "${APP}" "${STAGING}/${APP_NAME}.app"
+if [[ -f "${APP}/Contents/Resources/LeoJarvis.icns" ]]; then
+  cp "${APP}/Contents/Resources/LeoJarvis.icns" "${STAGING}/.VolumeIcon.icns"
+  if command -v SetFile >/dev/null 2>&1; then
+    SetFile -a C "${STAGING}" || true
+  fi
+fi
 ln -s /Applications "${STAGING}/Applications"
 hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING}" -ov -format UDZO "${DMG}"
+rm -rf "${STAGING}"
 
 SHA="$(shasum -a 256 "${DMG}" | awk '{print $1}')"
 MANIFEST="${ROOT}/desktop/updates/appcast.json"
