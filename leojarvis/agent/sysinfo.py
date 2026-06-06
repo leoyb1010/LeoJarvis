@@ -158,7 +158,17 @@ _DEFAULT_SERVICES = {
 def _services_map() -> dict[str, int]:
     cfg = settings().get("services", {})
     if isinstance(cfg, dict) and cfg:
-        return {k: int(v) for k, v in cfg.items()}
+        out: dict[str, int] = {}
+        for name, val in cfg.items():
+            if isinstance(val, dict):
+                port = val.get("port")
+            else:
+                port = val
+            try:
+                out[name] = int(port)
+            except (TypeError, ValueError):
+                continue
+        return out or dict(_DEFAULT_SERVICES)
     return dict(_DEFAULT_SERVICES)
 
 
@@ -1245,7 +1255,7 @@ def system_status() -> str:
 
 
 def list_services() -> str:
-    """检查已知本地服务是否在监听。"""
+    """检查配置服务是否在监听。"""
     out = ["本地服务状态:"]
     for name, port in _services_map().items():
         alive = _port_alive(port)

@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  siClaude,
+  siClaudecode,
+  siCursor,
+  siFastapi,
+  siGooglegemini,
+  siJavascript,
+  siNextdotjs,
+  siNodedotjs,
+  siOllama,
+  siPython,
+  siReact,
+  siTypescript,
+  siVite,
+  type SimpleIcon,
+} from "simple-icons";
+import {
   getCockpitOverview,
   getRemoteCockpit,
   listRemoteLeoJarvis,
@@ -135,6 +151,89 @@ function statusTone(status: string): "ok" | "warn" | "bad" | "neutral" {
   if (status === "无新通知") return "neutral";
   if (status === "未授权" || status === "未配置") return "warn";
   return "neutral";
+}
+
+function compactName(name: string) {
+  return name
+    .replace(/_/g, "-")
+    .replace(/\bcli\b/i, "CLI")
+    .replace(/\bcode\b/i, "Code")
+    .replace(/\bapp\b/i, "App")
+    .trim();
+}
+
+function initials(name: string, max = 3) {
+  const cleaned = compactName(name);
+  const parts = cleaned.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (!parts.length) return "S";
+  if (parts.length === 1) {
+    const single = parts[0];
+    if (/^\d+$/.test(single)) return single.slice(0, max);
+    return single.slice(0, max).toUpperCase();
+  }
+  return parts.slice(0, max).map((p) => p[0]).join("").toUpperCase();
+}
+
+type VisualSpec = {
+  label: string;
+  name: string;
+  tone: string;
+  icon?: SimpleIcon;
+  image?: string;
+};
+
+function RuntimeIcon({ visual }: { visual: VisualSpec }) {
+  if (visual.image) {
+    return <img src={visual.image} alt="" />;
+  }
+  if (visual.icon) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d={visual.icon.path} fill={`#${visual.icon.hex}`} />
+      </svg>
+    );
+  }
+  return <span>{visual.label}</span>;
+}
+
+function serviceVisual(service: ServiceRow) {
+  const key = `${service.name} ${service.desc || ""} ${service.process || ""} ${service.command || ""} ${service.cwd || ""}`.toLowerCase();
+  if (key.includes("leojarvis")) return { label: "LJ", name: "LeoJarvis", tone: "brand", image: "/brand-mark.png" };
+  if (key.includes("ollama")) return { label: "OL", name: "Ollama", tone: "agent", icon: siOllama };
+  if (key.includes("leoapi")) return { label: "API", name: "LeoAPI", tone: "code" };
+  if (key.includes("leonote")) return { label: "LN", name: "LeoNote", tone: "note", image: "/leonote-icon.png" };
+  if (key.includes("leomoney")) return { label: "LM", name: "LeoMoney", tone: "money" };
+  if (key.includes("cloudcli")) return { label: "CLI", name: "CloudCLI", tone: "code" };
+  if (key.includes("claude-code-ui")) return { label: "CC", name: "Claude UI", tone: "agent", icon: siClaudecode };
+  if (key.includes("openclaw")) return { label: "OC", name: "OpenClaw", tone: "agent" };
+  if (key.includes("hermes-agent")) return { label: "HA", name: "Hermes", tone: "agent" };
+  if (key.includes("agent-studio")) return { label: "AS", name: "Agent Studio", tone: "agent" };
+  if (key.includes("growth-system")) return { label: "GS", name: "Growth", tone: "data" };
+  if (key.includes("chinabridge")) return { label: "CB", name: "ChinaBridge", tone: "data" };
+  if (key.includes("web-preview") || key.includes("vite")) return { label: "WEB", name: "Web Preview", tone: "web", icon: siVite };
+  if (key.includes("next-app") || key.includes("next-server")) return { label: "NX", name: "Next App", tone: "web", icon: siNextdotjs };
+  if (key.includes("fastapi")) return { label: "FA", name: compactName(service.name), tone: "code", icon: siFastapi };
+  if (key.includes("python") || key.includes("uvicorn")) return { label: "PY", name: compactName(service.name), tone: "code", icon: siPython };
+  if (key.includes("typescript")) return { label: "TS", name: compactName(service.name), tone: "code", icon: siTypescript };
+  if (key.includes("react")) return { label: "RE", name: compactName(service.name), tone: "web", icon: siReact };
+  if (key.includes("node")) return { label: "JS", name: compactName(service.name), tone: "web", icon: siNodedotjs };
+  return { label: initials(service.name), name: compactName(service.name), tone: "neutral" };
+}
+
+function toolVisual(tool: AiToolStatus) {
+  const key = `${tool.id} ${tool.name}`.toLowerCase();
+  if (key.includes("claude_code")) return { label: "CC", name: "Claude Code", tone: "agent", icon: siClaudecode };
+  if (key.includes("claude")) return { label: "CL", name: "Claude", tone: "agent", icon: siClaude };
+  if (key.includes("codex")) return { label: "CX", name: "Codex CLI", tone: "brand", image: "/codex-icon.png" };
+  if (key.includes("gemini")) return { label: "G", name: "Gemini CLI", tone: "agent", icon: siGooglegemini };
+  if (key.includes("cursor")) return { label: "CR", name: "Cursor CLI", tone: "code", icon: siCursor };
+  if (key.includes("opencode")) return { label: "OC", name: "OpenCode", tone: "code" };
+  if (key.includes("aider")) return { label: "AI", name: "Aider", tone: "agent" };
+  if (key.includes("crush")) return { label: "CH", name: "Crush", tone: "agent" };
+  if (key.includes("grok")) return { label: "GB", name: "Grok Build", tone: "agent" };
+  if (key.includes("ollama")) return { label: "OL", name: "Ollama", tone: "agent", icon: siOllama };
+  if (key.includes("node")) return { label: "JS", name: compactName(tool.name), tone: "web", icon: siJavascript };
+  return { label: initials(tool.name), name: compactName(tool.name), tone: "neutral" };
 }
 
 export function Dashboard() {
@@ -347,31 +446,55 @@ export function Dashboard() {
         <article className="dash-panel">
           <div className="dash-panel-head"><b>{serviceTitle}</b><span>{data.health.services_online}/{data.health.services_total} 在线</span></div>
           <div className="dash-svc-list">
-            {data.services.map((svc) => (
-              <button className={`dash-svc ${svc.online ? "online" : "offline"}`} key={svc.name} onClick={() => setActiveService(svc)}>
-                <span className="dot" />
-                <b>{svc.name}</b>
-                <em>:{svc.port}</em>
-                <i>{svc.online ? "在线" : "离线"}</i>
-              </button>
-            ))}
+            {data.services.map((svc) => {
+              const visual = serviceVisual(svc);
+              return (
+                <button
+                  className={`dash-svc runtime-icon-card ${svc.online ? "online" : "offline"} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
+                  key={`${svc.name}:${svc.port}`}
+                  onClick={() => setActiveService(svc)}
+                  title={`${svc.name} · 127.0.0.1:${svc.port} · ${svc.online ? "在线" : "离线"}`}
+                >
+                  <span className="runtime-icon-shell">
+                    <RuntimeIcon visual={visual} />
+                    <span className="status-lamp" />
+                  </span>
+                  <b>{visual.name}</b>
+                  <em>:{svc.port}</em>
+                </button>
+              );
+            })}
           </div>
         </article>
 
         <article className="dash-panel">
           <div className="dash-panel-head"><b>{agentTitle}</b><span>{runtime?.tools_running ?? 0} 运行中</span></div>
           <div className="dash-tool-list">
-            {(runtime?.ai_tools || []).map((tool) => (
-              <button className={`dash-tool ${tool.installed ? "on" : "off"} ${tool.running ? "running" : ""}`} key={tool.id} onClick={() => setActiveTool(tool)}>
-                <span className="dot" />
-                <b>{tool.name}</b>
-                <i>{!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}</i>
-              </button>
-            ))}
+            {(runtime?.ai_tools || []).map((tool) => {
+              const visual = toolVisual(tool);
+              return (
+                <button
+                  className={`dash-tool runtime-icon-card ${tool.installed ? "on" : "off"} ${tool.running ? "running" : ""} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
+                  key={tool.id}
+                  onClick={() => setActiveTool(tool)}
+                  title={`${tool.name} · ${!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}`}
+                >
+                  <span className="runtime-icon-shell">
+                    <RuntimeIcon visual={visual} />
+                    <span className="status-lamp" />
+                  </span>
+                  <b>{visual.name}</b>
+                  <i>{!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}</i>
+                </button>
+              );
+            })}
             {(runtime?.agents || []).map((agent) => (
-              <div className={`dash-tool ${agent.status === "running" ? "running on" : "off"}`} key={agent.id}>
-                <span className="dot" />
-                <b>{agent.name}</b>
+              <div className={`dash-tool runtime-icon-card ${agent.status === "running" ? "running on" : "off"} tone-agent has-fallback-icon`} key={agent.id}>
+                <span className="runtime-icon-shell">
+                  <span>{initials(agent.name)}</span>
+                  <span className="status-lamp" />
+                </span>
+                <b>{compactName(agent.name)}</b>
                 <i>{agent.status === "running" ? "运行中" : agent.status}</i>
               </div>
             ))}
@@ -586,7 +709,12 @@ export function Dashboard() {
             <div><span>服务端口</span><b>{deviceScope} 127.0.0.1:{activeService.port}</b></div>
             <div><span>进程 PID</span><b>{activeService.pid || "—"}</b></div>
             <div><span>可自动重启</span><b>{activeService.can_restart ? "是" : "否"}</b></div>
+            <div><span>来源</span><b>{activeService.source || "配置"}</b></div>
+            {activeService.process ? <div><span>进程</span><b>{activeService.process}</b></div> : null}
+            {activeService.cwd ? <div><span>工作目录</span><b>{activeService.cwd}</b></div> : null}
+            {activeService.address ? <div><span>监听地址</span><b>{activeService.address}</b></div> : null}
             <p className="modal-note">{activeService.desc || serviceTitle}</p>
+            {activeService.command ? <p className="modal-note">{activeService.command}</p> : null}
           </div>
         ) : null}
       </Modal>

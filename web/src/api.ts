@@ -530,6 +530,11 @@ export async function approveAction(id: string, decision: "approve" | "reject") 
 export type ServiceRow = {
   name: string; port: number; online: boolean; pid: string | null; can_restart: boolean;
   desc?: string;
+  source?: "配置" | "自动发现" | string;
+  process?: string;
+  command?: string;
+  cwd?: string;
+  address?: string;
 };
 export async function getServices(): Promise<ServiceRow[]> {
   return readJson(await fetch(`${BASE}/services`), "读取本地服务");

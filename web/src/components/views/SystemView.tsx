@@ -301,7 +301,7 @@ export function SystemView() {
           <div className="panel-title" style={{ marginTop: 24 }}>本地服务状态</div>
           <div className="sys-service-grid">
             {services.length === 0 ? <div className="empty">暂无本地服务配置。</div> :
-              services.map((s) => <ServiceTile service={s} onOpen={setActiveService} key={s.name} />)}
+              services.map((s) => <ServiceTile service={s} onOpen={setActiveService} key={`${s.name}:${s.port}`} />)}
           </div>
 
           <div className="panel-title" style={{ marginTop: 24 }}>本地 AI 开发工具</div>
@@ -382,7 +382,12 @@ export function SystemView() {
             <div><span>端口</span><b>127.0.0.1:{activeService.port}</b></div>
             <div><span>进程 PID</span><b>{activeService.pid || "—"}</b></div>
             <div><span>可自动重启</span><b>{activeService.can_restart ? "是" : "否"}</b></div>
+            <div><span>来源</span><b>{activeService.source || "配置"}</b></div>
+            {activeService.process ? <div><span>进程</span><b>{activeService.process}</b></div> : null}
+            {activeService.cwd ? <div><span>工作目录</span><b>{activeService.cwd}</b></div> : null}
+            {activeService.address ? <div><span>监听地址</span><b>{activeService.address}</b></div> : null}
             <p className="modal-note">{activeService.desc || "本地服务"}</p>
+            {activeService.command ? <p className="modal-note">{activeService.command}</p> : null}
           </div>
         ) : null}
       </Modal>

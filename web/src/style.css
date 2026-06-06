@@ -1716,23 +1716,86 @@ button { font: inherit; }
 .dash-panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
 .dash-panel-head b { font: 650 14px var(--font-display); }
 .dash-panel-head span { font: 500 11.5px var(--font-mono); color: var(--meta); }
-.dash-svc-list, .dash-tool-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.dash-svc, .dash-tool {
-  display: flex; align-items: center; gap: 8px; text-align: left;
-  padding: 9px 11px; border-radius: 11px; border: 1px solid var(--border-soft);
-  background: var(--bg); cursor: pointer; transition: border-color .16s var(--ease), transform .1s var(--ease);
+.dash-svc-list, .dash-tool-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 12px 10px; align-items: start; }
+.runtime-icon-card {
+  min-width: 0;
+  min-height: 104px;
+  display: grid;
+  grid-template-rows: 48px minmax(28px, auto) 16px;
+  place-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 10px 6px 9px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color .16s var(--ease), background .16s var(--ease), transform .1s var(--ease);
 }
-.dash-svc:hover, .dash-tool:hover { border-color: var(--accent); }
-.dash-svc:active, .dash-tool:active { transform: scale(.985); }
-.dash-svc .dot, .dash-tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--meta); flex: none; }
-.dash-svc.online .dot { background: var(--good); }
-.dash-svc.offline .dot { background: var(--bad); }
-.dash-tool.on .dot { background: var(--good); }
-.dash-tool.off .dot { background: var(--meta); }
-.dash-tool.running .dot { background: var(--accent); animation: breathe 4s var(--ease) infinite; }
-.dash-svc b, .dash-tool b { font: 600 13px var(--font-body); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dash-svc em { font: 500 11px var(--font-mono); color: var(--meta); font-style: normal; }
-.dash-svc i, .dash-tool i { margin-left: auto; font: 600 11px var(--font-mono); color: var(--muted); font-style: normal; flex: none; }
+.runtime-icon-card:hover { border-color: var(--border-soft); background: var(--surface); }
+.runtime-icon-card:active { transform: scale(.985); }
+.runtime-icon-shell {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.runtime-icon-card.has-real-icon .runtime-icon-shell { background: #fff; border-color: rgba(0,0,0,.08); }
+.runtime-icon-shell img { width: 30px; height: 30px; object-fit: contain; border-radius: 8px; }
+.runtime-icon-shell svg { width: 25px; height: 25px; display: block; }
+.runtime-icon-shell > span:not(.status-lamp) {
+  color: var(--fg);
+  font: 800 13px/1 var(--font-display);
+  letter-spacing: .02em;
+}
+.runtime-icon-card.has-real-icon .runtime-icon-shell > span:not(.status-lamp) { color: #16181d; }
+.runtime-icon-card b {
+  max-width: 100%;
+  color: var(--fg);
+  font: 650 12px/1.16 var(--font-body);
+  letter-spacing: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.runtime-icon-card em,
+.runtime-icon-card i {
+  max-width: 100%;
+  color: var(--meta);
+  font: 650 10.5px/1 var(--font-mono);
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-lamp {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--meta);
+  border: 2px solid var(--card-bg);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.12);
+}
+.dash-svc.online .status-lamp, .dash-tool.on .status-lamp { background: var(--good); }
+.dash-svc.offline .status-lamp, .dash-tool.off .status-lamp { background: var(--meta); }
+.dash-svc.offline .status-lamp { background: var(--bad); }
+.dash-tool.running .status-lamp { background: var(--accent); animation: breathe 4s var(--ease) infinite; }
+.runtime-icon-card.tone-brand .runtime-icon-shell { box-shadow: 0 8px 24px color-mix(in oklab, var(--accent), transparent 84%); }
+.runtime-icon-card.tone-agent.has-fallback-icon .runtime-icon-shell { background: color-mix(in oklab, var(--accent), var(--bg) 86%); }
+.runtime-icon-card.tone-code.has-fallback-icon .runtime-icon-shell { background: color-mix(in oklab, var(--good), var(--bg) 88%); }
+.runtime-icon-card.tone-web.has-fallback-icon .runtime-icon-shell { background: color-mix(in oklab, var(--accent), var(--bg) 90%); }
+.runtime-icon-card.tone-money.has-fallback-icon .runtime-icon-shell { background: color-mix(in oklab, var(--warn), var(--bg) 88%); }
+.runtime-icon-card.tone-note.has-fallback-icon .runtime-icon-shell { background: color-mix(in oklab, var(--good), var(--bg) 90%); }
 .dash-mini-empty { grid-column: 1 / -1; font: 500 12px var(--font-body); color: var(--meta); padding: 4px 2px; }
 
 /* —— 应用与邮件：真实图标卡 —— */
