@@ -8,8 +8,11 @@ const BASE = (() => {
 })();
 
 function apiUrl(path: string) {
-  if (BASE) return new URL(path, BASE);
-  return new URL(path, window.location.origin);
+  // BASE 可能是相对前缀（同源托管时为 "/api"），而 new URL 需要绝对 base。
+  // 统一拼成绝对地址再构造，避免 "Invalid base URL"。
+  const origin = (typeof window !== "undefined" && window.location?.origin) ? window.location.origin : "http://127.0.0.1:8787";
+  const absBase = /^https?:\/\//i.test(BASE) ? BASE : `${origin}${BASE}`;
+  return new URL(`${absBase.replace(/\/$/, "")}${path}`);
 }
 
 async function readJson<T>(res: Response, label: string): Promise<T> {
@@ -129,7 +132,7 @@ export async function sendSelfHeartbeat(): Promise<{ ok: boolean; device: Device
   return readJson(await fetch(`${BASE}/devices/self-heartbeat`, { method: "POST" }), "上报本机心跳");
 }
 
-export async function addSshDevice(input: { host: string; name?: string; user?: string; port?: number; enabled?: boolean }) {
+export async function addSshDevice(input: { host: string; name?: string; user?: string; port?: number; enabled?: boolean; proxy_command?: string; ssh_options?: string[] }) {
   return readJson<any>(await fetch(`${BASE}/devices/ssh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -152,6 +155,8 @@ export type RemoteLeoJarvisConnection = {
   enabled: boolean;
   connected?: boolean;
   last_error?: string;
+  proxy_command?: string;
+  ssh_options?: string[];
 };
 
 export async function listRemoteLeoJarvis(): Promise<RemoteLeoJarvisConnection[]> {

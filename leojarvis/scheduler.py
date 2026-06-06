@@ -121,6 +121,19 @@ def run_reflection() -> dict:
     return result
 
 
+def run_ssh_probe() -> dict:
+    """定时探测已配置的 SSH 设备，把健康摘要写进设备库。
+    同步函数：APScheduler 会在线程池里跑，subprocess(ssh) 不会阻塞事件循环。"""
+    from . import remote_status
+    try:
+        res = remote_status.probe_all()
+        print(f"[ssh-probe] probed {res.get('count', 0)} device(s)")
+        return res
+    except Exception as exc:  # 永不让一次探测失败影响调度器
+        print(f"[ssh-probe] error: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = user_settings.effective("schedule")
     intel_cfg = user_settings.effective("intelligence")
@@ -134,6 +147,11 @@ def setup_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
     sched.add_job(run_system_guard, "interval", minutes=int(cfg.get("guard_minutes", 5)), id="guard", replace_existing=True)
+    # SSH 设备健康探测：定时刷新远程设备状态；启动后 ~15s 先跑一次，让设备页尽快有数据。
+    from datetime import datetime, timedelta
+    sched.add_job(run_ssh_probe, "interval", minutes=int(cfg.get("ssh_probe_minutes", 5)),
+                  id="ssh_probe", replace_existing=True,
+                  next_run_time=datetime.now() + timedelta(seconds=15))
     sched.add_job(run_reflection, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=0, id="reflect", replace_existing=True)
     sched.add_job(lambda: print("[briefing] ready"), "cron",
                   hour=int(cfg.get("briefing_hour", 8)),

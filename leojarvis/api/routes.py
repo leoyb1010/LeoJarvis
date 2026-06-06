@@ -44,6 +44,8 @@ class RemoteDeviceIn(BaseModel):
     user: str = ""
     port: int = 22
     enabled: bool = True
+    proxy_command: str = ""
+    ssh_options: list[str] = Field(default_factory=list)
 
 
 class RemoteLeoJarvisIn(BaseModel):
@@ -54,6 +56,8 @@ class RemoteLeoJarvisIn(BaseModel):
     remote_port: int = 8787
     local_port: int | None = None
     enabled: bool = True
+    proxy_command: str = ""
+    ssh_options: list[str] = Field(default_factory=list)
 
 
 class SettingsIn(BaseModel):
@@ -178,7 +182,7 @@ def list_ssh_devices() -> list[dict]:
 @router.post("/devices/ssh")
 def add_ssh_device(req: RemoteDeviceIn) -> dict:
     from .. import remote_status
-    return {"ok": True, "device": remote_status.add_host(host=req.host, name=req.name, user=req.user, port=req.port, enabled=req.enabled)}
+    return {"ok": True, "device": remote_status.add_host(host=req.host, name=req.name, user=req.user, port=req.port, enabled=req.enabled, proxy_command=req.proxy_command, ssh_options=req.ssh_options)}
 
 
 @router.delete("/devices/ssh/{device_id}")

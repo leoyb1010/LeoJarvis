@@ -49,9 +49,17 @@ def list_connections() -> list[dict[str, Any]]:
     return rows
 
 
+def _clean_options(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [v.strip() for v in value.replace("\n", ",").split(",")]
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
 def add_connection(*, name: str, host: str, user: str = "", ssh_port: int = 22,
                    remote_port: int = 8787, local_port: int | None = None,
-                   enabled: bool = True) -> dict[str, Any]:
+                   enabled: bool = True, proxy_command: str = "", ssh_options: Any = None) -> dict[str, Any]:
     host = host.strip()
     if not host:
         raise ValueError("host is required")
@@ -67,6 +75,8 @@ def add_connection(*, name: str, host: str, user: str = "", ssh_port: int = 22,
         "remote_port": int(remote_port or 8787),
         "local_port": int(local_port or _free_port()),
         "enabled": bool(enabled),
+        "proxy_command": (proxy_command or "").strip(),
+        "ssh_options": _clean_options(ssh_options),
         "connected": False,
         "last_error": "",
         "created_at": int(time.time()),
@@ -106,7 +116,15 @@ def connect(connection_id: str) -> dict[str, Any]:
         "-o", "BatchMode=yes",
         "-o", "ExitOnForwardFailure=yes",
         "-o", "ServerAliveInterval=30",
-        "-o", "ConnectTimeout=8",
+        "-o", "ConnectTimeout=10",
+        "-o", "StrictHostKeyChecking=accept-new",
+    ]
+    proxy = str(row.get("proxy_command") or "").strip()
+    if proxy:
+        cmd += ["-o", f"ProxyCommand={proxy}"]
+    for opt in _clean_options(row.get("ssh_options")):
+        cmd += ["-o", opt]
+    cmd += [
         "-p", str(int(row.get("ssh_port") or 22)),
         "-L", f"127.0.0.1:{local_port}:127.0.0.1:{int(row.get('remote_port') or 8787)}",
         _target(row),

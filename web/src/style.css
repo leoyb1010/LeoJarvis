@@ -2111,3 +2111,25 @@ button { font: inherit; }
 .tuning-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); }
 .tuning-grid label span { font: 600 11.5px var(--font-mono); color: var(--meta); }
 .tuning-grid input { padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--bg); color: var(--fg); }
+
+/* ============ 驾驶舱 SSH 设备健康面板 ============ */
+.ssh-health { display: flex; flex-direction: column; gap: 14px; }
+.ssh-health-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ssh-health-head b { font: 700 18px var(--font-display); }
+.ssh-health-head small { display: block; color: var(--meta); font: 12px var(--font-mono); margin-top: 3px; }
+.ssh-health .pill { font: 650 12px var(--font-mono); padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border-soft); }
+.ssh-health .pill.ok { color: var(--ok, #2bb673); }
+.ssh-health .pill.warn { color: var(--warn, #d29013); }
+.ssh-health .pill.bad { color: var(--bad, #d2483f); }
+.ssh-stats { margin: 0; }
+.ssh-health-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ssh-risk { font-size: 13px; line-height: 1.5; padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+.ssh-risk b { font: 650 11px var(--font-mono); margin-right: 6px; }
+.ssh-risk.bad b { color: var(--bad, #d2483f); }
+.ssh-risk.warn b { color: var(--warn, #d29013); }
+.ssh-risk.good b { color: var(--ok, #2bb673); }
+.ssh-ports { display: flex; flex-wrap: wrap; gap: 7px; }
+.port-pill { font: 600 11.5px var(--font-mono); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border-soft); }
+.port-pill.on { color: var(--ok, #2bb673); border-color: color-mix(in oklab, var(--ok, #2bb673), transparent 60%); }
+.port-pill.off { color: var(--meta); opacity: .6; }
+@media (max-width: 720px) { .ssh-health-cols { grid-template-columns: 1fr; } }

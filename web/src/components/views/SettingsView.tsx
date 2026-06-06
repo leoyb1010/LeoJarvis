@@ -71,8 +71,8 @@ export function SettingsView() {
   const [rssDraft, setRssDraft] = useState<{ name: string; url: string; category: string }>({ name: "", url: "", category: "自定义" });
   const [opmlText, setOpmlText] = useState("");
   const [xUsers, setXUsers] = useState("");
-  const [sshDraft, setSshDraft] = useState({ name: "", host: "", user: "", port: 22 });
-  const [remoteDraft, setRemoteDraft] = useState({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787 });
+  const [sshDraft, setSshDraft] = useState({ name: "", host: "", user: "", port: 22, proxy_command: "" });
+  const [remoteDraft, setRemoteDraft] = useState({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787, proxy_command: "" });
   const [remoteLeoJarvis, setRemoteLeoJarvis] = useState<RemoteLeoJarvisConnection[]>([]);
   const [remoteBusy, setRemoteBusy] = useState("");
 
@@ -133,7 +133,7 @@ export function SettingsView() {
     try {
       const res = await addRemoteLeoJarvis(remoteDraft);
       const connected = await connectRemoteLeoJarvis(res.connection.id);
-      setRemoteDraft({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787 });
+      setRemoteDraft({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787, proxy_command: "" });
       setRemoteLeoJarvis(await listRemoteLeoJarvis());
       if (!connected.ok) setError(connected.error || "SSH tunnel 连接失败，请确认目标机 SSH 授权和 LeoJarvis 已运行。");
     } catch (err) {
@@ -322,6 +322,7 @@ export function SettingsView() {
             <input placeholder="host / IP" value={remoteDraft.host} onChange={(e) => setRemoteDraft({ ...remoteDraft, host: e.target.value })} />
             <input placeholder="ssh user" value={remoteDraft.user} onChange={(e) => setRemoteDraft({ ...remoteDraft, user: e.target.value })} />
             <input type="number" placeholder="远端端口" value={remoteDraft.remote_port} onChange={(e) => setRemoteDraft({ ...remoteDraft, remote_port: Number(e.target.value) || 8787 })} />
+            <input placeholder="ProxyCommand（Cloudflare：cloudflared access ssh --hostname %h）" value={remoteDraft.proxy_command} onChange={(e) => setRemoteDraft({ ...remoteDraft, proxy_command: e.target.value })} />
             <button className="btn sm primary" disabled={!remoteDraft.host || !!remoteBusy} onClick={addRemoteProduct}>{remoteBusy === "add" ? "连接中" : "添加并连接"}</button>
           </div>
         </section>
@@ -331,7 +332,7 @@ export function SettingsView() {
           <div className="panel-title">SSH 设备健康监控</div>
           <p className="settings-note">仅需把本机 SSH key 授权进目标机 <code>~/.ssh/authorized_keys</code>，目标机有 python3 即可。LeoJarvis 通过 SSH 只读执行健康脚本（CPU/内存/磁盘/端口/进程），不读文件内容。</p>
           <div className="settings-list">
-            {remotes.map((r, i) => <div className="settings-row" key={`${r.host}-${i}`}><b>{r.name || r.host}</b><span>{r.user ? `${r.user}@` : ""}{r.host}:{r.port || 22}</span><button className="btn sm ghost" onClick={async () => { if (r.id) await removeSshDevice(r.id); save({ remote_devices: remotes.filter((_, j) => j !== i) }); }}>删除</button></div>)}
+            {remotes.map((r, i) => <div className="settings-row" key={`${r.host}-${i}`}><b>{r.name || r.host}</b><span>{r.user ? `${r.user}@` : ""}{r.host}:{r.port || 22}{r.proxy_command ? " · ProxyCommand" : ""}</span><button className="btn sm ghost" onClick={async () => { if (r.id) await removeSshDevice(r.id); save({ remote_devices: remotes.filter((_, j) => j !== i) }); }}>删除</button></div>)}
             {remotes.length === 0 ? <div className="empty">暂无远程设备。</div> : null}
           </div>
           <div className="settings-form ssh-form">
@@ -339,9 +340,10 @@ export function SettingsView() {
             <input placeholder="host / IP" value={sshDraft.host} onChange={(e) => setSshDraft({ ...sshDraft, host: e.target.value })} />
             <input placeholder="user" value={sshDraft.user} onChange={(e) => setSshDraft({ ...sshDraft, user: e.target.value })} />
             <input type="number" placeholder="端口" value={sshDraft.port} onChange={(e) => setSshDraft({ ...sshDraft, port: Number(e.target.value) || 22 })} />
+            <input placeholder="ProxyCommand（可选，如 Cloudflare：cloudflared access ssh --hostname %h）" value={sshDraft.proxy_command} onChange={(e) => setSshDraft({ ...sshDraft, proxy_command: e.target.value })} />
             <button className="btn sm primary" disabled={!sshDraft.host} onClick={() => {
               save({ remote_devices: [...remotes, { ...sshDraft, enabled: true }] });
-              setSshDraft({ name: "", host: "", user: "", port: 22 });
+              setSshDraft({ name: "", host: "", user: "", port: 22, proxy_command: "" });
             }}>添加 SSH 设备</button>
           </div>
           <button className="btn sm" disabled={remotes.length === 0} onClick={async () => { setError(""); try { const r = await probeSshDevices(); setNotice(`已探测 ${r.count} 台设备，详见「设备健康」页。`); window.setTimeout(() => setNotice(""), 4000); } catch (err) { setError(String(err)); } }}>立即探测全部设备</button>

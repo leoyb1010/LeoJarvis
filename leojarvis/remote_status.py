@@ -161,6 +161,14 @@ def configured_hosts() -> list[dict[str, Any]]:
     return [r for r in rows if isinstance(r, dict)]
 
 
+def _clean_options(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [v.strip() for v in value.replace("\n", ",").split(",")]
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
 def save_hosts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cleaned = []
     for row in rows:
@@ -174,14 +182,22 @@ def save_hosts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "user": str(row.get("user") or "").strip(),
             "port": int(row.get("port") or 22),
             "enabled": bool(row.get("enabled", True)),
+            # 可选：ProxyCommand（如 Cloudflare Tunnel / 跳板机）与额外 -o 选项。
+            "proxy_command": str(row.get("proxy_command") or "").strip(),
+            "ssh_options": _clean_options(row.get("ssh_options")),
         })
     user_settings.patch({"remote_devices": cleaned})
     return cleaned
 
 
-def add_host(*, host: str, name: str = "", user: str = "", port: int = 22, enabled: bool = True) -> dict[str, Any]:
+def add_host(*, host: str, name: str = "", user: str = "", port: int = 22, enabled: bool = True,
+             proxy_command: str = "", ssh_options: Any = None) -> dict[str, Any]:
     rows = configured_hosts()
-    item = {"id": re.sub(r"[^A-Za-z0-9_.-]+", "-", host)[:80], "name": name or host, "host": host, "user": user, "port": port, "enabled": enabled}
+    item = {
+        "id": re.sub(r"[^A-Za-z0-9_.-]+", "-", host)[:80],
+        "name": name or host, "host": host, "user": user, "port": port, "enabled": enabled,
+        "proxy_command": (proxy_command or "").strip(), "ssh_options": _clean_options(ssh_options),
+    }
     rows = [r for r in rows if r.get("id") != item["id"] and r.get("host") != host]
     rows.append(item)
     save_hosts(rows)
@@ -205,11 +221,15 @@ def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
     # Pipe the probe script on stdin (python3 -), so spaces/newlines in the
     # script are never re-split by the remote shell.
     cmd = [
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
         "-o", "StrictHostKeyChecking=accept-new",
-        "-p", str(int(row.get("port") or 22)),
-        target, "python3", "-",
     ]
+    proxy = str(row.get("proxy_command") or "").strip()
+    if proxy:
+        cmd += ["-o", f"ProxyCommand={proxy}"]
+    for opt in _clean_options(row.get("ssh_options")):
+        cmd += ["-o", opt]
+    cmd += ["-p", str(int(row.get("port") or 22)), target, "python3", "-"]
     try:
         out = subprocess.run(cmd, input=_REMOTE_SCRIPT, capture_output=True, text=True, timeout=timeout)
         if out.returncode != 0:
