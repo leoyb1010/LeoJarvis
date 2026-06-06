@@ -15,6 +15,7 @@ node_modules/
 web/node_modules/
 web/dist/
 web/.vite/
+*.tsbuildinfo
 dist/
 desktop/updates/appcast.json
 desktop/macos/.build/
