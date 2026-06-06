@@ -98,7 +98,7 @@ def _target(row: dict[str, Any]) -> str:
     return f"{row.get('user')}@{row.get('host')}" if row.get("user") else str(row.get("host"))
 
 
-def _probe_local_health(local_port: int, timeout: float = 1.0) -> str:
+def _probe_local_health(local_port: int, timeout: float = 3.0) -> str:
     try:
         res = httpx.get(f"http://127.0.0.1:{local_port}/api/health", timeout=timeout)
         if res.status_code < 400:
@@ -123,7 +123,12 @@ def connect(connection_id: str) -> dict[str, Any]:
 
     local_port = int(row.get("local_port") or _free_port())
     row["local_port"] = local_port
-    existing_err = _probe_local_health(local_port)
+    existing_err = ""
+    for _ in range(3):
+        existing_err = _probe_local_health(local_port, timeout=4.0)
+        if not existing_err or "Connection refused" in existing_err:
+            break
+        time.sleep(0.2)
     if not existing_err:
         row["connected"] = True
         row["last_error"] = ""
@@ -156,7 +161,7 @@ def connect(connection_id: str) -> dict[str, Any]:
             if proc.poll() is not None:
                 err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
                 break
-            err = _probe_local_health(local_port, timeout=0.8)
+            err = _probe_local_health(local_port, timeout=1.5)
             if not err:
                 break
             time.sleep(0.25)
