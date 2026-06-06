@@ -60,22 +60,22 @@ fi
 echo "==> [1/3] 构建前端 (web/dist)"
 "$NPM" --prefix web run build
 
-echo "==> [2/3] 停掉旧后端进程 (:$PORT)"
-if lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  lsof -ti "tcp:$PORT" -sTCP:LISTEN | xargs kill 2>/dev/null || true
+echo "==> [2/3] 停掉旧后端进程 (:${PORT})"
+if lsof -ti "tcp:${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  lsof -ti "tcp:${PORT}" -sTCP:LISTEN | xargs kill 2>/dev/null || true
   sleep 1
 fi
 
-echo "==> [3/3] 启动后端单进程 (前端+API 同源 :$PORT)"
+echo "==> [3/3] 启动后端单进程 (前端+API 同源 :${PORT})"
 mkdir -p data
 nohup "$PY" -m leojarvis.main > data/cortex.log 2>&1 &
 PID=$!
-echo "    pid=$PID, 日志: data/cortex.log"
+echo "    pid=${PID}, 日志: data/cortex.log"
 
 # 等待健康检查（curl 加 --max-time，避免端口半占用时无限等待）
 for i in $(seq 1 30); do
-  if curl -s --max-time 2 -o /dev/null "http://127.0.0.1:$PORT/health" 2>/dev/null; then
-    echo "==> 上线成功：打开 http://127.0.0.1:$PORT （进程 pid=$PID，日志 data/cortex.log）"
+  if curl -s --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
+    echo "==> 上线成功：打开 http://127.0.0.1:${PORT} （进程 pid=${PID}，日志 data/cortex.log）"
     exit 0
   fi
   # 后端进程已退出说明启动崩溃，立刻报错并打印日志尾部，不再干等。
