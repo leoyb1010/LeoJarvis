@@ -10,6 +10,7 @@ ollama>=0.3
 openai>=1.40
 pydantic>=2.8
 pydantic-settings>=2.4
+eval_type_backport>=0.2 ; python_version < "3.10"
 python-dateutil>=2.9
 tomli>=2.0 ; python_version < "3.11"
 pytest>=8.0

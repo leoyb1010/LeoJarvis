@@ -7,8 +7,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PORT="${LEOJARVIS_PORT:-${CORTEX_PORT:-8787}}"
-PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY="python3"
+
+resolve_python() {
+  if [ -x "$ROOT/.venv/bin/python" ]; then PY="$ROOT/.venv/bin/python"; return; fi
+  for p in python3.14 python3.13 python3.12 python3.11 python3.10 /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+    if command -v "$p" >/dev/null 2>&1; then PY="$(command -v "$p")"; return; fi
+    if [ -x "$p" ]; then PY="$p"; return; fi
+  done
+  PY=""
+}
+resolve_python
+if [ -z "${PY:-}" ]; then
+  echo "!! 找不到 Python。请安装 Python 3.10+，或确认 .venv/bin/python 存在。" >&2
+  exit 1
+fi
+echo "==> 使用 Python: $PY ($("$PY" --version 2>&1))"
 
 # 解析 npm：非交互 shell 通常不会加载 nvm / homebrew 的 PATH，这里主动找一遍。
 resolve_npm() {
