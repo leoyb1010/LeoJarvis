@@ -164,6 +164,8 @@ export type LocalNotificationApp = {
   configured: boolean;
   status: string;
   detail?: string;
+  mechanism?: string;
+  setup?: string;
   checked_at: number;
 };
 

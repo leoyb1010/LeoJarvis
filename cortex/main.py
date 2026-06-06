@@ -17,11 +17,27 @@ _sched = None
 async def lifespan(app: FastAPI):
     global _sched
     db.init_db()
+    _warm_caches()
     _sched = setup_scheduler()
     _sched.start()
     yield
     if _sched:
         _sched.shutdown()
+
+
+def _warm_caches() -> None:
+    """后台预热慢探测（AI 工具 / 天气），让首屏驾驶舱直接命中缓存，不卡顿。"""
+    import threading
+
+    def _warm() -> None:
+        try:
+            from .agent import sysinfo
+            sysinfo.ai_tool_status(block=True)
+            sysinfo.weather()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[warmup] failed: {exc}")
+
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 app = FastAPI(title="Cortex", version="0.1.0", lifespan=lifespan)

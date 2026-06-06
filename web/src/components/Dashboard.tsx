@@ -358,11 +358,23 @@ export function Dashboard() {
         {activeApp ? (
           <div className="modal-kv">
             <div><span>通知状态</span><b className={`tone-${statusTone(activeApp.status)}`}>{activeApp.status}</b></div>
-            <div><span>新通知数</span><b>{activeApp.has_new ? activeApp.count : 0}</b></div>
+            <div><span>未读通知</span><b>{activeApp.has_new ? activeApp.count : 0}</b></div>
             <div><span>运行状态</span><b>{activeApp.running ? "运行中" : "未运行"}</b></div>
             <div><span>已安装</span><b>{activeApp.installed ? "是" : "否"}</b></div>
             <div><span>检测时间</span><b>{fmtTime(activeApp.checked_at, false)}</b></div>
             <p className="modal-note">{activeApp.detail}</p>
+            {activeApp.mechanism ? (
+              <div className="modal-info-block">
+                <span>如何看到通知</span>
+                <p>{activeApp.mechanism}</p>
+              </div>
+            ) : null}
+            {activeApp.setup ? (
+              <div className="modal-info-block">
+                <span>{activeApp.id === "mail" ? "如何配置邮件" : "如何启用"}</span>
+                <p>{activeApp.setup}</p>
+              </div>
+            ) : null}
             <p className="modal-note privacy">{data.notifications?.privacy}</p>
           </div>
         ) : null}

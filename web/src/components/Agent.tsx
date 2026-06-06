@@ -61,10 +61,10 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
       {compact ? (
         <div className="floating-agent-head">
           <div>
-            <b>Jarvis</b>
-            <span>Command center · pending actions stay here</span>
+            <b>中枢助手</b>
+            <span>对它下达指令，待确认的高风险动作会留在这里</span>
           </div>
-          <button className="icon-btn" onClick={onClose}>Close</button>
+          <button className="icon-btn" onClick={onClose}>关闭</button>
         </div>
       ) : (
         <div className="page-head">
@@ -127,10 +127,10 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
         </div>
 
         <div className="composer">
-          <input value={input} placeholder="Ask Jarvis..."
+          <input value={input} placeholder="对中枢说点什么…"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)} />
-          <button className="btn primary" onClick={() => send(input)} disabled={busy}>Send</button>
+          <button className="btn primary" onClick={() => send(input)} disabled={busy}>发送</button>
         </div>
       </div>
     </div>
@@ -161,10 +161,10 @@ export function FloatingAgent() {
       <button
         className="agent-fab"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Close Jarvis" : "Open Jarvis"}
+        aria-label={open ? "关闭中枢助手" : "打开中枢助手"}
       >
-        <span>Jarvis</span>
-        <b>{open ? "Close" : "Command"}</b>
+        <span>中枢</span>
+        <b>{open ? "关闭" : "对话"}</b>
       </button>
     </div>
   );

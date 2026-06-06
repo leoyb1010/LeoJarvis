@@ -1081,11 +1081,11 @@ button { font: inherit; }
 .note-stat { padding: 16px; }
 .notes-shell {
   display: grid;
-  grid-template-columns: 300px minmax(420px, 1fr) 330px;
+  grid-template-columns: 360px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
-.notes-sidebar, .notes-cards { display: grid; gap: 12px; }
+.notes-browse { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
 .note-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .note-search input, .title-input, .tag-input, .note-textarea {
   min-width: 0;
@@ -1561,31 +1561,25 @@ button { font: inherit; }
   line-height: 1.35;
 }
 
-.notes-workbar {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.1fr) 220px minmax(260px, .9fr) minmax(320px, 1fr);
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 16px;
-  padding: 12px;
-}
 .notes-stat-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 .notes-stat-strip span {
-  display: grid;
-  gap: 4px;
-  padding: 8px 9px;
-  border-radius: 13px;
-  background: var(--surface-warm);
-  color: var(--meta);
-  font: 750 11px var(--font-mono);
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: var(--card-bg);
+  color: var(--muted);
+  font: 600 13px var(--font-body);
 }
 .notes-stat-strip b {
   color: var(--fg);
-  font: 780 18px/1 var(--font-display);
+  font: 700 22px/1 var(--font-display);
+  letter-spacing: -.02em;
 }
 .notes-import-inline {
   display: grid;
@@ -1606,37 +1600,42 @@ button { font: inherit; }
 .file-import.compact {
   min-height: 38px;
   border-style: solid;
-  padding: 8px 12px;
+  padding: 8px 14px;
   white-space: nowrap;
 }
-.notes-shell {
-  grid-template-columns: 270px minmax(480px, 1fr) 300px;
+.notes-list {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
-.notes-sidebar {
-  position: sticky;
-  top: 16px;
-  align-content: start;
-}
-.notes-editor {
-  min-height: 600px;
-  gap: 10px;
-}
+.notes-list::-webkit-scrollbar { width: 7px; }
+.notes-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 7px; }
 .editor-actions {
   align-items: center;
 }
 .editor-actions .icon-btn {
-  min-width: 42px;
-  padding: 7px 9px;
+  padding: 6px 12px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 .editor-actions .btn.primary {
   border-radius: 999px;
   padding-inline: 18px;
 }
+.editor-title-wrap { flex: 1; min-width: 0; }
 .note-card {
-  border-radius: 18px;
-  padding: 14px;
+  border-radius: 15px;
+  padding: 14px 15px;
+}
+.note-card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.note-card-tags span { color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 3px 9px; font: 600 11px var(--font-mono); }
+@media (max-width: 1080px) {
+  .notes-shell { grid-template-columns: 1fr; }
+  .notes-browse { position: static; }
+  .notes-list { max-height: none; }
+  .notes-stat-strip { grid-template-columns: repeat(2, 1fr); }
 }
 
 
@@ -1882,3 +1881,11 @@ button { font: inherit; }
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sys-modules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* —— 通知详情：机制 / 配置说明块 —— */
+.modal-info-block { margin-top: 14px; padding: 12px 14px; border-radius: 13px; background: var(--surface); border: 1px solid var(--border-soft); }
+.modal-info-block span { display: block; font: 700 11px var(--font-mono); letter-spacing: .05em; color: var(--accent); margin-bottom: 5px; }
+.modal-info-block p { margin: 0; font: 400 13px/1.65 var(--font-body); color: var(--fg-2); }
+
+/* —— 个人记事编辑区高度自适应 —— */
+.notes-editor { min-height: min(640px, calc(100vh - 220px)); }

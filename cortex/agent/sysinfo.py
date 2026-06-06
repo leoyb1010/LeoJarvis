@@ -12,6 +12,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -183,6 +184,45 @@ def _level(ok: bool, warn: bool = False) -> str:
     return "健康"
 
 
+def _friendly_process_name(raw: str) -> str:
+    """把进程路径整理成人类可读名字：.app 取应用名，系统组件给中文别名。"""
+    path = raw.strip()
+    # macOS 应用：/Applications/WeChat.app/.../WeChatAppEx Helper → WeChat
+    if ".app/" in path:
+        seg = path.split(".app/")[0]
+        app = seg.split("/")[-1]
+        helper = path.rsplit("/", 1)[-1]
+        # Helper / Renderer 等子进程标注用途，但主名取应用名。
+        role = ""
+        low = helper.lower()
+        if "renderer" in low:
+            role = "渲染进程"
+        elif "gpu" in low:
+            role = "GPU"
+        elif "helper" in low:
+            role = "辅助进程"
+        return f"{app} · {role}" if role and role not in app else app
+    base = path.rsplit("/", 1)[-1]
+    known = {
+        "WindowServer": "WindowServer · 图形合成",
+        "sysmond": "sysmond · 系统监控守护",
+        "kernel_task": "kernel_task · 内核",
+        "launchd": "launchd · 启动守护",
+        "mds_stores": "Spotlight 索引",
+        "mds": "Spotlight 索引",
+        "mdworker": "Spotlight 索引",
+        "coreaudiod": "核心音频",
+        "WindowManager": "窗口管理",
+        "distnoted": "通知分发",
+        "verge-mihomo": "Clash 代理内核",
+    }
+    if base in known:
+        return known[base]
+    if base.startswith("python") or base == ".venv/bin/python":
+        return "Python 进程"
+    return base
+
+
 def _process_rows(limit: int = 8) -> list[dict]:
     top = _run(["ps", "axo", "pid,pcpu,pmem,comm", "-r"], timeout=6)
     rows = []
@@ -194,7 +234,8 @@ def _process_rows(limit: int = 8) -> list[dict]:
             "pid": parts[0],
             "cpu": float(parts[1]) if parts[1].replace(".", "", 1).isdigit() else 0,
             "memory": float(parts[2]) if parts[2].replace(".", "", 1).isdigit() else 0,
-            "command": parts[3],
+            "command": _friendly_process_name(parts[3]),
+            "raw_command": parts[3],
         })
     return rows
 
@@ -244,7 +285,85 @@ def _cmd_version(path: str, args: list[str] | None = None) -> str:
     return out.splitlines()[0][:160] if out else "已安装，版本读取失败"
 
 
-def ai_tool_status() -> list[dict]:
+# npm 最新版查询要走网络（每个包 ~800ms），缓存 30 分钟，避免驾驶舱每 8 秒轮询时阻塞。
+_NPM_LATEST_CACHE: dict[str, tuple[float, str]] = {}
+# 整个 AI 工具状态（含 pgrep / --version / npm）变化很慢。采用 stale-while-revalidate：
+# 请求永远立刻拿缓存，过期则后台线程刷新，绝不阻塞驾驶舱轮询。
+_AI_TOOLS_CACHE: dict[str, object] = {"ts": 0.0, "data": None}
+_AI_TOOLS_LOCK = threading.Lock()
+_AI_TOOLS_REFRESHING = threading.Event()
+
+
+def _npm_latest(package: str) -> str:
+    now = time.time()
+    hit = _NPM_LATEST_CACHE.get(package)
+    if hit:
+        # 成功结果缓存 30 分钟；失败（未检测）只缓存 5 分钟后重试，避免每次轮询都等网络超时。
+        ttl = 1800 if hit[1] != "未检测" else 300
+        if now - hit[0] < ttl:
+            return hit[1]
+    latest = "未检测"
+    if shutil.which("npm"):
+        latest_out = _run(["npm", "view", package, "version"], timeout=5)
+        if latest_out and "ERR!" not in latest_out and "执行失败" not in latest_out:
+            latest = latest_out.splitlines()[-1].strip()
+    _NPM_LATEST_CACHE[package] = (now, latest)
+    return latest
+
+
+def ai_tool_status(*, max_age: float = 45.0, block: bool = False) -> list[dict]:
+    """AI 工具状态。stale-while-revalidate：有缓存就立刻返回，过期则后台刷新。
+
+    block=True 时（启动预热 / 系统状态页首开）会同步等待一次完整探测。
+    """
+    now = time.time()
+    cached = _AI_TOOLS_CACHE.get("data")
+    fresh = cached is not None and now - float(_AI_TOOLS_CACHE.get("ts", 0)) < max_age
+
+    if cached is None and block:
+        return _refresh_ai_tools()
+    if cached is not None and not fresh:
+        # 触发一次后台刷新（避免并发重复刷新），本次仍返回旧值。
+        if not _AI_TOOLS_REFRESHING.is_set():
+            _AI_TOOLS_REFRESHING.set()
+            threading.Thread(target=_refresh_ai_tools_bg, daemon=True).start()
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    # 无缓存且非阻塞：返回占位，由后台填充，首屏不卡。
+    if not _AI_TOOLS_REFRESHING.is_set():
+        _AI_TOOLS_REFRESHING.set()
+        threading.Thread(target=_refresh_ai_tools_bg, daemon=True).start()
+    return _ai_tools_placeholder()
+
+
+def _ai_tools_placeholder() -> list[dict]:
+    return [
+        {"id": tid, "name": name, "installed": shutil.which(cmd) is not None,
+         "path": shutil.which(cmd), "current_version": "检测中", "latest_version": "检测中",
+         "update_state": "检测中", "running": False, "running_detail": [], "launch": cmd,
+         "checked_at": int(time.time()), "advice": "正在检测本地 AI 开发工具…"}
+        for tid, name, cmd in (("claude_code", "Claude Code", "claude"),
+                               ("codex_cli", "Codex CLI", "codex"),
+                               ("grok_build", "Grok Build", "grokbuild"))
+    ]
+
+
+def _refresh_ai_tools_bg() -> None:
+    try:
+        _refresh_ai_tools()
+    finally:
+        _AI_TOOLS_REFRESHING.clear()
+
+
+def _refresh_ai_tools() -> list[dict]:
+    with _AI_TOOLS_LOCK:
+        rows = _probe_ai_tools()
+        _AI_TOOLS_CACHE["ts"] = time.time()
+        _AI_TOOLS_CACHE["data"] = rows
+        return rows
+
+
+def _probe_ai_tools() -> list[dict]:
     tools = [
         {
             "id": "claude_code",
@@ -283,10 +402,8 @@ def ai_tool_status() -> list[dict]:
                     running.append(line[:180])
         latest = "未检测"
         update_state = "未知"
-        if found and tool.get("package") and shutil.which("npm"):
-            latest_out = _run(["npm", "view", tool["package"], "version"], timeout=5)
-            if latest_out and "ERR!" not in latest_out and "执行失败" not in latest_out:
-                latest = latest_out.splitlines()[-1].strip()
+        if found and tool.get("package"):
+            latest = _npm_latest(tool["package"])
         current = _cmd_version(found) if found else ""
         if found and latest != "未检测" and latest and latest not in current:
             update_state = "可能可更新"
@@ -309,13 +426,30 @@ def ai_tool_status() -> list[dict]:
     return rows
 
 
-def _is_running(patterns: list[str]) -> tuple[bool, list[str]]:
+def _is_running(patterns: list[str], *, exclude: list[str] | None = None) -> tuple[bool, list[str]]:
+    """检测进程是否在跑。返回 (是否运行, 脱敏后的进程摘要)。
+
+    隐私：只回 PID + 友好进程名，绝不返回包含邮箱 / 家目录 / 命令行参数的原始行。
+    exclude 用于排除误匹配（例如 "Mail" 不应命中 "MailMaster"）。
+    """
     matches: list[str] = []
+    seen_pids: set[str] = set()
+    excl = [e.lower() for e in (exclude or [])]
     for pattern in patterns:
         out = _run(["pgrep", "-fl", pattern], timeout=3)
         for line in out.splitlines():
-            if line and "pgrep" not in line and line not in matches:
-                matches.append(line[:180])
+            if not line or "pgrep" in line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                continue
+            pid, cmd = parts[0], parts[1]
+            if pid in seen_pids:
+                continue
+            if any(e in cmd.lower() for e in excl):
+                continue
+            seen_pids.add(pid)
+            matches.append(f"{_friendly_process_name(cmd)} · PID {pid}")
     return bool(matches), matches[:3]
 
 
@@ -422,15 +556,16 @@ def local_notifications() -> dict:
             "id": "mail",
             "name": "邮件",
             "apps": ["Mail"],
-            "bundle_hints": ["com.apple.mail", "Mail"],
-            "processes": ["Mail"],
+            "bundle_hints": ["com.apple.mail"],
+            "processes": ["MacOS/Mail"],
+            "exclude": ["MailMaster", "mailmaster"],
             "configured": mail_configured,
             "category": "邮件",
         },
     ]
     apps = []
     for app in targets:
-        running, detail = _is_running(app["processes"])
+        running, detail = _is_running(app["processes"], exclude=app.get("exclude"))
         count = sum(v for bundle, v in counts.items() if any(h.lower() in bundle.lower() for h in app["bundle_hints"]))
         installed = _find_app(app["apps"]) is not None
         if not installed:
@@ -443,17 +578,31 @@ def local_notifications() -> dict:
             status = "有新通知" if count > 0 else "无新通知"
         # 隐私优先：只取应用级计数，绝不读取通知标题/正文/联系人，避免触发账号风控。
         if status == "有新通知":
-            detail_text = f"{app['name']} 有 {count} 条新通知（仅应用级计数，未读取任何内容）。"
+            detail_text = f"{app['name']} 有 {count} 条未读通知（仅应用级计数，未读取任何内容）。"
         elif status == "无新通知":
             detail_text = f"{app['name']} 最近 24 小时没有新通知。"
         elif status == "未授权":
-            detail_text = "需要在「系统设置 → 隐私与安全性 → 完全磁盘访问」中授权后才能读取应用级计数。"
+            detail_text = "需要在「系统设置 → 隐私与安全性 → 完全磁盘访问」中，把运行 Cortex 的终端（或 Python）加入并勾选，重启后端后即可读取应用级计数。"
         elif status == "未安装":
             detail_text = f"未在本机检测到 {app['name']}。"
         elif status == "未配置":
-            detail_text = f"{app['name']} 尚未在 settings.toml 完成账户配置。"
+            detail_text = f"{app['name']} 尚未完成配置，请按下方说明设置。"
         else:
-            detail_text = "暂未检测到通知数据库，稍后会自动重试。"
+            detail_text = "暂未检测到 macOS 通知数据库，稍后会自动重试。"
+
+        # 机制说明：解释「即时通讯通知是如何看到的」，让用户清楚没有抓取/登录风险。
+        if app["id"] == "mail":
+            mechanism = "邮件未读数读取本机 macOS 通知数据库的应用级计数，不连接你的邮箱服务器、不读邮件内容。"
+            setup = ("启用方式：① 在系统「邮件」App 里登录邮箱并开启通知；"
+                     "② 系统设置 → 通知 → 邮件 → 允许通知；"
+                     "③ 给运行 Cortex 的终端授予「完全磁盘访问」。"
+                     "若要主动拉取未读邮件，可在 config/settings.toml 的 [email] 填 imap_host / username / password 并 enabled=true。")
+        else:
+            mechanism = (f"{app['name']} 的未读数来自 macOS 系统通知中心的应用级计数（仅数字），"
+                         "Cortex 不登录该应用、不读取消息内容、不模拟客户端，因此不会触发账号风控。")
+            setup = ("启用方式：在 macOS「系统设置 → 通知」中允许该应用发送通知，"
+                     "并给运行 Cortex 的终端授予「完全磁盘访问」，即可读取其未读计数。")
+
         apps.append({
             "id": app["id"],
             "name": app["name"],
@@ -467,6 +616,8 @@ def local_notifications() -> dict:
             "configured": app["configured"],
             "status": status,
             "detail": detail_text,
+            "mechanism": mechanism,
+            "setup": setup,
             "checked_at": int(time.time()),
         })
     return {
