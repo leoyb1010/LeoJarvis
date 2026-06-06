@@ -98,6 +98,16 @@ def _target(row: dict[str, Any]) -> str:
     return f"{row.get('user')}@{row.get('host')}" if row.get("user") else str(row.get("host"))
 
 
+def _probe_local_health(local_port: int, timeout: float = 1.0) -> str:
+    try:
+        res = httpx.get(f"http://127.0.0.1:{local_port}/api/health", timeout=timeout)
+        if res.status_code < 400:
+            return ""
+        return f"HTTP {res.status_code}"
+    except Exception as exc:
+        return str(exc)
+
+
 def connect(connection_id: str) -> dict[str, Any]:
     rows = _rows()
     row = next((r for r in rows if r.get("id") == connection_id), None)
@@ -105,9 +115,11 @@ def connect(connection_id: str) -> dict[str, Any]:
         return {"ok": False, "error": "未知远程 LeoJarvis"}
     proc = _TUNNELS.get(connection_id)
     if proc and proc.poll() is None:
-        row["connected"] = True
+        err = _probe_local_health(int(row.get("local_port") or 0))
+        row["connected"] = not bool(err)
+        row["last_error"] = err[:300]
         _save(rows)
-        return {"ok": True, "connection": row}
+        return {"ok": not bool(err), "error": err, "connection": row}
 
     local_port = int(row.get("local_port") or _free_port())
     row["local_port"] = local_port
@@ -131,13 +143,22 @@ def connect(connection_id: str) -> dict[str, Any]:
     ]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        time.sleep(1.0)
-        if proc.poll() is not None:
-            err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
+        err = ""
+        for _ in range(24):
+            if proc.poll() is not None:
+                err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
+                break
+            err = _probe_local_health(local_port, timeout=0.8)
+            if not err:
+                break
+            time.sleep(0.25)
+        if err:
+            if proc.poll() is None:
+                proc.terminate()
             row["connected"] = False
-            row["last_error"] = err
+            row["last_error"] = err[:300]
             _save(rows)
-            return {"ok": False, "error": err, "connection": row}
+            return {"ok": False, "error": err[:300], "connection": row}
         _TUNNELS[connection_id] = proc
         row["connected"] = True
         row["last_error"] = ""
