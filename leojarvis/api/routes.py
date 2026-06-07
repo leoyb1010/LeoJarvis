@@ -414,22 +414,34 @@ def devices(limit: int = 50) -> list[dict]:
     db.upsert_device_heartbeat(local)
     now = int(time.time())
     connections = remote_cortex.list_connections(auto_connect=False)
-    refreshed_connections = []
+    refreshed_connections = list(connections)
+    stale_checks: list[tuple[int, str, dict]] = []
     # 设备页需要真实 LeoJarvis HTTP 状态：只看 SSH 本地端口会产生“假在线、设备离线”。
-    for conn in connections:
+    for idx, conn in enumerate(connections):
         cid = str(conn.get("id") or "")
         if not cid:
             continue
         if not conn.get("enabled", True):
             db.delete_device_heartbeat(cid)
-            refreshed_connections.append(conn)
             continue
         last_health_ts = int(conn.get("last_health_ts") or 0)
-        if conn.get("connected") and last_health_ts and now - last_health_ts < 60:
-            refreshed_connections.append(conn)
-        else:
-            checked = remote_cortex.validate_connection(cid, timeout=3.0, reconnect_async=True)
-            refreshed_connections.append(checked or conn)
+        if not (conn.get("connected") and last_health_ts and now - last_health_ts < 60):
+            stale_checks.append((idx, cid, conn))
+    if stale_checks:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _check(item: tuple[int, str, dict]) -> tuple[int, dict | None]:
+            idx, cid, conn = item
+            try:
+                return idx, remote_cortex.validate_connection(cid, timeout=3.0, reconnect_async=True)
+            except Exception as exc:
+                print(f"[devices] remote health validation failed: {conn.get('name') or cid}: {exc}")
+                return idx, None
+
+        with ThreadPoolExecutor(max_workers=min(4, len(stale_checks))) as pool:
+            for idx, checked in pool.map(_check, stale_checks):
+                if checked:
+                    refreshed_connections[idx] = checked
     connections = refreshed_connections
     # 远端摘要后台刷新（去重，单线程在跑就不再开），下一次轮询即更新——不阻塞首屏。
     with _DEVICE_REFRESH_LOCK:
