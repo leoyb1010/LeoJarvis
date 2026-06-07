@@ -396,13 +396,7 @@ final class ServiceController {
     }
 
     func isHealthy() async -> Bool {
-        guard let url = URL(string: "\(localBaseURL.absoluteString)/api/health") else { return false }
-        do {
-            let (_, response) = try await URLSession.shared.data(from: url)
-            return (response as? HTTPURLResponse)?.statusCode == 200
-        } catch {
-            return false
-        }
+        await request(path: "/api/health", timeout: 2) != nil
     }
 
     func waitUntilHealthy(seconds: Int) async {
@@ -418,7 +412,7 @@ final class ServiceController {
         snapshot.healthy = await isHealthy()
         guard snapshot.healthy else { return snapshot }
 
-        if let cockpit = await getJSON(path: "/api/cockpit/overview") {
+        if let cockpit = await getJSON(path: "/api/cockpit/overview", timeout: 8) {
             if let health = cockpit["health"] as? [String: Any] {
                 snapshot.healthScore = intValue(health["score"])
                 snapshot.servicesOnline = intValue(health["services_online"])
@@ -437,39 +431,28 @@ final class ServiceController {
             }
         }
 
-        if let remotes = await getJSONArray(path: "/api/remote-cortex") {
+        if let remotes = await getJSONArray(path: "/api/remote-cortex", timeout: 4) {
             snapshot.remoteTotal = remotes.count
             snapshot.remoteConnected = remotes.filter { ($0["connected"] as? Bool) == true }.count
         }
         return snapshot
     }
 
-    func getJSON(path: String) async -> [String: Any]? {
-        guard let url = URL(string: "\(localBaseURL.absoluteString)\(path)") else { return nil }
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            return try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        } catch {
-            return nil
-        }
+    func getJSON(path: String, timeout: TimeInterval = 5) async -> [String: Any]? {
+        guard let data = await request(path: path, timeout: timeout)?.0 else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    func getJSONArray(path: String) async -> [[String: Any]]? {
-        guard let url = URL(string: "\(localBaseURL.absoluteString)\(path)") else { return nil }
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            return try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        } catch {
-            return nil
-        }
+    func getJSONArray(path: String, timeout: TimeInterval = 5) async -> [[String: Any]]? {
+        guard let data = await request(path: path, timeout: timeout)?.0 else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
     }
 
     func post(path: String, json: String) async -> Bool {
         guard let url = URL(string: "\(localBaseURL.absoluteString)\(path)") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = json.data(using: .utf8)
         do {
@@ -478,6 +461,19 @@ final class ServiceController {
             return code >= 200 && code < 300
         } catch {
             return false
+        }
+    }
+
+    private func request(path: String, timeout: TimeInterval) async -> (Data, HTTPURLResponse)? {
+        guard let url = URL(string: "\(localBaseURL.absoluteString)\(path)") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            return (data, http)
+        } catch {
+            return nil
         }
     }
 
@@ -694,7 +690,7 @@ struct UpdateCheckResult {
 
 final class UpdateManager {
     private let repoPath: String
-    private let currentVersion = "0.1.0"
+    private let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
 
     init(repoPath: String) {
         self.repoPath = repoPath

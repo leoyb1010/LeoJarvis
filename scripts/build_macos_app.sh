@@ -6,10 +6,14 @@ APP_NAME="LeoJarvis"
 VERSION="${LEOJARVIS_APP_VERSION:-0.1.0}"
 ARCH="$(uname -m)"
 DIST="${ROOT}/dist/macos"
-STAGING="${DIST}/staging"
 APP="${DIST}/${APP_NAME}.app"
 DMG="${DIST}/${APP_NAME}-${VERSION}-${ARCH}.dmg"
 SWIFT_DIR="${ROOT}/desktop/macos"
+BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/${APP_NAME}.build.XXXXXX")"
+STAGING="${BUILD_ROOT}/staging"
+APP_BUILD="${BUILD_ROOT}/${APP_NAME}.app"
+DMG_BUILD="${BUILD_ROOT}/${APP_NAME}-${VERSION}-${ARCH}.dmg"
+trap 'rm -rf "${BUILD_ROOT}"' EXIT
 
 export PATH="${HOME}/.nvm/versions/node/v24.15.0/bin:${HOME}/.volta/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
 if ! command -v npm >/dev/null 2>&1; then
@@ -30,17 +34,17 @@ if [[ ! -x "${BIN}" ]]; then
 fi
 
 echo "==> Assemble ${APP_NAME}.app"
-rm -rf "${APP}" "${STAGING}" "${DMG}"
-mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources" "${STAGING}"
-cp "${BIN}" "${APP}/Contents/MacOS/${APP_NAME}"
-chmod +x "${APP}/Contents/MacOS/${APP_NAME}"
+rm -rf "${APP}" "${DMG}"
+mkdir -p "${DIST}" "${APP_BUILD}/Contents/MacOS" "${APP_BUILD}/Contents/Resources" "${STAGING}"
+install -m 755 "${BIN}" "${APP_BUILD}/Contents/MacOS/${APP_NAME}"
+chmod +x "${APP_BUILD}/Contents/MacOS/${APP_NAME}"
 
 if [[ -f "${ROOT}/web/public/brand-mark.png" ]]; then
-  cp "${ROOT}/web/public/brand-mark.png" "${APP}/Contents/Resources/brand-mark.png"
+  ditto --norsrc --noextattr "${ROOT}/web/public/brand-mark.png" "${APP_BUILD}/Contents/Resources/brand-mark.png"
 fi
 
 if [[ -f "${ROOT}/web/public/app-icon.png" ]]; then
-  cp "${ROOT}/web/public/app-icon.png" "${APP}/Contents/Resources/app-icon.png"
+  ditto --norsrc --noextattr "${ROOT}/web/public/app-icon.png" "${APP_BUILD}/Contents/Resources/app-icon.png"
   ICONSET="${STAGING}/${APP_NAME}.iconset"
   rm -rf "${ICONSET}"
   mkdir -p "${ICONSET}"
@@ -54,11 +58,11 @@ if [[ -f "${ROOT}/web/public/app-icon.png" ]]; then
   sips -z 512 512 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_256x256@2x.png" >/dev/null
   sips -z 512 512 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_512x512.png" >/dev/null
   sips -z 1024 1024 "${ROOT}/web/public/app-icon.png" --out "${ICONSET}/icon_512x512@2x.png" >/dev/null
-  iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/LeoJarvis.icns"
+  iconutil -c icns "${ICONSET}" -o "${APP_BUILD}/Contents/Resources/LeoJarvis.icns"
   rm -rf "${ICONSET}"
 fi
 
-INFO="${APP}/Contents/Info.plist"
+INFO="${APP_BUILD}/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Clear dict" "${INFO}" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.leo.leojarvis.desktop" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${APP_NAME}" "${INFO}"
@@ -75,29 +79,39 @@ INFO="${APP}/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSUserNotificationAlertStyle string alert" "${INFO}"
 
 echo "==> Clean metadata and sign app"
-xattr -cr "${APP}" 2>/dev/null || true
-find "${APP}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+xattr -cr "${APP_BUILD}" 2>/dev/null || true
+find "${APP_BUILD}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+find "${APP_BUILD}" -name "._*" -delete
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "${APP}" >/dev/null
-  codesign --verify --deep --strict "${APP}" >/dev/null
+  codesign --force --deep --sign - "${APP_BUILD}" >/dev/null
+  codesign --verify --deep --strict "${APP_BUILD}" >/dev/null
 fi
 
 echo "==> Create DMG"
-cp -R "${APP}" "${STAGING}/${APP_NAME}.app"
-if [[ -f "${APP}/Contents/Resources/LeoJarvis.icns" ]]; then
-  cp "${APP}/Contents/Resources/LeoJarvis.icns" "${STAGING}/.VolumeIcon.icns"
+ditto --norsrc --noextattr "${APP_BUILD}" "${STAGING}/${APP_NAME}.app"
+if [[ -f "${APP_BUILD}/Contents/Resources/LeoJarvis.icns" ]]; then
+  ditto --norsrc --noextattr "${APP_BUILD}/Contents/Resources/LeoJarvis.icns" "${STAGING}/.VolumeIcon.icns"
   if command -v SetFile >/dev/null 2>&1; then
     SetFile -a C "${STAGING}" || true
   fi
 fi
 ln -s /Applications "${STAGING}/Applications"
-hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING}" -ov -format UDZO "${DMG}"
-rm -rf "${STAGING}"
-find "${APP}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING}" -ov -format UDZO "${DMG_BUILD}"
+xattr -cr "${APP_BUILD}" 2>/dev/null || true
+find "${APP_BUILD}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+find "${APP_BUILD}" -name "._*" -delete
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "${APP}" >/dev/null
-  codesign --verify --deep --strict "${APP}" >/dev/null
+  codesign --force --deep --sign - "${APP_BUILD}" >/dev/null
+  codesign --verify --deep --strict "${APP_BUILD}" >/dev/null
 fi
+ditto --norsrc --noextattr "${APP_BUILD}" "${APP}"
+xattr -cr "${APP}" 2>/dev/null || true
+find "${APP}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+find "${APP}" -name "._*" -delete
+# Desktop/File Provider folders can re-add FinderInfo to .app bundles after copy.
+# The canonical signed artifact is verified above in the temp build folder and
+# again when packaged into the DMG.
+ditto --norsrc --noextattr "${DMG_BUILD}" "${DMG}"
 xattr -c "${DMG}" 2>/dev/null || true
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --sign - "${DMG}" >/dev/null
