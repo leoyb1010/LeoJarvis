@@ -16,10 +16,14 @@ import {
   type SimpleIcon,
 } from "simple-icons";
 import {
+  closeTerminalSession,
+  createTerminalSession,
   getCockpitOverview,
   getRemoteCockpit,
   listRemoteLeoJarvis,
+  readTerminalSession,
   upgradeAiTool,
+  writeTerminalSession,
   type AiToolStatus,
   type BriefingItem,
   type CockpitGithubCard,
@@ -27,6 +31,7 @@ import {
   type LocalNotificationApp,
   type RemoteLeoJarvisConnection,
   type ServiceRow,
+  type TerminalSession,
 } from "../api";
 import { PageSkeleton } from "./Skeleton";
 import { Modal } from "./Modal";
@@ -84,6 +89,19 @@ function storeSamples(rows: MetricSample[]) {
 function fmtTime(ts?: number, ms = true) {
   if (!ts) return "—";
   return new Date(ms ? ts : ts * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatRepoSpeed(speed?: number | null) {
+  if (speed == null || !Number.isFinite(speed)) return "观察";
+  const value = Math.abs(speed) >= 10 ? speed.toFixed(0) : speed.toFixed(2);
+  return `${speed > 0 ? "+" : ""}${value}/天`;
+}
+
+function cleanTerminalOutput(value: string) {
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
 // 微型趋势线：保留克制，但加入低噪网格底，避免六格像生硬折线。
@@ -251,6 +269,12 @@ export function Dashboard() {
   const [remotes, setRemotes] = useState<RemoteLeoJarvisConnection[]>([]);
   const [activeDevice, setActiveDevice] = useState("local");
   const [deviceError, setDeviceError] = useState("");
+  const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
+  const [terminalDevice, setTerminalDevice] = useState("local");
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalBusy, setTerminalBusy] = useState(false);
+  const [terminalError, setTerminalError] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -283,6 +307,24 @@ export function Dashboard() {
     return () => { alive = false; window.clearInterval(t); };
   }, [activeDevice]);
 
+  useEffect(() => {
+    if (!terminalSession?.id) return;
+    let alive = true;
+    const read = async () => {
+      try {
+        const res = await readTerminalSession(terminalSession.id, terminalDevice);
+        if (!alive) return;
+        if (res.output) setTerminalOutput((prev) => `${prev}${res.output}`.slice(-50000));
+        if (res.session) setTerminalSession(res.session);
+      } catch (err) {
+        if (alive) setTerminalError(String(err));
+      }
+    };
+    read();
+    const t = window.setInterval(read, 700);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [terminalSession?.id, terminalDevice]);
+
   const series = useMemo(() => ({
     health: samples.map((s) => s.health),
     disk: samples.map((s) => s.disk),
@@ -293,6 +335,7 @@ export function Dashboard() {
     intel: samples.map((s) => s.intel),
     memory: samples.map((s) => s.memory),
   }), [samples]);
+  const terminalDisplay = useMemo(() => cleanTerminalOutput(terminalOutput), [terminalOutput]);
 
   const validRemotes = remotes.filter((r) => r.enabled !== false);
   const switchLabel = activeDevice === "local" ? "本机 LeoJarvis"
@@ -305,7 +348,7 @@ export function Dashboard() {
   const deviceScope = isLocalDevice ? "本机" : "远端";
   const statusTitle = isLocalDevice ? "本机状态" : "远程状态";
   const serviceTitle = isLocalDevice ? "本机服务" : "远端服务";
-  const agentTitle = isLocalDevice ? "本机编程与 Agent" : "远端编程与 Agent";
+  const agentTitle = isLocalDevice ? "本机编程服务" : "远端编程服务";
   const appsTitle = isLocalDevice ? "本机应用与邮件监控" : "远端应用与邮件监控";
   const sourceMeta = isLocalDevice ? "127.0.0.1:8787" : switchSub;
   const onDeviceChange = (value: string) => {
@@ -318,6 +361,10 @@ export function Dashboard() {
     setActiveTool(null);
     setActiveService(null);
     setUpgradeResult("");
+    setTerminalSession(null);
+    setTerminalOutput("");
+    setTerminalInput("");
+    setTerminalError("");
   };
   const deviceSwitch = (
     <div className="dash-device-switch card">
@@ -367,6 +414,46 @@ export function Dashboard() {
       setUpgradeResult(String(err));
     } finally {
       setUpgradingTool("");
+    }
+  }
+
+  async function closeToolTerminal() {
+    if (terminalSession) {
+      try { await closeTerminalSession(terminalSession.id, terminalDevice); } catch { /* best-effort */ }
+    }
+    setTerminalSession(null);
+    setTerminalOutput("");
+    setTerminalInput("");
+    setTerminalError("");
+  }
+
+  async function openToolTerminal(tool: AiToolStatus) {
+    if (!tool.installed || terminalBusy) return;
+    setTerminalBusy(true);
+    setTerminalError("");
+    setTerminalOutput("");
+    try {
+      if (terminalSession) await closeToolTerminal();
+      const res = await createTerminalSession(tool.id, "", activeDevice);
+      if (!res.ok || !res.session) throw new Error(res.error || "CLI 控制台启动失败");
+      setTerminalDevice(activeDevice);
+      setTerminalSession(res.session);
+      setTerminalOutput(res.output || "");
+    } catch (err) {
+      setTerminalError(String(err));
+    } finally {
+      setTerminalBusy(false);
+    }
+  }
+
+  async function sendTerminalText() {
+    if (!terminalSession || !terminalInput.trim()) return;
+    const text = terminalInput.endsWith("\n") ? terminalInput : `${terminalInput}\n`;
+    setTerminalInput("");
+    try {
+      await writeTerminalSession(terminalSession.id, text, terminalDevice);
+    } catch (err) {
+      setTerminalError(String(err));
     }
   }
 
@@ -523,55 +610,60 @@ export function Dashboard() {
         ))}
       </div>
 
-      {/* 资讯：点击呼出详情卡片 */}
-      <SectionTitle title="今日关键情报" meta="已筛选 · 已评分 · 已中文化 · 点击查看详情" />
-      {topBriefing.length === 0 ? (
-        <div className="empty">暂无足够高价值的信息进入驾驶舱。</div>
-      ) : (
-        <div className="dash-intel-layout">
-          <button className="dash-intel-hero" onClick={() => setActiveSignal(topBriefing[0])}>
-            <span className={`dash-pri pri-${topBriefing[0].priority || "观察"}`}>{topBriefing[0].priority || "观察"}</span>
-            <h3>{topBriefing[0].title}</h3>
-            <p>{topBriefing[0].take}</p>
-            <div><em>{topBriefing[0].source}</em><em>{fmtTime(topBriefing[0].ts)}</em></div>
-          </button>
-          <div className="dash-intel-rail">
-            {topBriefing.slice(1).map((item) => (
-              <button className="dash-feed-card compact" key={item.event_id} onClick={() => setActiveSignal(item)}>
-                <div className="dash-feed-top">
-                  <span className={`dash-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
-                  <em>{item.source}</em>
-                </div>
-                <b>{item.title}</b>
-                <p>{item.take}</p>
-              </button>
-            ))}
+      <SectionTitle title="今日情报与雷达" meta="处理后信息 · 点击查看详情" />
+      <div className="dash-signal-grid">
+        <section className="dash-signal-panel">
+          <div className="dash-signal-head">
+            <div>
+              <b>资讯情报</b>
+              <span>已筛选 · 已评分 · 已中文化</span>
+            </div>
+            <em>{topBriefing.length} 条</em>
           </div>
-        </div>
-      )}
+          {topBriefing.length === 0 ? <div className="empty compact">暂无足够高价值的信息进入驾驶舱。</div> : (
+            <div className="dash-signal-list">
+              {topBriefing.slice(0, 6).map((item, index) => (
+                <button className={`dash-signal-item ${index === 0 ? "lead" : ""}`} key={item.event_id} onClick={() => setActiveSignal(item)}>
+                  <div>
+                    <span className={`dash-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
+                    <em>{item.source} · {fmtTime(item.ts)}</em>
+                  </div>
+                  <b>{item.title}</b>
+                  <p>{item.take}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
 
-      {/* GitHub：点击呼出详情卡片 */}
-      <SectionTitle title="GitHub 高增速雷达" meta="只展示处理后项目 · 点击查看详情" />
-      {repos.length === 0 ? (
-        <div className="empty">暂无达到驾驶舱阈值的 GitHub 项目。</div>
-      ) : (
-        <div className="dash-repo-board">
-          {repos.map((repo, index) => (
-            <button className={`dash-repo-card ${index === 0 ? "hero" : ""}`} key={repo.name} onClick={() => setActiveRepo(repo)}>
-              <div className="dash-repo-meta">
-                <span>{repo.language || "项目"}</span>
-                <b>{repo.speed ? `+${repo.speed}/天` : "观察"}</b>
-              </div>
-              <h3>{repo.name}</h3>
-              <p>{repo.summary}</p>
-              <div className="dash-repo-foot">
-                <span>{repo.stars ? `${repo.stars.toLocaleString()} 星` : "星标观察中"}</span>
-                <span>{repo.priority || "高优先"}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
+        <section className="dash-signal-panel">
+          <div className="dash-signal-head">
+            <div>
+              <b>GitHub 雷达</b>
+              <span>近期项目 · 高增速 · 高相关</span>
+            </div>
+            <em>{repos.length} 项</em>
+          </div>
+          {repos.length === 0 ? <div className="empty compact">暂无达到驾驶舱阈值的 GitHub 项目。</div> : (
+            <div className="dash-repo-compact">
+              {repos.slice(0, 6).map((repo, index) => (
+                <button className={`dash-repo-row ${index === 0 ? "lead" : ""}`} key={repo.name} onClick={() => setActiveRepo(repo)}>
+                  <div className="dash-repo-row-top">
+                    <span>{repo.language || "项目"}</span>
+                    <b>{formatRepoSpeed(repo.speed)}</b>
+                  </div>
+                  <h3>{repo.name}</h3>
+                  <p>{repo.summary}</p>
+                  <div className="dash-repo-row-foot">
+                    <span>{repo.stars ? `${repo.stars.toLocaleString()} 星` : "星标观察中"}</span>
+                    <span>{repo.priority || "高优先"}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
 
       {/* ===== 详情弹层 ===== */}
       <Modal open={showHealthDetail} onClose={() => setShowHealthDetail(false)} kicker="综合健康" title={`健康值 ${data.health.score}`}>
@@ -668,7 +760,7 @@ export function Dashboard() {
             <p className="lead">{activeRepo.summary}</p>
             <div className="modal-meta">
               <span>{activeRepo.stars ? `${activeRepo.stars.toLocaleString()} 星标` : "星标观察中"}</span>
-              <span>{activeRepo.speed ? `+${activeRepo.speed}/天` : "观察"}</span>
+              <span>{formatRepoSpeed(activeRepo.speed)}</span>
               {activeRepo.language ? <span>{activeRepo.language}</span> : null}
               <span>评分 {activeRepo.score?.toFixed(2)}</span>
             </div>
@@ -682,8 +774,16 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker={agentTitle} title={activeTool?.name}
-        footer={activeTool?.can_upgrade && isLocalDevice ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); void closeToolTerminal(); }} kicker={agentTitle} title={activeTool?.name}
+        footer={activeTool ? (
+          <div className="modal-actions">
+            {activeTool.installed ? (
+              terminalSession ? <button className="btn sm ghost" onClick={() => void closeToolTerminal()}>关闭控制台</button>
+                : <button className="btn sm primary" onClick={() => void openToolTerminal(activeTool)} disabled={terminalBusy}>{terminalBusy ? "启动中" : "打开控制台"}</button>
+            ) : null}
+            {activeTool.can_upgrade && isLocalDevice ? <button className="btn sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}
+          </div>
+        ) : null}>
         {activeTool ? (
           <div className="modal-kv">
             <div><span>安装状态</span><b>{activeTool.installed ? "已安装" : "未安装"}</b></div>
@@ -696,8 +796,27 @@ export function Dashboard() {
             {activeTool.upgrade_command ? <div><span>升级命令</span><b><code>{activeTool.upgrade_command}</code></b></div> : null}
             {activeTool.path ? <p className="modal-note"><code>{activeTool.path}</code></p> : null}
             <p className="modal-note">{activeTool.advice}</p>
-            {!isLocalDevice ? <p className="modal-note">当前为远端只读状态，本机 App 不会直接执行远端安装或升级命令。</p> : null}
+            {!isLocalDevice ? <p className="modal-note">当前为远端设备：控制台通过远端 LeoJarvis 白名单接口启动；升级操作仍需登录远端主机确认。</p> : null}
             {upgradeResult ? <pre className="toolResult">{upgradeResult}</pre> : null}
+            {terminalError ? <p className="modal-note tone-bad">{terminalError}</p> : null}
+            {terminalSession ? (
+              <section className="cli-console">
+                <div className="cli-console-head">
+                  <b>{terminalSession.tool_name}</b>
+                  <span>{terminalSession.running ? "运行中" : `已结束 ${terminalSession.exit_code ?? ""}`} · {terminalSession.command}</span>
+                </div>
+                <pre>{terminalDisplay || "控制台已启动，等待输出…"}</pre>
+                <div className="cli-console-input">
+                  <input
+                    value={terminalInput}
+                    placeholder="输入命令或提示，Enter 发送"
+                    onChange={(e) => setTerminalInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void sendTerminalText(); }}
+                  />
+                  <button className="btn sm primary" onClick={() => void sendTerminalText()} disabled={!terminalInput.trim() || !terminalSession.running}>发送</button>
+                </div>
+              </section>
+            ) : null}
           </div>
         ) : null}
       </Modal>

@@ -120,6 +120,7 @@ export type DeviceSummary = {
     battery_percent?: number | null;
     battery_plugged?: boolean | null;
     network_latency_ms?: number | null;
+    uptime_hours?: number | null;
   };
   modules?: Record<string, { level?: string; value?: string; summary?: string }>;
   services: { online: number; total: number };
@@ -609,6 +610,67 @@ export async function getAiTools(): Promise<AiToolStatus[]> {
 }
 export async function upgradeAiTool(id: string): Promise<{ ok: boolean; tool?: string; command?: string; output?: string; error?: string }> {
   return readJson(await fetch(`${BASE}/system/ai-tools/${id}/upgrade`, { method: "POST" }), "升级 AI 工具");
+}
+
+export type TerminalSession = {
+  id: string;
+  tool_id: string;
+  tool_name: string;
+  command: string;
+  cwd: string;
+  created_at: number;
+  running: boolean;
+  exit_code?: number | null;
+};
+
+export type TerminalResponse = {
+  ok: boolean;
+  error?: string;
+  session?: TerminalSession;
+  output?: string;
+};
+
+function remoteTerminalData<T>(payload: T | { ok: boolean; data?: T; error?: string }): T {
+  if (payload && typeof payload === "object" && "data" in payload && (payload as any).data) return (payload as any).data as T;
+  return payload as T;
+}
+
+export async function createTerminalSession(tool_id: string, cwd = "", remoteId = "local"): Promise<TerminalResponse> {
+  const path = remoteId === "local" ? `${BASE}/terminal/sessions` : `${BASE}/remote-cortex/${remoteId}/terminal/sessions`;
+  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool_id, cwd }),
+  }), "启动 CLI 控制台");
+  return remoteTerminalData<TerminalResponse>(payload);
+}
+
+export async function readTerminalSession(sessionId: string, remoteId = "local"): Promise<TerminalResponse> {
+  const path = remoteId === "local"
+    ? `${BASE}/terminal/sessions/${sessionId}/read`
+    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}/read`;
+  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path), "读取 CLI 控制台");
+  return remoteTerminalData<TerminalResponse>(payload);
+}
+
+export async function writeTerminalSession(sessionId: string, text: string, remoteId = "local"): Promise<TerminalResponse> {
+  const path = remoteId === "local"
+    ? `${BASE}/terminal/sessions/${sessionId}/write`
+    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}/write`;
+  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  }), "写入 CLI 控制台");
+  return remoteTerminalData<TerminalResponse>(payload);
+}
+
+export async function closeTerminalSession(sessionId: string, remoteId = "local"): Promise<{ ok: boolean; error?: string }> {
+  const path = remoteId === "local"
+    ? `${BASE}/terminal/sessions/${sessionId}`
+    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}`;
+  const payload = await readJson<{ ok: boolean; error?: string } | { ok: boolean; data?: { ok: boolean; error?: string }; error?: string }>(await fetch(path, { method: "DELETE" }), "关闭 CLI 控制台");
+  return remoteTerminalData<{ ok: boolean; error?: string }>(payload);
 }
 
 export type DevTool = { id: string; name: string; category: string; installed: boolean; path: string | null; version: string; launch: string; checked_at: number };

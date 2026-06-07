@@ -11,6 +11,8 @@ import { IntelligenceView } from "./components/views/IntelligenceView";
 import { SettingsView } from "./components/views/SettingsView";
 import { MemoryView } from "./components/MemoryView";
 
+type ThemeMode = "auto" | "dark" | "light";
+
 const VIEWS: Record<ViewId, ComponentType> = {
   dashboard: Dashboard,
   system: SystemView,
@@ -27,14 +29,23 @@ function viewFromHash(): ViewId {
 
 export default function App() {
   const [view, setView] = useState<ViewId>(() => viewFromHash());
-  const [theme, setTheme] = useState<"dark" | "light">(
-    () => (localStorage.getItem("cortex-theme") as "dark" | "light") || "light",
+  const [theme, setTheme] = useState<ThemeMode>(
+    () => (localStorage.getItem("cortex-theme-mode") as ThemeMode) || "auto",
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("cortex-theme", theme);
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const resolved = theme === "auto" ? (mq.matches ? "dark" : "light") : theme;
+      document.documentElement.setAttribute("data-theme", resolved);
+      document.documentElement.setAttribute("data-theme-mode", theme);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    localStorage.setItem("cortex-theme-mode", theme);
+    localStorage.setItem("cortex-theme", theme === "auto" ? (mq.matches ? "dark" : "light") : theme);
+    return () => mq.removeEventListener("change", apply);
   }, [theme]);
 
   useEffect(() => {
@@ -59,7 +70,7 @@ export default function App() {
         active={view}
         onNavigate={navigate}
         theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        onToggleTheme={() => setTheme((t) => (t === "auto" ? "dark" : t === "dark" ? "light" : "auto"))}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
       />

@@ -64,6 +64,15 @@ class SettingsIn(BaseModel):
     settings: dict = Field(default_factory=dict)
 
 
+class TerminalSessionIn(BaseModel):
+    tool_id: str
+    cwd: str = ""
+
+
+class TerminalWriteIn(BaseModel):
+    text: str = ""
+
+
 @router.get("/settings")
 def get_settings() -> dict:
     return user_settings.load()
@@ -200,7 +209,9 @@ def probe_ssh_devices() -> dict:
 @router.get("/remote-cortex")
 def remote_cortex_list() -> list[dict]:
     from .. import remote_cortex
-    return remote_cortex.list_connections()
+    rows = remote_cortex.list_connections(auto_connect=False)
+    remote_cortex.ensure_enabled_connections_async(rows)
+    return rows
 
 
 @router.post("/remote-cortex")
@@ -230,19 +241,52 @@ def remote_cortex_disconnect(connection_id: str) -> dict:
 @router.get("/remote-cortex/{connection_id}/cockpit")
 def remote_cortex_cockpit(connection_id: str) -> dict:
     from .. import remote_cortex
-    return remote_cortex.fetch(connection_id, "/cockpit/overview")
+    res = remote_cortex.fetch(connection_id, "/cockpit/overview", auto_connect=False, timeout=5, reconnect=False)
+    if not res.get("ok"):
+        remote_cortex.connect_async(connection_id)
+    return res
 
 
 @router.get("/remote-cortex/{connection_id}/system")
 def remote_cortex_system(connection_id: str) -> dict:
     from .. import remote_cortex
-    return remote_cortex.fetch(connection_id, "/system/overview")
+    res = remote_cortex.fetch(connection_id, "/system/overview", auto_connect=False, timeout=5, reconnect=False)
+    if not res.get("ok"):
+        remote_cortex.connect_async(connection_id)
+    return res
 
 
 @router.get("/remote-cortex/{connection_id}/health")
 def remote_cortex_health(connection_id: str) -> dict:
     from .. import remote_cortex
-    return remote_cortex.fetch(connection_id, "/health")
+    res = remote_cortex.fetch(connection_id, "/health", auto_connect=False, timeout=3, reconnect=False)
+    if not res.get("ok"):
+        remote_cortex.connect_async(connection_id)
+    return res
+
+
+@router.post("/remote-cortex/{connection_id}/terminal/sessions")
+def remote_terminal_create(connection_id: str, req: TerminalSessionIn) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.request(connection_id, "POST", "/terminal/sessions", json_data=req.model_dump())
+
+
+@router.get("/remote-cortex/{connection_id}/terminal/sessions/{session_id}/read")
+def remote_terminal_read(connection_id: str, session_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.request(connection_id, "GET", f"/terminal/sessions/{session_id}/read")
+
+
+@router.post("/remote-cortex/{connection_id}/terminal/sessions/{session_id}/write")
+def remote_terminal_write(connection_id: str, session_id: str, req: TerminalWriteIn) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.request(connection_id, "POST", f"/terminal/sessions/{session_id}/write", json_data=req.model_dump())
+
+
+@router.delete("/remote-cortex/{connection_id}/terminal/sessions/{session_id}")
+def remote_terminal_close(connection_id: str, session_id: str) -> dict:
+    from .. import remote_cortex
+    return remote_cortex.request(connection_id, "DELETE", f"/terminal/sessions/{session_id}")
 
 
 @router.get("/device/summary")
@@ -268,9 +312,44 @@ def device_heartbeat(req: DeviceHeartbeatIn) -> dict:
 
 @router.get("/devices")
 def devices(limit: int = 50) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from ..agent import sysinfo
+    from .. import remote_cortex
     local = sysinfo.device_summary()
     db.upsert_device_heartbeat(local)
+    connections = remote_cortex.list_connections(auto_connect=False)
+    remote_cortex.ensure_enabled_connections_async(connections)
+    connected: list[dict] = []
+    for conn in connections:
+        if not conn.get("enabled", True):
+            continue
+        conn_id = str(conn.get("id") or "")
+        db.delete_device_heartbeat(f"rc-{conn_id}")
+        if not conn.get("connected"):
+            continue
+        connected.append(conn)
+
+    def _remote_summary(conn: dict) -> dict | None:
+        conn_id = str(conn.get("id") or "")
+        try:
+            res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=3.5)
+            if res.get("ok") and res.get("data"):
+                summary = dict(res["data"])
+                summary["device_id"] = conn_id
+                summary["device_name"] = conn.get("name") or summary.get("device_name") or conn.get("host")
+                summary["host_name"] = summary.get("host_name") or conn.get("host")
+                summary["role"] = "remote-leojarvis"
+                return summary
+        except Exception:
+            return None
+        return None
+
+    if connected:
+        with ThreadPoolExecutor(max_workers=min(4, len(connected))) as pool:
+            for fut in as_completed([pool.submit(_remote_summary, conn) for conn in connected]):
+                summary = fut.result()
+                if summary:
+                    db.upsert_device_heartbeat(summary)
     rows = db.list_device_heartbeats(limit=limit)
     now = int(time.time())
     for row in rows:
@@ -342,6 +421,36 @@ def system_ai_tool_upgrade(tool_id: str) -> dict:
 def system_dev_tools() -> dict:
     from ..agent import sysinfo
     return sysinfo.dev_toolchain_status()
+
+
+@router.get("/terminal/sessions")
+def terminal_sessions() -> list[dict]:
+    from .. import terminal_sessions as terms
+    return terms.list_sessions()
+
+
+@router.post("/terminal/sessions")
+def terminal_session_create(req: TerminalSessionIn) -> dict:
+    from .. import terminal_sessions as terms
+    return terms.create(req.tool_id, cwd=req.cwd)
+
+
+@router.get("/terminal/sessions/{session_id}/read")
+def terminal_session_read(session_id: str) -> dict:
+    from .. import terminal_sessions as terms
+    return terms.read(session_id)
+
+
+@router.post("/terminal/sessions/{session_id}/write")
+def terminal_session_write(session_id: str, req: TerminalWriteIn) -> dict:
+    from .. import terminal_sessions as terms
+    return terms.write(session_id, req.text)
+
+
+@router.delete("/terminal/sessions/{session_id}")
+def terminal_session_close(session_id: str) -> dict:
+    from .. import terminal_sessions as terms
+    return terms.close(session_id)
 
 
 @router.get("/system/notifications")

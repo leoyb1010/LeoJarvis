@@ -33,6 +33,12 @@ function repoVelocity(repo: GithubRadarRepo) {
   return "观察中";
 }
 
+function formatRepoSpeed(speed?: number | null) {
+  if (speed == null || !Number.isFinite(speed)) return "观察";
+  const value = Math.abs(speed) >= 10 ? speed.toFixed(0) : speed.toFixed(2);
+  return `${speed > 0 ? "+" : ""}${value}/天`;
+}
+
 function isGithubSignal(item: BriefingItem) {
   return item.kind === "github_repo" || item.source === "GitHub 项目雷达";
 }
@@ -90,7 +96,7 @@ function RepoBlock({ repo, onOpen, featured = false }: { repo: CockpitGithubCard
     <button className={`sig-block repo ${featured ? "featured" : ""}`} onClick={() => onOpen(repo)}>
       <div className="sig-top">
         <span className="sig-pri pri-高优先">{repo.priority || "高优先"}</span>
-        <b>{repo.speed ? `+${repo.speed}/天` : "观察"}</b>
+        <b>{formatRepoSpeed(repo.speed)}</b>
       </div>
       <h4>{repo.name}</h4>
       <p>{repo.summary}</p>
@@ -152,6 +158,7 @@ export function IntelligenceView() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [channelFilter, setChannelFilter] = useState("all");
   const [target, setTarget] = useState("");
   const [source, setSource] = useState({ type: "web" as "web" | "rss", name: "", url: "" });
   const [activeSignal, setActiveSignal] = useState<BriefingItem | null>(null);
@@ -180,12 +187,16 @@ export function IntelligenceView() {
   const items = useMemo(() => {
     const raw = briefing?.items || [...(briefing?.business || []), ...(briefing?.life || [])];
     return raw.filter((item) => {
+      if (channelFilter === "news" && (isGithubSignal(item) || isXSignal(item) || item.kind === "email")) return false;
+      if (channelFilter === "github" && !isGithubSignal(item)) return false;
+      if (channelFilter === "x" && !isXSignal(item)) return false;
+      if (channelFilter === "mail" && item.kind !== "email") return false;
       if (sourceFilter && item.source !== sourceFilter) return false;
       if (priorityFilter && item.priority !== priorityFilter) return false;
       if (tagFilter && !(item.tags || []).includes(tagFilter)) return false;
       return item.triage !== "ignore";
     });
-  }, [briefing, sourceFilter, priorityFilter, tagFilter]);
+  }, [briefing, channelFilter, sourceFilter, priorityFilter, tagFilter]);
 
   const newsItems = useMemo(() => items.filter((item) => !isGithubSignal(item) && !isXSignal(item)), [items]);
   const xItems = useMemo(() => {
@@ -312,13 +323,24 @@ export function IntelligenceView() {
         </section>
       ) : null}
 
-      <div className="brief-controls">
+      <div className="brief-controls product-filters">
+        <div className="brief-channel-tabs">
+          {[
+            ["all", "全部"],
+            ["news", "资讯情报"],
+            ["github", "GitHub"],
+            ["x", "X 监控"],
+            ["mail", "邮件"],
+          ].map(([id, label]) => (
+            <button key={id} className={channelFilter === id ? "on" : ""} onClick={() => setChannelFilter(id)}>{label}</button>
+          ))}
+        </div>
         <ChipFilter label="来源" rows={briefing?.filters?.sources || []} active={sourceFilter} onChange={setSourceFilter} />
         <ChipFilter label="优先级" rows={briefing?.filters?.priorities || []} active={priorityFilter} onChange={setPriorityFilter} />
         <ChipFilter label="标签" rows={briefing?.filters?.tags || []} active={tagFilter} onChange={setTagFilter} />
       </div>
 
-      <div className="intel-brief-board">
+      <div className="intel-live-grid">
         <section className="intel-main-panel">
           <div className="panel-title-row">
             <div>
@@ -333,22 +355,22 @@ export function IntelligenceView() {
             </div>
           )}
         </section>
-      </div>
 
-      <section className="github-radar-module">
-        <div className="panel-title-row">
-          <div>
-            <div className="panel-title">GitHub 高增速雷达</div>
-            <p>只展示经过 star 动量、活跃度、相关性和中文摘要处理后的项目。</p>
+        <section className="github-radar-module">
+          <div className="panel-title-row">
+            <div>
+              <div className="panel-title">GitHub 高增速雷达</div>
+              <p>只展示经过 star 动量、活跃度、相关性和中文摘要处理后的项目。</p>
+            </div>
+            <span>{githubCards.length} 项</span>
           </div>
-          <span>{githubCards.length} 项</span>
-        </div>
-        {githubCards.length === 0 ? <div className="empty">暂无达到雷达阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
-          <div className="github-radar-grid">
-            {githubCards.slice(0, 8).map((repo, index) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} featured={index === 0} />)}
-          </div>
-        )}
-      </section>
+          {githubCards.length === 0 ? <div className="empty">暂无达到雷达阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
+            <div className="github-radar-grid">
+              {githubCards.slice(0, 8).map((repo, index) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} featured={index === 0} />)}
+            </div>
+          )}
+        </section>
+      </div>
 
       <section className="x-monitor-module">
         <div className="panel-title-row">
@@ -477,7 +499,7 @@ export function IntelligenceView() {
             <p className="lead">{activeRepo.summary}</p>
             <div className="modal-meta">
               <span>{activeRepo.stars ? `${activeRepo.stars.toLocaleString()} 星标` : "星标观察中"}</span>
-              <span>{activeRepo.speed ? `+${activeRepo.speed}/天` : "观察"}</span>
+              <span>{formatRepoSpeed(activeRepo.speed)}</span>
               {activeRepo.language ? <span>{activeRepo.language}</span> : null}
               <span>评分 {activeRepo.score?.toFixed(2)}</span>
             </div>

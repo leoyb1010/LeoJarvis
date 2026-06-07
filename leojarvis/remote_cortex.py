@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import socket
 import subprocess
+import threading
 import time
 from typing import Any
 
@@ -11,6 +12,8 @@ import httpx
 from . import user_settings
 
 _TUNNELS: dict[str, subprocess.Popen] = {}
+_CONNECTING: set[str] = set()
+_CONNECT_LOCK = threading.Lock()
 
 
 def _stable_id(host: str, user: str = "", port: int = 22) -> str:
@@ -41,8 +44,27 @@ def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
         rid = row.get("id")
         proc = _TUNNELS.get(str(rid))
         local_port = int(row.get("local_port") or 0)
-        health_err = _probe_local_health(local_port, timeout=0.8) if local_port else "missing local port"
-        connected = bool(proc and proc.poll() is None) or not bool(health_err)
+        if not local_port:
+            health_err = "missing local port"
+        elif not _port_accepting(local_port):
+            health_err = "Connection refused"
+        else:
+            health_err = _probe_local_health(local_port, timeout=2.0)
+            if health_err and "timed out" in health_err:
+                health_err = _probe_local_health(local_port, timeout=4.0)
+        connected = not bool(health_err)
+        if not connected and row.get("connected") is True and local_port and _port_accepting(local_port):
+            # A single slow health response should not make a previously healthy
+            # SSH tunnel disappear from the device switcher. Explicit fetches
+            # still mark it failed if the remote API is actually unreachable.
+            connected = True
+            health_err = ""
+        if proc and proc.poll() is None and not connected:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            _TUNNELS.pop(str(rid), None)
         if connected:
             if row.get("connected") is not True or row.get("last_error"):
                 row["connected"] = True
@@ -63,6 +85,30 @@ def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
                 connect(str(row.get("id")))
         rows = _rows()
     return rows
+
+
+def connect_async(connection_id: str) -> None:
+    with _CONNECT_LOCK:
+        if connection_id in _CONNECTING:
+            return
+        _CONNECTING.add(connection_id)
+
+    def _runner() -> None:
+        try:
+            _connect_impl(connection_id)
+        finally:
+            with _CONNECT_LOCK:
+                _CONNECTING.discard(connection_id)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
+def ensure_enabled_connections_async(rows: list[dict[str, Any]] | None = None) -> None:
+    for row in (rows if rows is not None else list_connections(auto_connect=False)):
+        if row.get("enabled", True) and not row.get("connected"):
+            rid = str(row.get("id") or "")
+            if rid:
+                connect_async(rid)
 
 
 def _clean_options(value: Any) -> list[str]:
@@ -116,7 +162,7 @@ def _target(row: dict[str, Any]) -> str:
 
 def _probe_local_health(local_port: int, timeout: float = 3.0) -> str:
     try:
-        res = httpx.get(f"http://127.0.0.1:{local_port}/api/health", timeout=timeout)
+        res = httpx.get(f"http://127.0.0.1:{local_port}/api/health", timeout=timeout, trust_env=False)
         if res.status_code < 400:
             return ""
         return f"HTTP {res.status_code}"
@@ -124,7 +170,28 @@ def _probe_local_health(local_port: int, timeout: float = 3.0) -> str:
         return str(exc)
 
 
-def connect(connection_id: str) -> dict[str, Any]:
+def _port_accepting(local_port: int, timeout: float = 0.35) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", int(local_port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _wait_for_listener(proc: subprocess.Popen, local_port: int, *, max_wait: float = 18.0) -> str:
+    deadline = time.time() + max_wait
+    last_error = "等待 SSH 本地端口监听超时"
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            return (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
+        if _port_accepting(local_port):
+            return ""
+        last_error = "Connection refused"
+        time.sleep(0.25)
+    return last_error
+
+
+def _connect_impl(connection_id: str) -> dict[str, Any]:
     rows = _rows()
     row = next((r for r in rows if r.get("id") == connection_id), None)
     if not row:
@@ -132,16 +199,26 @@ def connect(connection_id: str) -> dict[str, Any]:
     proc = _TUNNELS.get(connection_id)
     if proc and proc.poll() is None:
         err = _probe_local_health(int(row.get("local_port") or 0))
-        row["connected"] = not bool(err)
-        row["last_error"] = err[:300]
-        _save(rows)
-        return {"ok": not bool(err), "error": err, "connection": row}
+        if not err:
+            row["connected"] = True
+            row["last_error"] = ""
+            _save(rows)
+            return {"ok": True, "error": "", "connection": row}
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        _TUNNELS.pop(connection_id, None)
 
     local_port = int(row.get("local_port") or _free_port())
     row["local_port"] = local_port
     existing_err = ""
     for _ in range(3):
-        existing_err = _probe_local_health(local_port, timeout=4.0)
+        existing_err = _probe_local_health(local_port, timeout=0.8)
         if not existing_err or "Connection refused" in existing_err:
             break
         time.sleep(0.2)
@@ -151,6 +228,9 @@ def connect(connection_id: str) -> dict[str, Any]:
         row["updated_at"] = int(time.time())
         _save(rows)
         return {"ok": True, "connection": row}
+    if existing_err:
+        local_port = _free_port()
+        row["local_port"] = local_port
 
     def _ssh_cmd(port: int) -> list[str]:
         cmd = [
@@ -178,15 +258,21 @@ def connect(connection_id: str) -> dict[str, Any]:
         try:
             row["local_port"] = local_port
             proc = subprocess.Popen(_ssh_cmd(local_port), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-            err = ""
-            for _ in range(24):
+            err = _wait_for_listener(proc, local_port)
+            if not err:
+                # Cloudflare/SSH forwarding may accept the local socket slightly
+                # before the remote LeoJarvis HTTP service is ready to answer.
+                time.sleep(1.0)
+            for _ in range(30):
+                if err and "Connection refused" not in err:
+                    break
                 if proc.poll() is not None:
                     err = (proc.stderr.read() if proc.stderr else "ssh tunnel failed")[:300]
                     break
                 err = _probe_local_health(local_port, timeout=1.5)
                 if not err:
                     break
-                time.sleep(0.25)
+                time.sleep(0.35)
             if err:
                 if proc.poll() is None:
                     proc.terminate()
@@ -220,6 +306,28 @@ def connect(connection_id: str) -> dict[str, Any]:
     return {"ok": False, "error": row["last_error"], "connection": row}
 
 
+def connect(connection_id: str) -> dict[str, Any]:
+    with _CONNECT_LOCK:
+        if connection_id in _CONNECTING:
+            owns_connect = False
+        else:
+            _CONNECTING.add(connection_id)
+            owns_connect = True
+    if not owns_connect:
+        row: dict[str, Any] | None = None
+        for _ in range(80):
+            row = next((r for r in _rows() if r.get("id") == connection_id), None)
+            if row and row.get("connected") and not _probe_local_health(int(row.get("local_port") or 0), timeout=1.0):
+                return {"ok": True, "connection": row}
+            time.sleep(0.5)
+        return {"ok": False, "error": (row or {}).get("last_error") or "远程连接仍在建立中", "connection": row}
+    try:
+        return _connect_impl(connection_id)
+    finally:
+        with _CONNECT_LOCK:
+            _CONNECTING.discard(connection_id)
+
+
 def disconnect(connection_id: str) -> dict[str, Any]:
     proc = _TUNNELS.pop(connection_id, None)
     if proc and proc.poll() is None:
@@ -241,19 +349,28 @@ def _base_url(row: dict[str, Any]) -> str:
     return f"http://127.0.0.1:{int(row.get('local_port') or 0)}/api"
 
 
-def fetch(connection_id: str, path: str) -> dict[str, Any]:
-    rows = list_connections(auto_connect=True)
+def fetch(
+    connection_id: str,
+    path: str,
+    *,
+    auto_connect: bool = True,
+    timeout: float = 12,
+    reconnect: bool = True,
+) -> dict[str, Any]:
+    rows = list_connections(auto_connect=auto_connect)
     row = next((r for r in rows if r.get("id") == connection_id), None)
     if not row:
         return {"ok": False, "error": "未知远程 LeoJarvis"}
     if not row.get("connected"):
+        if not auto_connect:
+            return {"ok": False, "error": row.get("last_error") or "远程 LeoJarvis 未连接", "connection": row}
         res = connect(connection_id)
         if not res.get("ok"):
             return res
         row = res["connection"]
     path = "/" + path.strip("/")
     try:
-        with httpx.Client(timeout=12, trust_env=False) as client:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
             res = client.get(_base_url(row) + path)
             res.raise_for_status()
             if row.get("last_error") or row.get("connected") is not True:
@@ -269,11 +386,13 @@ def fetch(connection_id: str, path: str) -> dict[str, Any]:
     row["last_error"] = first_error
     row["connected"] = False
     _save([row if r.get("id") == connection_id else r for r in _rows()])
+    if not reconnect:
+        return {"ok": False, "error": row["last_error"], "connection": row}
     reconnect = connect(connection_id)
     if reconnect.get("ok"):
         row = reconnect["connection"]
         try:
-            with httpx.Client(timeout=16, trust_env=False) as client:
+            with httpx.Client(timeout=max(timeout, 8), trust_env=False) as client:
                 res = client.get(_base_url(row) + path)
                 res.raise_for_status()
                 row["connected"] = True
@@ -287,3 +406,48 @@ def fetch(connection_id: str, path: str) -> dict[str, Any]:
     row["connected"] = False
     _save([row if r.get("id") == connection_id else r for r in _rows()])
     return {"ok": False, "error": row["last_error"], "connection": row}
+
+
+def fetch_connected(row: dict[str, Any], path: str, *, timeout: float = 3.0) -> dict[str, Any]:
+    """Read through an already connected tunnel without triggering probe/connect.
+
+    Dashboard aggregate endpoints use this to avoid one slow remote blocking the
+    whole local page. Explicit remote actions should keep using fetch/request.
+    """
+    if not row.get("connected"):
+        return {"ok": False, "error": row.get("last_error") or "远程 LeoJarvis 未连接", "connection": row}
+    path = "/" + path.strip("/")
+    try:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
+            res = client.get(_base_url(row) + path)
+            res.raise_for_status()
+            return {"ok": True, "connection": row, "data": res.json()}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300], "connection": row}
+
+
+def request(connection_id: str, method: str, path: str, *, json_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Proxy a stateful API call to a remote LeoJarvis instance through the
+    managed SSH tunnel. Used for safe, allowlisted actions such as CLI PTY
+    sessions. The remote backend still performs its own whitelist checks.
+    """
+    rows = list_connections(auto_connect=True)
+    row = next((r for r in rows if r.get("id") == connection_id), None)
+    if not row:
+        return {"ok": False, "error": "未知远程 LeoJarvis"}
+    if not row.get("connected"):
+        res = connect(connection_id)
+        if not res.get("ok"):
+            return res
+        row = res["connection"]
+    path = "/" + path.strip("/")
+    try:
+        with httpx.Client(timeout=30, trust_env=False) as client:
+            res = client.request(method.upper(), _base_url(row) + path, json=json_data)
+            res.raise_for_status()
+            return {"ok": True, "connection": row, "data": res.json()}
+    except Exception as exc:
+        row["last_error"] = str(exc)[:300]
+        row["connected"] = False
+        _save([row if r.get("id") == connection_id else r for r in _rows()])
+        return {"ok": False, "error": row["last_error"], "connection": row}

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 
 export type ViewId = "dashboard" | "system" | "intelligence" | "notes" | "memory" | "settings";
+export type ThemeMode = "auto" | "dark" | "light";
 
 const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
   {
@@ -30,7 +31,7 @@ export function Sidebar({
 }: {
   active: ViewId;
   onNavigate: (v: ViewId) => void;
-  theme: "dark" | "light";
+  theme: ThemeMode;
   onToggleTheme: () => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -85,8 +86,8 @@ export function Sidebar({
       <div className="spacer" />
 
       <div className="theme-toggle" onClick={onToggleTheme}>
-        <span>{theme === "dark" ? "Dark" : "Light"}</span>
-        <span className="tt-hint">{theme === "dark" ? "Night" : "Day"}</span>
+        <span>{theme === "auto" ? "Auto" : theme === "dark" ? "Dark" : "Light"}</span>
+        <span className="tt-hint">{theme === "auto" ? "System" : theme === "dark" ? "Night" : "Day"}</span>
       </div>
     </aside>
   );

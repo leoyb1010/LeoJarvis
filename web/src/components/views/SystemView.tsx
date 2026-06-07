@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   addSshDevice,
@@ -140,6 +140,7 @@ function deviceTone(device: DeviceSummary) {
 
 function DeviceCard({ device }: { device: DeviceSummary }) {
   const t = deviceTone(device);
+  const m = device.metrics || {};
   return (
     <article className={`device-card ${t}`}>
       <div className="device-card-head">
@@ -151,9 +152,12 @@ function DeviceCard({ device }: { device: DeviceSummary }) {
         <div className="device-score"><b>{Math.round(device.health || 0)}</b><span>{device.online ? device.status : "离线"}</span></div>
       </div>
       <div className="device-metrics">
-        <div><span>CPU</span><b>{pct(device.metrics.cpu_load_pct)}</b><em>{device.metrics.cpu_load ?? "—"} / {device.metrics.cpu_cores || "?"} 核</em></div>
-        <div><span>RAM</span><b>{pct(device.metrics.ram_used_pct)}</b><em>{device.metrics.ram_total_gb ? `${device.metrics.ram_used_gb ?? "—"}G / ${device.metrics.ram_total_gb}G` : "内存"}</em></div>
-        <div><span>SSD</span><b>{pct(device.metrics.ssd_used_pct)}</b><em>{device.metrics.ssd_free_gb != null ? `剩余 ${device.metrics.ssd_free_gb}G` : "磁盘"}</em></div>
+        <div><span>CPU</span><b>{pct(m.cpu_load_pct)}</b><em>{m.cpu_load ?? "—"} / {m.cpu_cores || "?"} 核</em></div>
+        <div><span>RAM</span><b>{pct(m.ram_used_pct)}</b><em>{m.ram_total_gb ? `${m.ram_used_gb ?? "—"}G / ${m.ram_total_gb}G` : "内存"}</em></div>
+        <div><span>SSD</span><b>{pct(m.ssd_used_pct)}</b><em>{m.ssd_free_gb != null ? `剩余 ${m.ssd_free_gb}G` : "磁盘"}</em></div>
+        <div><span>温控</span><b>{m.thermal_pressure != null ? String(m.thermal_pressure) : "—"}</b><em>{device.modules?.thermal?.value || "热压力"}</em></div>
+        <div><span>电源</span><b>{m.battery_percent != null ? `${m.battery_percent}%` : "—"}</b><em>{m.battery_plugged ? "外接电源" : "电池/未知"}</em></div>
+        <div><span>网络</span><b>{m.network_latency_ms != null ? `${m.network_latency_ms}ms` : "—"}</b><em>{m.uptime_hours != null ? `运行 ${m.uptime_hours}h` : "连通性"}</em></div>
       </div>
       <div className="device-risks">
         {(device.risks || []).slice(0, 2).map((risk) => <span className={risk.level === "异常" ? "bad" : risk.level === "注意" ? "warn" : "good"} key={`${risk.title}-${risk.advice}`}><b>{risk.level}</b>{risk.title}</span>)}
@@ -177,11 +181,17 @@ export function SystemView() {
   const [ssh, setSsh] = useState({ name: "", host: "", user: "" });
   const [sshBusy, setSshBusy] = useState(false);
   const [devTools, setDevTools] = useState<DevToolchain | null>(null);
+  const lastProbe = useRef(0);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
+      if (Date.now() - lastProbe.current > 45000) {
+        lastProbe.current = Date.now();
+        await sendSelfHeartbeat().catch(() => {});
+        await probeSshDevices().catch(() => {});
+      }
       const [overview, serviceRows, deviceRows] = await Promise.all([getSystemOverview(), getServices(), getDevices()]);
       setData(overview);
       setServices(serviceRows);
@@ -332,7 +342,7 @@ export function SystemView() {
             </div>
           )}
 
-          <div className="intel-grid-2" style={{ marginTop: 24 }}>
+          <div className="system-bottom-grid">
             <section className="card">
               <div className="panel-title">资源占用排行</div>
               <div className="process-list">
@@ -345,14 +355,11 @@ export function SystemView() {
                 ))}
               </div>
             </section>
-            <section className="card">
-              <div className="panel-title">高级详情</div>
-              <details className="raw-details">
-                <summary>查看原始命令输出</summary>
-                <pre className="toolResult">{data.raw || "暂无原始输出"}</pre>
-              </details>
-            </section>
           </div>
+          <details className="raw-details raw-compact">
+            <summary>高级详情：查看原始命令输出</summary>
+            <pre className="toolResult">{data.raw || "暂无原始输出"}</pre>
+          </details>
         </>
       )}
 

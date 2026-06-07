@@ -351,3 +351,9 @@ def list_device_heartbeats(limit: int = 50) -> list[dict[str, Any]]:
         data.setdefault("last_seen_ts", r["last_seen_ts"])
         out.append(data)
     return out
+
+
+def delete_device_heartbeat(device_id: str) -> None:
+    init_db()
+    with conn() as c:
+        c.execute("DELETE FROM device_heartbeats WHERE device_id=?", (device_id,))
