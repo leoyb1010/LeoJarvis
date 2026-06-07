@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import threading
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -8,6 +11,7 @@ from typing import Any
 from .config import DATA_DIR
 
 SETTINGS_PATH = DATA_DIR / "user_settings.json"
+_SETTINGS_LOCK = threading.RLock()
 
 DEFAULT_X_MONITOR_USERS = [
     "OpenAI",
@@ -82,20 +86,35 @@ def _normalize_x_monitor(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def load() -> dict[str, Any]:
-    if not SETTINGS_PATH.exists():
-        return _normalize_x_monitor(deepcopy(DEFAULTS))
-    try:
-        raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        return _normalize_x_monitor(_merge(DEFAULTS, raw if isinstance(raw, dict) else {}))
-    except Exception:
-        return _normalize_x_monitor(deepcopy(DEFAULTS))
+    with _SETTINGS_LOCK:
+        if not SETTINGS_PATH.exists():
+            return _normalize_x_monitor(deepcopy(DEFAULTS))
+        try:
+            raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            return _normalize_x_monitor(_merge(DEFAULTS, raw if isinstance(raw, dict) else {}))
+        except Exception:
+            return _normalize_x_monitor(deepcopy(DEFAULTS))
 
 
 def save(data: dict[str, Any]) -> dict[str, Any]:
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    merged = _merge(DEFAULTS, data if isinstance(data, dict) else {})
-    SETTINGS_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
-    return merged
+    with _SETTINGS_LOCK:
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        merged = _merge(DEFAULTS, data if isinstance(data, dict) else {})
+        payload = json.dumps(merged, ensure_ascii=False, indent=2) + "\n"
+        fd, tmp = tempfile.mkstemp(prefix=f".{SETTINGS_PATH.name}.", suffix=".tmp", dir=str(SETTINGS_PATH.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, SETTINGS_PATH)
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        return merged
 
 
 def patch(partial: dict[str, Any]) -> dict[str, Any]:
