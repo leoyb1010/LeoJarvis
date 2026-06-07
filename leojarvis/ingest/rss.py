@@ -6,10 +6,11 @@ import trafilatura
 
 from ..config import sources
 from .. import user_settings
+from ..localize import to_chinese
 from .base import Collector, RawItem
 
 
-def _x_monitor_feeds() -> list[dict]:
+def x_monitor_feeds() -> list[dict]:
     """Expand the X / Twitter monitor config into RSS feed dicts.
 
     Each entry in x_monitor.users may be a bare handle (templated through
@@ -26,10 +27,18 @@ def _x_monitor_feeds() -> list[dict]:
         s = str(entry).strip()
         if s.startswith("http://") or s.startswith("https://"):
             url, name = s, s
+            route = "custom_feed"
         else:
             handle = s.lstrip("@")
-            url = f"{base}/twitter/user/{handle}"
-            name = f"X · {handle}"
+            # rsshub.app 的 Twitter/X 路由需要实例侧账号配置，公共实例经常 404。
+            # 用户配置自建 RSSHub 时继续走 RSSHub；默认公共实例则用 Nitter RSS 兜底。
+            if base in {"https://rsshub.app", "http://rsshub.app"}:
+                url = f"https://nitter.net/{handle}/rss"
+                route = "nitter_fallback"
+            else:
+                url = f"{base}/twitter/user/{handle}"
+                route = "rsshub"
+            name = f"X · @{handle}"
         feeds.append({
             "name": name,
             "url": url,
@@ -37,6 +46,11 @@ def _x_monitor_feeds() -> list[dict]:
             "category": "X社媒",
             "fulltext": False,
             "limit": int(cfg.get("limit", 6)),
+            "meta": {
+                "channel": "x_monitor",
+                "handle": s if s.startswith("http") else f"@{s.lstrip('@')}",
+                "route": route,
+            },
         })
     return feeds
 
@@ -65,7 +79,7 @@ def _all_feeds() -> list[dict]:
     for feed in user_rss.get("sources", []) or []:
         if isinstance(feed, dict) and feed.get("enabled", True):
             add(feed)
-    for feed in _x_monitor_feeds():
+    for feed in x_monitor_feeds():
         add(feed)
     return merged
 
@@ -91,18 +105,22 @@ class RSSCollector(Collector):
                         content = content or "正文抓取失败，保留摘要。"
                 title = getattr(entry, "title", "") or "（无标题）"
                 published = getattr(entry, "published", "") or getattr(entry, "updated", "")
+                is_x = (feed.get("category") == "X社媒") or ((feed.get("meta") or {}).get("channel") == "x_monitor")
+                display_title = to_chinese(title, context="X 监控动态标题" if is_x else "RSS 资讯标题", max_chars=140) if is_x else title
+                display_content = to_chinese(content or title, context="X 监控动态摘要" if is_x else "RSS 资讯摘要", max_chars=1200) if is_x else (content or title)
                 items.append(RawItem(
                     source=f"rss:{feed.get('name', 'unnamed')}",
                     domain=feed.get("domain", "business"),
-                    kind="news",
-                    title=title,
-                    content=content or title,
+                    kind="x_post" if is_x else "news",
+                    title=display_title,
+                    content=display_content,
                     url=link,
                     meta={
                         "category": feed.get("category", "综合资讯"),
                         "feed_name": feed.get("name", "RSS"),
                         "original_title": title,
                         "published": published,
+                        **(feed.get("meta") or {}),
                     },
                 ))
         return items

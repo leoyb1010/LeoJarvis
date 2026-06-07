@@ -16,6 +16,7 @@ import {
   type CockpitGithubCard,
   type GithubRadarRepo,
   type IntelligenceOverview,
+  type IntelligenceSource,
 } from "../../api";
 import { PageSkeleton } from "../Skeleton";
 import { Sparkline } from "../Sparkline";
@@ -32,10 +33,38 @@ function repoVelocity(repo: GithubRadarRepo) {
   return "观察中";
 }
 
+function isGithubSignal(item: BriefingItem) {
+  return item.kind === "github_repo" || item.source === "GitHub 项目雷达";
+}
+
+function isXSignal(item: BriefingItem) {
+  return item.kind === "x_post" || item.channel === "x_monitor" || item.source === "X 监控" || (item.source_raw || "").includes("intel:x:");
+}
+
+function repoToCard(repo: GithubRadarRepo): CockpitGithubCard {
+  const speed = repo.stars_per_day ?? repo.cold_stars_per_day ?? null;
+  return {
+    name: repo.repo_full_name,
+    title: `${repo.repo_full_name} · GitHub 高增速项目`,
+    url: repo.url,
+    score: repo.momentum_score ?? 0.72,
+    summary: repo.summary_zh || repo.display_description || "该项目进入 GitHub 雷达，等待下一轮中文分析补齐。",
+    why: repo.why_zh || `星标 ${repo.stars.toLocaleString()}，${repoVelocity(repo)}。`,
+    relation: repo.relation_zh || "与你关注的 AI、开发工具、本地助理和自动化方向相关。",
+    next_step: repo.next_step_zh || "打开 README、示例和最近提交，判断是否值得持续监控。",
+    priority: speed != null && speed >= 25 ? "高优先" : "中优先",
+    tags: repo.display_topics || repo.topics || ["GitHub 项目"],
+    stars: repo.stars,
+    speed,
+    star_history: [],
+    language: repo.language,
+  };
+}
+
 // 资讯块：紧凑、可点击，详情通过悬浮卡片呈现，不直接跳来源。
 function SignalBlock({ item, onOpen, featured = false }: { item: BriefingItem; onOpen: (i: BriefingItem) => void; featured?: boolean }) {
   return (
-    <button className={`sig-block tri-${item.triage} ${featured ? "featured" : ""}`} onClick={() => onOpen(item)}>
+    <button className={`sig-block tri-${item.triage} ${isXSignal(item) ? "x-signal" : ""} ${featured ? "featured" : ""}`} onClick={() => onOpen(item)}>
       <div className="sig-top">
         <span className={`sig-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
         <b>{item.score.toFixed(2)}</b>
@@ -46,6 +75,12 @@ function SignalBlock({ item, onOpen, featured = false }: { item: BriefingItem; o
         <span>{item.source}</span>
         <span>{fmtTime(item.ts)}</span>
       </div>
+      {featured && (item.why_important || item.next_step) ? (
+        <div className="sig-insight">
+          {item.why_important ? <span><b>为什么重要</b>{item.why_important}</span> : null}
+          {item.next_step ? <span><b>下一步</b>{item.next_step}</span> : null}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -59,6 +94,10 @@ function RepoBlock({ repo, onOpen, featured = false }: { repo: CockpitGithubCard
       </div>
       <h4>{repo.name}</h4>
       <p>{repo.summary}</p>
+      <div className="repo-why-line">
+        <span>推荐理由</span>
+        <em>{repo.why}</em>
+      </div>
       <div className="sig-foot">
         <span>{repo.stars ? `${repo.stars.toLocaleString()} 星` : "星标观察中"}</span>
         <span>{repo.language || "项目"}</span>
@@ -67,17 +106,18 @@ function RepoBlock({ repo, onOpen, featured = false }: { repo: CockpitGithubCard
   );
 }
 
-function RadarMetricRow({ repo }: { repo: GithubRadarRepo }) {
+function RadarMetricRow({ repo, onOpen }: { repo: GithubRadarRepo; onOpen: (r: CockpitGithubCard) => void }) {
   const speed = repo.stars_per_day ?? repo.cold_stars_per_day ?? 0;
   const width = Math.min(100, Math.max(6, speed));
   return (
-    <div className="radar-row">
+    <button className="radar-row" onClick={() => onOpen(repoToCard(repo))}>
       <div>
         <b>{repo.repo_full_name}</b>
+        <p>{repo.summary_zh || repo.display_description || "等待中文分析补齐。"}</p>
         <span>{repo.language || "未知语言"} · {repo.stars.toLocaleString()} 星标 · {repoVelocity(repo)}</span>
       </div>
       <i><em style={{ width: `${width}%` }} /></i>
-    </div>
+    </button>
   );
 }
 
@@ -116,6 +156,7 @@ export function IntelligenceView() {
   const [source, setSource] = useState({ type: "web" as "web" | "rss", name: "", url: "" });
   const [activeSignal, setActiveSignal] = useState<BriefingItem | null>(null);
   const [activeRepo, setActiveRepo] = useState<CockpitGithubCard | null>(null);
+  const [activeSource, setActiveSource] = useState<IntelligenceSource | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState("");
 
   const refresh = async () => {
@@ -146,12 +187,33 @@ export function IntelligenceView() {
     });
   }, [briefing, sourceFilter, priorityFilter, tagFilter]);
 
+  const newsItems = useMemo(() => items.filter((item) => !isGithubSignal(item) && !isXSignal(item)), [items]);
+  const xItems = useMemo(() => {
+    const raw = briefing?.x?.length ? briefing.x : items.filter(isXSignal);
+    return raw.filter((item) => {
+      if (sourceFilter && item.source !== sourceFilter) return false;
+      if (priorityFilter && item.priority !== priorityFilter) return false;
+      if (tagFilter && !(item.tags || []).includes(tagFilter)) return false;
+      return item.triage !== "ignore";
+    });
+  }, [briefing, items, sourceFilter, priorityFilter, tagFilter]);
+  const mailItems = briefing?.mail || [];
+
   const radarRows = useMemo(() => {
     return [...(intel?.github || [])].sort((a, b) => {
       const av = a.stars_per_day ?? a.cold_stars_per_day ?? 0;
       const bv = b.stars_per_day ?? b.cold_stars_per_day ?? 0;
       return bv - av;
     });
+  }, [intel]);
+
+  const githubCards = useMemo(() => {
+    if (repos.length) return repos;
+    return radarRows.slice(0, 8).map(repoToCard);
+  }, [repos, radarRows]);
+
+  const xSources = useMemo(() => {
+    return (intel?.sources || []).filter((s) => s.meta?.channel === "x_monitor" || s.name.startsWith("X ·"));
   }, [intel]);
 
   const doScan = async () => {
@@ -199,10 +261,10 @@ export function IntelligenceView() {
   };
 
   const tiles: [string, number | string][] = [
-    ["24小时高价值", items.length],
-    ["已去重", briefing?.counts.duplicates_removed ?? 0],
-    ["关注项", intel?.stats.enabled_targets ?? "—"],
-    ["GitHub 雷达", repos.length || intel?.stats.github_repos || 0],
+    ["新闻简报", newsItems.length],
+    ["GitHub 雷达", githubCards.length || intel?.stats.github_repos || 0],
+    ["X 监控源", xSources.length],
+    ["邮件观察", briefing?.counts.mail ?? mailItems.length],
   ];
 
   return (
@@ -211,7 +273,7 @@ export function IntelligenceView() {
         <div>
           <div className="kicker">个人情报扫描器</div>
           <h1>情报简报</h1>
-          <p>资讯、GitHub 项目、来源与关注项集中在这里。进入简报前会去重、降噪、评分并中文化。点击任意条目呼出详情卡片，再决定是否打开来源。</p>
+          <p>资讯、GitHub 高增速项目、X AI/科技源和邮件观察分层展示。新闻进入简报前会去重、降噪、评分并中文化；邮件只在独立区域提示，不混入资讯判断。</p>
         </div>
         <div className="head-actions">
           <button className="btn ghost" onClick={refresh}>刷新</button>
@@ -256,31 +318,79 @@ export function IntelligenceView() {
         <ChipFilter label="标签" rows={briefing?.filters?.tags || []} active={tagFilter} onChange={setTagFilter} />
       </div>
 
-      <div className="briefing-layout">
-        <section>
-          <div className="panel-title">最近 24 小时高价值简报</div>
-          {items.length === 0 ? <div className="empty">当前筛选没有高价值简报条目。</div> : (
-            <div className="sig-grid editorial">
-              {items.map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
+      <div className="intel-brief-board">
+        <section className="intel-main-panel">
+          <div className="panel-title-row">
+            <div>
+              <div className="panel-title">新闻简报</div>
+              <p>按优先级、来源和标签筛选后的 24 小时高价值新闻，不包含邮件。</p>
             </div>
-          )}
-        </section>
-
-        <section>
-          <div className="panel-title">GitHub 高增速雷达</div>
-          {repos.length === 0 ? <div className="empty">暂无达到驾驶舱阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
-            <div className="repo-ladder">
-              {repos.map((repo, index) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} featured={index === 0} />)}
+            <span>{newsItems.length} 条</span>
+          </div>
+          {newsItems.length === 0 ? <div className="empty">当前筛选没有新闻简报条目。</div> : (
+            <div className="sig-grid editorial">
+              {newsItems.map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
             </div>
           )}
         </section>
       </div>
 
+      <section className="github-radar-module">
+        <div className="panel-title-row">
+          <div>
+            <div className="panel-title">GitHub 高增速雷达</div>
+            <p>只展示经过 star 动量、活跃度、相关性和中文摘要处理后的项目。</p>
+          </div>
+          <span>{githubCards.length} 项</span>
+        </div>
+        {githubCards.length === 0 ? <div className="empty">暂无达到雷达阈值的 GitHub 项目。系统会继续扫描星标增速和相关性。</div> : (
+          <div className="github-radar-grid">
+            {githubCards.slice(0, 8).map((repo, index) => <RepoBlock repo={repo} onOpen={setActiveRepo} key={repo.name} featured={index === 0} />)}
+          </div>
+        )}
+      </section>
+
+      <section className="x-monitor-module">
+        <div className="panel-title-row">
+          <div>
+            <div className="panel-title">X AI / 科技监控</div>
+            <p>OpenAI、Anthropic、DeepMind、xAI、DeepSeek、NVIDIA、Hugging Face、LangChain、Cursor 等源独立监控。</p>
+          </div>
+          <span>{xSources.length} 源</span>
+        </div>
+        <div className="x-source-strip">
+          {xSources.slice(0, 18).map((s) => <span key={s.id}>{s.meta?.handle || s.name.replace("X · ", "")}</span>)}
+          {xSources.length === 0 ? <em>未配置 X 监控源</em> : null}
+        </div>
+        {xItems.length === 0 ? (
+          <div className="empty">暂无 X 动态进入简报。默认公共 RSSHub 对 X 路由不稳定，系统已启用 Nitter RSS 兜底；点击“采集资讯”会重新拉取。</div>
+        ) : (
+          <div className="x-monitor-grid">
+            {xItems.slice(0, 8).map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
+          </div>
+        )}
+      </section>
+
+      <section className="mail-separation-panel">
+        <div className="panel-title-row">
+          <div>
+            <div className="panel-title">邮件观察</div>
+            <p>邮件分析已从资讯简报中分离，仅作为独立提醒和待处理线索。</p>
+          </div>
+          <span>{mailItems.length} 封</span>
+        </div>
+        {mailItems.length === 0 ? <div className="empty compact">当前没有进入观察区的邮件。</div> : (
+          <div className="mail-brief-grid">
+            {mailItems.slice(0, 4).map((item) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+          </div>
+        )}
+      </section>
+
       <div className="intel-grid-2" style={{ marginTop: 28 }}>
         <section className="card intel-panel">
-          <div className="panel-title">原始雷达指标</div>
-          <div className="radar-list">
-            {radarRows.slice(0, 8).map((repo) => <RadarMetricRow repo={repo} key={repo.repo_full_name} />)}
+            <div className="panel-title">雷达动量指标</div>
+            <div className="radar-list">
+            {radarRows.slice(0, 8).map((repo) => <RadarMetricRow repo={repo} onOpen={setActiveRepo} key={repo.repo_full_name} />)}
             {radarRows.length === 0 ? <div className="empty">暂无雷达数据。</div> : null}
           </div>
         </section>
@@ -315,14 +425,14 @@ export function IntelligenceView() {
               <button className="btn sm" onClick={submitSource}>接入</button>
             </div>
             <div className="source-list">
-              {(intel?.sources || []).slice(0, 12).map((s) => (
+              {(intel?.sources || []).slice(0, 18).map((s) => (
                 <button
-                  className={`source-row ${s.enabled ? "on" : ""}`}
+                  className={`source-row ${s.enabled ? "on" : ""} ${s.meta?.managed ? "managed" : ""}`}
                   key={s.id}
-                  onClick={() => setIntelligenceSourceEnabled(s.id, !s.enabled).then(refresh)}
+                  onClick={() => setActiveSource(s)}
                 >
                   <span>{s.name}</span>
-                  <small>{s.type} · {fmtTime(s.last_scan_ts)}</small>
+                  <small>{s.meta?.channel === "x_monitor" ? `X 监控 · ${s.meta?.handle || "默认源"}` : `${s.type} · ${fmtTime(s.last_scan_ts)}`}</small>
                 </button>
               ))}
             </div>
@@ -380,6 +490,47 @@ export function IntelligenceView() {
               <div><span>下一步</span><p>{activeRepo.next_step}</p></div>
             </div>
             {activeRepo.tags?.length ? <div className="modal-tags">{activeRepo.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={!!activeSource} onClose={() => setActiveSource(null)} kicker="情报来源" title={activeSource?.name}
+        footer={activeSource ? (
+          <div className="modal-actions">
+            {activeSource.url ? <a className="btn sm" href={activeSource.url} target="_blank" rel="noreferrer">打开源地址</a> : null}
+            {!activeSource.meta?.managed ? (
+              <button className="btn sm primary" onClick={() => setIntelligenceSourceEnabled(activeSource.id, !activeSource.enabled).then(() => { setActiveSource(null); refresh(); })}>
+                {activeSource.enabled ? "停用来源" : "启用来源"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}>
+        {activeSource ? (
+          <div className="modal-rich">
+            <p className="lead">
+              {activeSource.meta?.channel === "x_monitor"
+                ? "这是 X AI / 科技监控默认源，用来捕捉官方发布、模型更新、开发者工具动态和行业早期信号。默认公共 RSSHub 对 X 不稳定时，系统会使用 Nitter RSS 兜底。"
+                : activeSource.type === "rss"
+                  ? "这是 RSS 资讯源，进入简报前会经过去重、评分、中文化和优先级处理。"
+                  : "这是网页变化监控源，系统会对页面内容变化做摘要和评分。"}
+            </p>
+            <div className="modal-grid">
+              <div><span>类型</span><p>{activeSource.meta?.channel === "x_monitor" ? "X 监控" : activeSource.type.toUpperCase()}</p></div>
+              <div><span>状态</span><p>{activeSource.enabled ? "启用中" : "已停用"}{activeSource.meta?.managed ? " · 默认托管源" : ""}</p></div>
+              <div><span>最近扫描</span><p>{fmtTime(activeSource.last_scan_ts)}</p></div>
+            </div>
+            <div className="modal-detail">
+              <span>来源链路</span>
+              <p>{activeSource.url}</p>
+            </div>
+            {activeSource.meta ? (
+              <div className="modal-meta">
+                {activeSource.meta.handle ? <span>{activeSource.meta.handle}</span> : null}
+                {activeSource.meta.category ? <span>{activeSource.meta.category}</span> : null}
+                {activeSource.meta.route ? <span>{activeSource.meta.route}</span> : null}
+                {activeSource.domain ? <span>{activeSource.domain === "life" ? "生活域" : "业务域"}</span> : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>

@@ -33,7 +33,26 @@ const DEFAULT_SETTINGS: LeoJarvisSettings = {
   email: { enabled: false, accounts: [], apple_mail_fallback: true, apple_mail_limit: 20, apple_mail_unread_only: false },
   gmail: { enabled: false, user: "", app_password: "", host: "imap.gmail.com", port: 993, mailbox: "INBOX" },
   rss: { sources: [] },
-  x_monitor: { enabled: true, rsshub_base: "https://rsshub.app", users: ["sama", "karpathy"] },
+  x_monitor: {
+    enabled: true,
+    rsshub_base: "https://rsshub.app",
+    include_default_ai_tech: true,
+    limit: 6,
+    users: [
+      "OpenAI",
+      "AnthropicAI",
+      "GoogleDeepMind",
+      "xai",
+      "deepseek_ai",
+      "nvidia",
+      "huggingface",
+      "cursor_ai",
+      "vercel",
+      "togethercompute",
+      "sama",
+      "karpathy",
+    ],
+  },
   remote_devices: [],
   remote_cortex: [],
   overrides: {},
@@ -283,7 +302,7 @@ export function SettingsView() {
           <div className="settings-form two">
             <input placeholder="RSSHub 实例（自建更稳）" value={settings.x_monitor.rsshub_base} onChange={(e) => setSettings({ ...settings, x_monitor: { ...settings.x_monitor, rsshub_base: e.target.value } })} onBlur={(e) => save({ x_monitor: { ...settings.x_monitor, rsshub_base: e.target.value } })} />
           </div>
-          <textarea className="settings-textarea" value={xUsers} onChange={(e) => setXUsers(e.target.value)} placeholder={"sama\nkarpathy\nhttps://rss.app/feeds/xxxx.xml"} />
+          <textarea className="settings-textarea" value={xUsers} onChange={(e) => setXUsers(e.target.value)} placeholder={"OpenAI\nAnthropicAI\nGoogleDeepMind\nxai\ndeepseek_ai\nnvidia\nhuggingface\ncursor_ai\nvercel\nhttps://rss.app/feeds/xxxx.xml"} />
           <button className="btn sm primary" onClick={() => save({ x_monitor: { ...settings.x_monitor, users: splitLines(xUsers), enabled: true } })}>保存 X 监控名单</button>
         </section>
 

@@ -128,18 +128,21 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
         repo = repo_index.get(name, {})
         stars = int(item.get("repo_stars") or repo.get("stars") or 0) if (item.get("repo_stars") or repo) else None
         speed = float(item.get("repo_speed") or _repo_speed(repo) or 0) if (item.get("repo_speed") or repo) else None
+        summary = repo.get("summary_zh") or repo.get("display_description") or item.get("take") or "已通过情报评分筛选，值得进入驾驶舱观察。"
+        if str(summary).startswith("这个 GitHub 项目值得进入雷达") or "英文来源摘要" in str(summary):
+            summary = repo.get("summary_zh") or repo.get("display_description") or "项目增长和活跃度达到雷达阈值，等待下一轮中文摘要补齐。"
         seen.add(name)
         cards.append({
             "name": name,
             "title": item.get("title"),
             "url": item.get("url"),
             "score": score,
-            "summary": item.get("take") or "已通过情报评分筛选，值得进入驾驶舱观察。",
-            "why": item.get("why_important") or "增长和活跃度达到驾驶舱展示阈值。",
-            "relation": item.get("relation") or "与你的 AI、开发工具或本地助理关注项相关。",
-            "next_step": item.get("next_step") or "打开项目页，判断是否需要加入关注或写入个人记事。",
+            "summary": summary,
+            "why": repo.get("why_zh") or item.get("why_important") or "增长和活跃度达到驾驶舱展示阈值。",
+            "relation": repo.get("relation_zh") or item.get("relation") or "与你的 AI、开发工具或本地助理关注项相关。",
+            "next_step": repo.get("next_step_zh") or item.get("next_step") or "打开 README、示例和最近提交，判断是否值得持续监控。",
             "priority": item.get("priority") or "高优先",
-            "tags": item.get("tags") or ["GitHub 项目"],
+            "tags": repo.get("display_topics") or item.get("tags") or ["GitHub 项目"],
             "stars": stars,
             "speed": speed,
             "star_history": repo.get("star_history") or [],
@@ -168,7 +171,7 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
             "relation": "与你关注的 AI 工具、本地助理、自动化或开发工作流可能相关。",
             "next_step": "打开项目页看 README 和最近提交，决定是否加入情报关注项或写入个人记事。",
             "priority": "高优先" if speed >= 25 else "中优先",
-            "tags": chinese_tags(repo.get("topics") or []) or ["GitHub 项目"],
+            "tags": repo.get("display_topics") or chinese_tags(repo.get("topics") or []) or ["GitHub 项目"],
             "stars": stars,
             "speed": speed,
             "star_history": repo.get("star_history") or [],

@@ -74,6 +74,14 @@ INFO="${APP}/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "${INFO}"
 /usr/libexec/PlistBuddy -c "Add :NSUserNotificationAlertStyle string alert" "${INFO}"
 
+echo "==> Clean metadata and sign app"
+xattr -cr "${APP}" 2>/dev/null || true
+find "${APP}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "${APP}" >/dev/null
+  codesign --verify --deep --strict "${APP}" >/dev/null
+fi
+
 echo "==> Create DMG"
 cp -R "${APP}" "${STAGING}/${APP_NAME}.app"
 if [[ -f "${APP}/Contents/Resources/LeoJarvis.icns" ]]; then
@@ -85,6 +93,16 @@ fi
 ln -s /Applications "${STAGING}/Applications"
 hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING}" -ov -format UDZO "${DMG}"
 rm -rf "${STAGING}"
+find "${APP}" -print0 | xargs -0 xattr -c 2>/dev/null || true
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "${APP}" >/dev/null
+  codesign --verify --deep --strict "${APP}" >/dev/null
+fi
+xattr -c "${DMG}" 2>/dev/null || true
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "${DMG}" >/dev/null
+  codesign --verify "${DMG}" >/dev/null
+fi
 
 SHA="$(shasum -a 256 "${DMG}" | awk '{print $1}')"
 MANIFEST="${ROOT}/desktop/updates/appcast.json"

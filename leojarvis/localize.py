@@ -10,6 +10,26 @@ _ALLOWED = {
 }
 
 _TERM_MAP = {
+    "ai-agent": "AI 智能体",
+    "ai-agents": "AI 智能体",
+    "ai agent": "AI 智能体",
+    "ai agents": "AI 智能体",
+    "agentic": "智能体",
+    "agentic-ai": "智能体 AI",
+    "agentic-skills": "智能体技能",
+    "ai-skills": "AI 技能",
+    "ai-tool": "AI 工具",
+    "ai-tools": "AI 工具",
+    "ai-coding": "AI 编程",
+    "coding-agent": "编程智能体",
+    "coding-agents": "编程智能体",
+    "developer-tools": "开发者工具",
+    "devtools": "开发者工具",
+    "mcp-server": "MCP 服务",
+    "mcp-servers": "MCP 服务",
+    "llm": "大语言模型",
+    "llms": "大语言模型",
+    "local-ai": "本地 AI",
     "personal assistant": "个人助理",
     "desktop assistant": "桌面助理",
     "workflow automation": "工作流自动化",
@@ -69,7 +89,7 @@ def fallback_chinese(text: str, *, prefix: str = "") -> str:
             if len(keywords) >= 6:
                 break
         subject = "、".join(keywords) if keywords else "英文来源"
-        label = prefix or "英文来源摘要"
+        label = prefix or "中文摘要"
         return f"{label}：{subject} 相关动态"
     return lowered[:500]
 

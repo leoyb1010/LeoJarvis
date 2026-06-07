@@ -1,12 +1,17 @@
 import base64
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from leojarvis import db
 from leojarvis.ingest.base import RawItem
+from leojarvis.ingest.rss import x_monitor_feeds
+from leojarvis.intelligence.scanner import github_radar
 from leojarvis.judge.engine import judge_and_store
+from leojarvis.localize import to_chinese
 from leojarvis.main import app
+from leojarvis import user_settings
 
 
 def test_health_endpoint():
@@ -51,6 +56,106 @@ def test_event_judgment_briefing_feedback_cycle():
                 c.execute("DELETE FROM memories WHERE source_events LIKE ?", (f"%{event_id}%",))
                 c.execute("DELETE FROM judgments WHERE event_id=?", (event_id,))
                 c.execute("DELETE FROM events WHERE id=?", (event_id,))
+
+
+def test_briefing_separates_email_from_news():
+    db.init_db()
+    email_id = None
+    news_id = None
+    try:
+        email_id = db.insert_event(
+            source="email:Apple Mail:INBOX",
+            domain="life",
+            kind="email",
+            title="测试邮件不应进入新闻简报",
+            content="From: test@example.com",
+            dedup_key="pytest-email-separate",
+        )
+        news_id = db.insert_event(
+            source="rss:pytest",
+            domain="business",
+            kind="news",
+            title="测试 AI 新闻应进入新闻简报",
+            content="AI Agent 和本地助理相关的重要新闻。",
+            dedup_key="pytest-news-separate",
+        )
+        assert email_id and news_id
+        db.insert_judgment(event_id=email_id, score=0.62, take="邮件摘要", triage="digest", reasons=["邮件观察"])
+        db.insert_judgment(event_id=news_id, score=0.82, take="新闻摘要", triage="digest", reasons=["AI Agent"])
+        with TestClient(app) as client:
+            res = client.get("/briefing/today")
+        assert res.status_code == 200
+        payload = res.json()
+        assert any(row["event_id"] == email_id for row in payload["mail"])
+        assert all(row["event_id"] != email_id for row in payload["items"])
+        assert any(row["event_id"] == news_id for row in payload["items"])
+    finally:
+        with db.conn() as c:
+            for event_id in [email_id, news_id]:
+                if event_id:
+                    c.execute("DELETE FROM judgments WHERE event_id=?", (event_id,))
+                    c.execute("DELETE FROM events WHERE id=?", (event_id,))
+
+
+def test_github_radar_has_chinese_display_fields():
+    db.init_db()
+    repo = "pytest/local-agent-demo"
+    with db.conn() as c:
+        c.execute("DELETE FROM github_repo_snapshots WHERE repo_full_name=?", (repo,))
+        created = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat().replace("+00:00", "Z")
+        pushed = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat().replace("+00:00", "Z")
+        c.execute(
+            """INSERT INTO github_repo_snapshots(
+                 id, repo_full_name, query, stars, forks, open_issues, description, url,
+                 language, topics, license, created_at, pushed_at, updated_at, observed_ts
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "pytest-github-radar-display",
+                repo,
+                "personal AI assistant",
+                1200,
+                160,
+                12,
+                "A local-first AI agent desktop app with persistent memory and workflow automation.",
+                "https://github.com/pytest/local-agent-demo",
+                "TypeScript",
+                '["ai-agent","local-first","automation"]',
+                "MIT",
+                created,
+                pushed,
+                pushed,
+                db.now_ms(),
+            ),
+        )
+    try:
+        rows = github_radar(limit=200)
+        item = next(row for row in rows if row["repo_full_name"] == repo)
+        assert item["summary_zh"]
+        assert "英文来源摘要" not in item["summary_zh"]
+        assert not item["summary_zh"].startswith("中文摘要")
+        assert "英文来源摘要" not in " ".join(item["display_topics"])
+        assert "AI 智能体" in item["display_topics"]
+        assert item["why_zh"]
+        assert item["relation_zh"]
+        assert item["next_step_zh"]
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM github_repo_snapshots WHERE repo_full_name=?", (repo,))
+
+
+def test_x_monitor_defaults_include_ai_tech_sources():
+    cfg = user_settings.load()["x_monitor"]
+    assert "OpenAI" in cfg["users"]
+    assert "AnthropicAI" in cfg["users"]
+    assert "GoogleDeepMind" in cfg["users"]
+    feeds = x_monitor_feeds()
+    assert any(feed["name"] == "X · @OpenAI" for feed in feeds)
+
+
+def test_localize_fallback_uses_display_safe_label():
+    text = to_chinese("A new agentic workflow automation benchmark for AI coding agents", allow_llm=False)
+    assert "英文来源摘要" not in text
+    assert text
 
 
 def test_cockpit_and_personal_notes_endpoints():

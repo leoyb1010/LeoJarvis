@@ -91,10 +91,10 @@ fulltext = false
 limit = 12
 
 [[rss]]
-name = "Reuters · World"
-url = "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"
+name = "OpenAI · News"
+url = "https://openai.com/news/rss.xml"
 domain = "business"
-category = "财经"
+category = "AI科技"
 fulltext = false
 limit = 10
 
@@ -141,7 +141,12 @@ max_queries = 10
 max_results_per_query = 8
 # 搜索最近仍活跃、且不是太老的项目，用于发现 star 增长很快的新项目。
 pushed_days = 45
-created_days = 730
+created_days = 180
+# 展示层只保留近期项目，或真实观测到最近仍在快速涨 star 的项目。
+max_repo_age_days = 210
+min_cold_stars_per_day = 5
+min_measured_stars_per_day = 3
+popular_star_ceiling = 80000
 queries = [
   "AI agent local-first",
   "personal AI assistant",

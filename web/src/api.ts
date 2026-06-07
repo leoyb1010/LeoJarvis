@@ -51,6 +51,10 @@ export type BriefingItem = {
   detail?: string;
   tags?: string[];
   ts?: number;
+  repo_stars?: number | null;
+  repo_speed?: number | null;
+  channel?: string | null;
+  category?: string | null;
 };
 
 export type BriefingGroup = {
@@ -65,9 +69,12 @@ export type BriefingData = {
   business: BriefingItem[];
   life: BriefingItem[];
   items?: BriefingItem[];
+  mail?: BriefingItem[];
+  x?: BriefingItem[];
+  github?: BriefingItem[];
   focus?: BriefingItem[];
   groups?: BriefingGroup[];
-  counts: { business: number; life: number; total?: number; duplicates_removed?: number };
+  counts: { business: number; life: number; total?: number; mail?: number; x?: number; github?: number; duplicates_removed?: number };
   filters?: {
     sources: { name: string; count: number }[];
     priorities: { name: string; count: number }[];
@@ -191,7 +198,7 @@ export type LeoJarvisSettings = {
   email: { enabled: boolean; accounts: any[]; apple_mail_fallback?: boolean; apple_mail_limit?: number; apple_mail_unread_only?: boolean };
   gmail: { enabled: boolean; user: string; app_password: string; host?: string; port?: number; mailbox?: string };
   rss: { sources: RssSource[] };
-  x_monitor: { enabled: boolean; rsshub_base: string; users: string[] };
+  x_monitor: { enabled: boolean; rsshub_base: string; users: string[]; include_default_ai_tech?: boolean; limit?: number };
   remote_devices: any[];
   remote_cortex: RemoteLeoJarvisConnection[];
   overrides?: Record<string, Record<string, any>>;
@@ -399,6 +406,13 @@ export type GithubRadarRepo = {
   stars: number;
   forks?: number;
   description?: string;
+  display_description?: string;
+  summary_zh?: string;
+  why_zh?: string;
+  relation_zh?: string;
+  next_step_zh?: string;
+  display_topics?: string[];
+  momentum_score?: number;
   url?: string;
   language?: string;
   topics?: string[];

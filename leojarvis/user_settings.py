@@ -9,6 +9,23 @@ from .config import DATA_DIR
 
 SETTINGS_PATH = DATA_DIR / "user_settings.json"
 
+DEFAULT_X_MONITOR_USERS = [
+    "OpenAI",
+    "AnthropicAI",
+    "GoogleDeepMind",
+    "xai",
+    "deepseek_ai",
+    "nvidia",
+    "huggingface",
+    "cursor_ai",
+    "vercel",
+    "togethercompute",
+    "sama",
+    "karpathy",
+]
+
+DEPRECATED_X_MONITOR_USERS = {"LangChainAI", "lmarena_ai"}
+
 DEFAULTS: dict[str, Any] = {
     "notifications": {
         "enabled": True,
@@ -18,7 +35,13 @@ DEFAULTS: dict[str, Any] = {
     "email": {"enabled": False, "accounts": [], "apple_mail_fallback": True, "apple_mail_limit": 20, "apple_mail_unread_only": False},
     "gmail": {"enabled": False, "user": "", "app_password": "", "host": "imap.gmail.com", "port": 993, "mailbox": "INBOX"},
     "rss": {"sources": []},
-    "x_monitor": {"enabled": True, "rsshub_base": "https://rsshub.app", "users": ["sama", "karpathy"]},
+    "x_monitor": {
+        "enabled": True,
+        "rsshub_base": "https://rsshub.app",
+        "users": DEFAULT_X_MONITOR_USERS,
+        "include_default_ai_tech": True,
+        "limit": 6,
+    },
     "remote_devices": [],
     "remote_cortex": [],
     # 高级阈值/节奏：留空表示沿用 settings.toml。UI 在这里写入即可覆盖，
@@ -37,14 +60,35 @@ def _merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _normalize_x_monitor(data: dict[str, Any]) -> dict[str, Any]:
+    monitor = data.get("x_monitor")
+    if not isinstance(monitor, dict):
+        monitor = {}
+    users: list[str] = []
+    for raw in monitor.get("users") or []:
+        value = str(raw).strip()
+        if value in DEPRECATED_X_MONITOR_USERS:
+            continue
+        if value and value not in users:
+            users.append(value)
+    if monitor.get("include_default_ai_tech", True):
+        for value in DEFAULT_X_MONITOR_USERS:
+            if value not in users:
+                users.append(value)
+    monitor["users"] = users
+    monitor["limit"] = int(monitor.get("limit") or 6)
+    data["x_monitor"] = monitor
+    return data
+
+
 def load() -> dict[str, Any]:
     if not SETTINGS_PATH.exists():
-        return deepcopy(DEFAULTS)
+        return _normalize_x_monitor(deepcopy(DEFAULTS))
     try:
         raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        return _merge(DEFAULTS, raw if isinstance(raw, dict) else {})
+        return _normalize_x_monitor(_merge(DEFAULTS, raw if isinstance(raw, dict) else {}))
     except Exception:
-        return deepcopy(DEFAULTS)
+        return _normalize_x_monitor(deepcopy(DEFAULTS))
 
 
 def save(data: dict[str, Any]) -> dict[str, Any]:
