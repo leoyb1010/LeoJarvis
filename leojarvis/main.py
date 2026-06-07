@@ -38,6 +38,9 @@ def _warm_caches() -> None:
             from .agent import sysinfo
             sysinfo.ai_tool_status(block=True)
             sysinfo.weather()
+            # 预热驾驶舱总览缓存，首屏直接命中，避免第一次点击卡 1~2s。
+            from .cockpit import overview
+            overview(force=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[warmup] failed: {exc}")
 

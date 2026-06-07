@@ -635,6 +635,17 @@ function remoteTerminalData<T>(payload: T | { ok: boolean; data?: T; error?: str
   return payload as T;
 }
 
+export async function getTerminalSessions(remoteId = "local"): Promise<TerminalSession[]> {
+  const path = remoteId === "local" ? `${BASE}/terminal/sessions` : `${BASE}/remote-cortex/${remoteId}/terminal/sessions`;
+  try {
+    const payload = await readJson<TerminalSession[] | { ok: boolean; data?: TerminalSession[] }>(await fetch(path), "读取 CLI 会话");
+    const rows = Array.isArray(payload) ? payload : (payload as any)?.data;
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function createTerminalSession(tool_id: string, cwd = "", remoteId = "local"): Promise<TerminalResponse> {
   const path = remoteId === "local" ? `${BASE}/terminal/sessions` : `${BASE}/remote-cortex/${remoteId}/terminal/sessions`;
   const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path, {

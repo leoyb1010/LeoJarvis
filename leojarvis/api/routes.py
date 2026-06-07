@@ -310,46 +310,62 @@ def device_heartbeat(req: DeviceHeartbeatIn) -> dict:
     return {"ok": True, "device": summary}
 
 
+import threading as _threading
+
+_DEVICE_REFRESH_LOCK = _threading.Lock()
+_device_refreshing = False
+
+
+def _refresh_remote_device_summaries() -> None:
+    """后台抓取已连接远端的 /device/summary 并写入心跳，不阻塞 /devices 响应。"""
+    global _device_refreshing
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        from .. import remote_cortex
+        connections = remote_cortex.list_connections(auto_connect=False)
+        connected = [c for c in connections if c.get("enabled", True) and c.get("connected")]
+        if not connected:
+            return
+
+        def _one(conn: dict) -> None:
+            conn_id = str(conn.get("id") or "")
+            try:
+                res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=4.0)
+                if res.get("ok") and res.get("data"):
+                    s = dict(res["data"])
+                    s["device_id"] = conn_id
+                    s["device_name"] = conn.get("name") or s.get("device_name") or conn.get("host")
+                    s["host_name"] = s.get("host_name") or conn.get("host")
+                    s["role"] = "remote-leojarvis"
+                    db.upsert_device_heartbeat(s)
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=min(4, len(connected))) as pool:
+            list(pool.map(_one, connected))
+    finally:
+        with _DEVICE_REFRESH_LOCK:
+            globals()["_device_refreshing"] = False
+
+
 @router.get("/devices")
 def devices(limit: int = 50) -> list[dict]:
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     from ..agent import sysinfo
     from .. import remote_cortex
+    global _device_refreshing
     local = sysinfo.device_summary()
     db.upsert_device_heartbeat(local)
     connections = remote_cortex.list_connections(auto_connect=False)
     remote_cortex.ensure_enabled_connections_async(connections)
-    connected: list[dict] = []
+    # 仅清理“已删除/已禁用”的远端心跳；连接中的保留上次数据，避免一抖就显示离线。
     for conn in connections:
         if not conn.get("enabled", True):
-            continue
-        conn_id = str(conn.get("id") or "")
-        db.delete_device_heartbeat(f"rc-{conn_id}")
-        if not conn.get("connected"):
-            continue
-        connected.append(conn)
-
-    def _remote_summary(conn: dict) -> dict | None:
-        conn_id = str(conn.get("id") or "")
-        try:
-            res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=2.5)
-            if res.get("ok") and res.get("data"):
-                summary = dict(res["data"])
-                summary["device_id"] = conn_id
-                summary["device_name"] = conn.get("name") or summary.get("device_name") or conn.get("host")
-                summary["host_name"] = summary.get("host_name") or conn.get("host")
-                summary["role"] = "remote-leojarvis"
-                return summary
-        except Exception:
-            return None
-        return None
-
-    if connected:
-        with ThreadPoolExecutor(max_workers=min(4, len(connected))) as pool:
-            for fut in as_completed([pool.submit(_remote_summary, conn) for conn in connected]):
-                summary = fut.result()
-                if summary:
-                    db.upsert_device_heartbeat(summary)
+            db.delete_device_heartbeat(f"rc-{conn.get('id') or ''}")
+    # 远端摘要后台刷新（去重，单线程在跑就不再开），下一次轮询即更新——不阻塞首屏。
+    with _DEVICE_REFRESH_LOCK:
+        if not _device_refreshing:
+            _device_refreshing = True
+            _threading.Thread(target=_refresh_remote_device_summaries, daemon=True).start()
     rows = db.list_device_heartbeats(limit=limit)
     now = int(time.time())
     for row in rows:

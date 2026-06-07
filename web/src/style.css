@@ -3073,9 +3073,15 @@ button { font: inherit; }
 .intel-live-grid .github-radar-module { margin-top: 0; }
 .panel-title-row p { font: 400 12.5px/1.5 var(--font-body); color: var(--muted); margin-top: 4px; }
 .panel-title-row > span { flex: none; color: var(--accent); background: var(--accent-soft); border: 0; border-radius: 999px; padding: 5px 11px; font: 700 11px var(--font-mono); }
+/* 卡片用 masonry（按内容高度排布），每条消息高度贴合内容，杜绝被拉伸出的下方空白 */
 .sig-grid.editorial, .intel-live-grid .sig-grid.editorial,
-.intel-live-grid .github-radar-grid, .github-radar-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 10px;
+.intel-live-grid .github-radar-grid, .github-radar-grid,
+.x-monitor-grid, .mail-brief-grid {
+  display: block; column-width: 290px; column-gap: 10px;
+}
+.intel-main-panel .sig-block, .github-radar-module .sig-block,
+.x-monitor-module .sig-block, .mail-separation-panel .sig-block {
+  break-inside: avoid; width: 100%; margin: 0 0 10px;
 }
 .sig-block { gap: 8px; padding: 14px 15px; border-radius: var(--r-md); box-shadow: none; }
 .sig-block:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-1); }
@@ -3094,7 +3100,6 @@ button { font: inherit; }
 .repo-why-line { padding-top: 8px; }
 .x-monitor-module, .mail-separation-panel { margin-top: 14px; }
 .x-source-strip span, .x-source-strip em { border-radius: 999px; padding: 5px 10px; background: var(--inset); border-color: var(--line-soft); font: 650 11px var(--font-mono); }
-.x-monitor-grid, .mail-brief-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 10px; }
 .intel-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
 .intel-panel { padding: 18px; border-radius: var(--r-lg); }
 .radar-row { width: 100%; text-align: left; display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); background: none; border-left: 0; border-right: 0; border-top: 0; cursor: pointer; }
@@ -3193,3 +3198,7 @@ button { font: inherit; }
   .device-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .main { padding: 20px 18px 80px; }
 }
+
+/* CLI 后台运行中：工具卡用 accent 标识 */
+.dash-tool.has-bg i { color: var(--accent); font-weight: 700; }
+.dash-tool.has-bg .status-lamp { background: var(--accent); }

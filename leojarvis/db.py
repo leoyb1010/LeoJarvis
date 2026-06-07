@@ -170,11 +170,23 @@ CREATE INDEX IF NOT EXISTS idx_device_heartbeats_seen ON device_heartbeats(last_
 """
 
 
+import threading
+
+_INIT_LOCK = threading.Lock()
+_SCHEMA_READY = False
+
+
 @contextmanager
 def conn():
     DB_PATH.parent.mkdir(exist_ok=True)
-    c = sqlite3.connect(DB_PATH)
+    # timeout=30 + busy_timeout 让并发写入排队等待而不是直接抛 "database is locked"。
+    c = sqlite3.connect(DB_PATH, timeout=30.0)
     c.row_factory = sqlite3.Row
+    # WAL 必须在“非事务”状态下、每个连接显式开启：放在 SCHEMA 的 executescript 里会被
+    # 隐式事务吞掉而失效（之前根本没生成 -wal 文件 = 仍是 rollback 模式，读写互锁导致服务挂）。
+    c.execute("PRAGMA busy_timeout=30000")
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
     try:
         yield c
         c.commit()
@@ -182,7 +194,20 @@ def conn():
         c.close()
 
 
-def init_db() -> None:
+def init_db(force: bool = False) -> None:
+    # 整个进程只建一次表/迁移一次。之前每次 query/insert 都调用 init_db()，
+    # 等于每次读都跑一遍 SCHEMA + 写一次 "UPDATE memories"，把数据库锁死、首页/系统页/情报页转圈。
+    global _SCHEMA_READY
+    if _SCHEMA_READY and not force:
+        return
+    with _INIT_LOCK:
+        if _SCHEMA_READY and not force:
+            return
+        _init_db_impl()
+        _SCHEMA_READY = True
+
+
+def _init_db_impl() -> None:
     with conn() as c:
         c.executescript(SCHEMA)
         memory_cols = {r["name"] for r in c.execute("PRAGMA table_info(memories)").fetchall()}

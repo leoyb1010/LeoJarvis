@@ -20,6 +20,7 @@ import {
   createTerminalSession,
   getCockpitOverview,
   getRemoteCockpit,
+  getTerminalSessions,
   listRemoteLeoJarvis,
   readTerminalSession,
   upgradeAiTool,
@@ -275,6 +276,8 @@ export function Dashboard() {
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalError, setTerminalError] = useState("");
+  // 后台仍在运行的 CLI 会话（关闭弹层后不杀进程），用于在工具卡上标记“后台运行中”。
+  const [bgSessions, setBgSessions] = useState<TerminalSession[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -310,6 +313,17 @@ export function Dashboard() {
     const t = window.setInterval(() => { load(); refreshRemotes(); }, 8000);
     return () => { alive = false; window.clearInterval(t); };
   }, [activeDevice]);
+
+  // 后台 CLI 会话清单：标记哪些工具有正在后台运行的控制台，可一键重新挂载。
+  useEffect(() => {
+    let alive = true;
+    const poll = () => getTerminalSessions(activeDevice)
+      .then((rows) => { if (alive) setBgSessions(rows.filter((s) => s.running)); })
+      .catch(() => {});
+    poll();
+    const t = window.setInterval(poll, 5000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [activeDevice, terminalSession?.id]);
 
   useEffect(() => {
     if (!terminalSession?.id) return;
@@ -426,23 +440,32 @@ export function Dashboard() {
     }
   }
 
-  async function closeToolTerminal() {
-    if (terminalSession) {
-      try { await closeTerminalSession(terminalSession.id, terminalDevice); } catch { /* best-effort */ }
-    }
+  // 仅“脱离”：停止前端轮询、清空本地显示，但不杀进程——CLI 继续在后台独立运行。
+  function detachToolTerminal() {
     setTerminalSession(null);
     setTerminalOutput("");
     setTerminalInput("");
     setTerminalError("");
   }
 
+  // 显式“结束会话”：真正杀掉后台 CLI 进程。
+  async function endToolTerminal() {
+    if (terminalSession) {
+      try { await closeTerminalSession(terminalSession.id, terminalDevice); } catch { /* best-effort */ }
+    }
+    detachToolTerminal();
+    getTerminalSessions(activeDevice).then((rows) => setBgSessions(rows.filter((s) => s.running))).catch(() => {});
+  }
+
+  // 打开/重新挂载控制台：后端遇到同工具的后台会话会自动重新挂载并回放完整上下文。
   async function openToolTerminal(tool: AiToolStatus) {
     if (!tool.installed || terminalBusy) return;
     setTerminalBusy(true);
     setTerminalError("");
     setTerminalOutput("");
+    setTerminalInput("");
+    setTerminalSession(null);
     try {
-      if (terminalSession) await closeToolTerminal();
       const res = await createTerminalSession(tool.id, "", activeDevice);
       if (!res.ok || !res.session) throw new Error(res.error || "CLI 控制台启动失败");
       setTerminalDevice(activeDevice);
@@ -568,19 +591,20 @@ export function Dashboard() {
           <div className="dash-tool-list">
             {(runtime?.ai_tools || []).map((tool) => {
               const visual = toolVisual(tool);
+              const hasBg = bgSessions.some((s) => s.tool_id === tool.id);
               return (
                 <button
-                  className={`dash-tool runtime-icon-card ${tool.installed ? "on" : "off"} ${tool.running ? "running" : ""} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
+                  className={`dash-tool runtime-icon-card ${tool.installed ? "on" : "off"} ${hasBg || tool.running ? "running" : ""} ${hasBg ? "has-bg" : ""} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
                   key={tool.id}
                   onClick={() => setActiveTool(tool)}
-                  title={`${tool.name} · ${!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}`}
+                  title={`${tool.name} · ${!tool.installed ? "未安装" : hasBg ? "后台控制台运行中" : tool.running ? "运行中" : "就绪"}`}
                 >
                   <span className="runtime-icon-shell">
                     <RuntimeIcon visual={visual} />
                     <span className="status-lamp" />
                   </span>
                   <b>{visual.name}</b>
-                  <i>{!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}</i>
+                  <i>{!tool.installed ? "未安装" : hasBg ? "后台运行" : tool.running ? "运行中" : "就绪"}</i>
                 </button>
               );
             })}
@@ -783,12 +807,16 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); void closeToolTerminal(); }} kicker={agentTitle} title={activeTool?.name}
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); detachToolTerminal(); }} kicker={agentTitle} title={activeTool?.name}
         footer={activeTool ? (
           <div className="modal-actions">
             {activeTool.installed ? (
-              terminalSession ? <button className="btn sm ghost" onClick={() => void closeToolTerminal()}>关闭控制台</button>
-                : <button className="btn sm primary" onClick={() => void openToolTerminal(activeTool)} disabled={terminalBusy}>{terminalBusy ? "启动中" : "打开控制台"}</button>
+              terminalSession ? (
+                <>
+                  <button className="btn sm ghost" onClick={() => { setActiveTool(null); setUpgradeResult(""); detachToolTerminal(); }}>最小化（后台运行）</button>
+                  <button className="btn sm danger" onClick={() => void endToolTerminal()}>结束会话</button>
+                </>
+              ) : <button className="btn sm primary" onClick={() => void openToolTerminal(activeTool)} disabled={terminalBusy}>{terminalBusy ? "启动中" : (bgSessions.some((s) => s.tool_id === activeTool.id) ? "重新挂载控制台" : "打开控制台")}</button>
             ) : null}
             {activeTool.can_upgrade && isLocalDevice ? <button className="btn sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}
           </div>

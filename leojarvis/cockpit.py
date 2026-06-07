@@ -182,7 +182,30 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
     return cards
 
 
-def overview() -> dict:
+import threading as _threading
+
+_OVERVIEW_CACHE: dict = {"ts": 0.0, "data": None}
+_OVERVIEW_TTL = 6.0
+_OVERVIEW_LOCK = _threading.Lock()
+
+
+def overview(force: bool = False) -> dict:
+    # 驾驶舱总览很重（系统探测 + 简报 + GitHub 雷达 + 多张表）。顶部状态条(每页)和驾驶舱
+    # 同时高频轮询它，没缓存就是每页都卡 1~2s。这里加 6s TTL：高频轮询直接命中缓存。
+    now = time.time()
+    cached = _OVERVIEW_CACHE.get("data")
+    if cached is not None and not force and (now - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_TTL:
+        return cached
+    with _OVERVIEW_LOCK:
+        if _OVERVIEW_CACHE.get("data") is not None and not force and (time.time() - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_TTL:
+            return _OVERVIEW_CACHE["data"]
+        data = _build_overview()
+        _OVERVIEW_CACHE["data"] = data
+        _OVERVIEW_CACHE["ts"] = time.time()
+        return data
+
+
+def _build_overview() -> dict:
     system = _parse_system(sysinfo.system_status())
     service_rows = services.status_all()
     notifications = sysinfo.local_notifications()
