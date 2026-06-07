@@ -330,7 +330,7 @@ def _refresh_remote_device_summaries() -> None:
         def _one(conn: dict) -> None:
             conn_id = str(conn.get("id") or "")
             try:
-                res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=4.0)
+                res = remote_cortex.fetch(conn_id, "/device/summary", auto_connect=True, timeout=12.0, reconnect=True)
                 if res.get("ok") and res.get("data"):
                     s = dict(res["data"])
                     s["device_id"] = conn_id
@@ -338,14 +338,71 @@ def _refresh_remote_device_summaries() -> None:
                     s["host_name"] = s.get("host_name") or conn.get("host")
                     s["role"] = "remote-leojarvis"
                     db.upsert_device_heartbeat(s)
-            except Exception:
-                pass
+                elif res.get("error"):
+                    print(f"[devices] remote summary failed: {conn.get('name') or conn_id}: {res.get('error')}")
+            except Exception as exc:
+                print(f"[devices] remote summary error: {conn.get('name') or conn_id}: {exc}")
 
         with ThreadPoolExecutor(max_workers=min(4, len(connected))) as pool:
             list(pool.map(_one, connected))
     finally:
         with _DEVICE_REFRESH_LOCK:
             globals()["_device_refreshing"] = False
+
+
+def _remote_device_placeholder(conn: dict, *, now: int, online: bool, error: str = "") -> dict:
+    status = "连接中" if online else "离线"
+    level = "注意" if online else "异常"
+    advice = "远端 LeoJarvis 已连接，正在刷新设备摘要。" if online else (error or "远端 LeoJarvis 暂未响应。")
+    return {
+        "device_id": str(conn.get("id") or ""),
+        "device_name": str(conn.get("name") or conn.get("host") or "远程 LeoJarvis"),
+        "host_name": str(conn.get("host") or ""),
+        "model": "远程 Mac",
+        "role": "remote-leojarvis",
+        "generated_at": now,
+        "last_seen_ts": now if online else 0,
+        "health": 72 if online else 0,
+        "status": status,
+        "metrics": {},
+        "modules": {},
+        "services": {"online": 0, "total": 0},
+        "risks": [{"title": status, "advice": advice[:180], "level": level}],
+        "privacy": "远端设备只显示连接态和健康摘要，不读取个人内容。",
+        "age_seconds": 0 if online else now,
+        "online": online,
+    }
+
+
+def _apply_remote_device_states(rows: list[dict], connections: list[dict], *, now: int) -> list[dict]:
+    by_id = {str(row.get("device_id") or ""): row for row in rows}
+    remote_by_id = {str(conn.get("id") or ""): conn for conn in connections if conn.get("enabled", True)}
+    for row in rows:
+        age = max(0, now - int(row.get("last_seen_ts") or row.get("generated_at") or now))
+        row["age_seconds"] = age
+        device_id = str(row.get("device_id") or "")
+        remote_conn = remote_by_id.get(device_id)
+        if remote_conn:
+            is_connected = bool(remote_conn.get("connected")) and not bool(remote_conn.get("last_error"))
+            row["online"] = is_connected
+            if not is_connected:
+                row["status"] = "离线"
+                row["health"] = min(float(row.get("health") or 0), 40)
+                risks = list(row.get("risks") or [])
+                risks.insert(0, {
+                    "title": "远端 LeoJarvis 未响应",
+                    "advice": str(remote_conn.get("last_error") or "正在后台重连。")[:180],
+                    "level": "异常",
+                })
+                row["risks"] = risks[:4]
+        else:
+            row["online"] = age < 180
+    for conn in connections:
+        cid = str(conn.get("id") or "")
+        if conn.get("enabled", True) and cid and cid not in by_id:
+            online = bool(conn.get("connected")) and not bool(conn.get("last_error"))
+            rows.append(_remote_device_placeholder(conn, now=now, online=online, error=str(conn.get("last_error") or "")))
+    return rows
 
 
 @router.get("/devices")
@@ -355,23 +412,32 @@ def devices(limit: int = 50) -> list[dict]:
     global _device_refreshing
     local = sysinfo.device_summary()
     db.upsert_device_heartbeat(local)
+    now = int(time.time())
     connections = remote_cortex.list_connections(auto_connect=False)
-    remote_cortex.ensure_enabled_connections_async(connections)
-    # 仅清理“已删除/已禁用”的远端心跳；连接中的保留上次数据，避免一抖就显示离线。
+    refreshed_connections = []
+    # 设备页需要真实 LeoJarvis HTTP 状态：只看 SSH 本地端口会产生“假在线、设备离线”。
     for conn in connections:
+        cid = str(conn.get("id") or "")
+        if not cid:
+            continue
         if not conn.get("enabled", True):
-            db.delete_device_heartbeat(f"rc-{conn.get('id') or ''}")
+            db.delete_device_heartbeat(cid)
+            refreshed_connections.append(conn)
+            continue
+        last_health_ts = int(conn.get("last_health_ts") or 0)
+        if conn.get("connected") and last_health_ts and now - last_health_ts < 60:
+            refreshed_connections.append(conn)
+        else:
+            checked = remote_cortex.validate_connection(cid, timeout=3.0, reconnect_async=True)
+            refreshed_connections.append(checked or conn)
+    connections = refreshed_connections
     # 远端摘要后台刷新（去重，单线程在跑就不再开），下一次轮询即更新——不阻塞首屏。
     with _DEVICE_REFRESH_LOCK:
         if not _device_refreshing:
             _device_refreshing = True
             _threading.Thread(target=_refresh_remote_device_summaries, daemon=True).start()
     rows = db.list_device_heartbeats(limit=limit)
-    now = int(time.time())
-    for row in rows:
-        age = max(0, now - int(row.get("last_seen_ts") or row.get("generated_at") or now))
-        row["age_seconds"] = age
-        row["online"] = age < 180
+    rows = _apply_remote_device_states(rows, connections, now=now)
     return sorted(rows, key=lambda r: (not r.get("online"), -(float(r.get("health") or 0)), -int(r.get("last_seen_ts") or 0)))
 
 

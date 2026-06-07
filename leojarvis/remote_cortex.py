@@ -40,10 +40,12 @@ def _save(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
     rows = _rows()
     changed = False
+    now = int(time.time())
     for row in rows:
         rid = row.get("id")
         proc = _TUNNELS.get(str(rid))
         local_port = int(row.get("local_port") or 0)
+        grace_online = False
         # 仅用「本地端口是否在监听」判定连通：SSH 隧道在监听即视为已连接，
         # 0.35s 即可返回。之前每次都走 HTTP /api/health（2s + 4s 重试），
         # 两台机器就会让 /devices、/remote-cortex 卡 12~15s（设备页/驾驶舱转圈）。
@@ -51,10 +53,20 @@ def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
         if not local_port:
             health_err = "missing local port"
         elif _port_accepting(local_port):
-            health_err = ""
+            last_health_ts = int(row.get("last_health_ts") or 0)
+            if row.get("last_error") and (not last_health_ts or now - last_health_ts > 90):
+                health_err = str(row.get("last_error") or "remote health not verified")
+            else:
+                health_err = ""
         else:
             health_err = "Connection refused"
         connected = not bool(health_err)
+        last_health_ts = int(row.get("last_health_ts") or 0)
+        if not connected and row.get("connected") is True and last_health_ts and now - last_health_ts < 90:
+            # The SSH tunnel may be rotating local ports. Keep the UI stable for
+            # one short grace window and let the background connector rebuild it.
+            connected = True
+            grace_online = True
         if not connected and row.get("connected") is True and local_port and _port_accepting(local_port):
             # A single slow health response should not make a previously healthy
             # SSH tunnel disappear from the device switcher. Explicit fetches
@@ -68,6 +80,10 @@ def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
                 pass
             _TUNNELS.pop(str(rid), None)
         if connected:
+            if grace_online and row.get("enabled", True) and rid:
+                connect_async(str(rid))
+            elif row.get("enabled", True) and rid and (not last_health_ts or now - last_health_ts > 60):
+                connect_async(str(rid))
             if row.get("connected") is not True or row.get("last_error"):
                 row["connected"] = True
                 row["last_error"] = ""
@@ -170,6 +186,67 @@ def _probe_local_health(local_port: int, timeout: float = 3.0) -> str:
         return f"HTTP {res.status_code}"
     except Exception as exc:
         return str(exc)
+
+
+def validate_connection(connection_id: str, *, timeout: float = 1.2, reconnect_async: bool = False) -> dict[str, Any] | None:
+    """Synchronize cached connection state with the actual remote HTTP health.
+
+    A listening SSH tunnel is not enough: stale Cloudflare/SSH tunnels can accept
+    local sockets while the remote LeoJarvis HTTP request times out. Device pages
+    need the real app health, so this performs a bounded /api/health check and
+    optionally starts a background reconnect when it fails.
+    """
+    rows = _rows()
+    row = next((r for r in rows if r.get("id") == connection_id), None)
+    if not row:
+        return None
+    local_port = int(row.get("local_port") or 0)
+    if not local_port:
+        ok = False
+        err = "missing local port"
+    elif not _port_accepting(local_port, timeout=min(timeout, 0.5)):
+        ok = False
+        err = "Connection refused"
+    else:
+        err = _probe_local_health(local_port, timeout=timeout)
+        ok = not bool(err)
+
+    now = int(time.time())
+    last_health_ts = int(row.get("last_health_ts") or 0)
+    # Cloudflare/SSH tunnels can have a single slow probe or rotate local ports.
+    # Do not flip a recently verified remote offline inside the grace window;
+    # start reconnect in the background and let the next explicit fetch correct it.
+    if not ok and row.get("connected") is True and last_health_ts and now - last_health_ts < 90:
+        if reconnect_async and row.get("enabled", True):
+            connect_async(connection_id)
+        return row
+
+    changed = False
+    if ok:
+        if row.get("connected") is not True or row.get("last_error"):
+            changed = True
+        row["connected"] = True
+        row["last_error"] = ""
+        row["last_health_ts"] = now
+    else:
+        if row.get("connected") is not False or row.get("last_error") != err:
+            changed = True
+        row["connected"] = False
+        row["last_error"] = err[:300]
+        row["last_health_ts"] = now
+        proc = _TUNNELS.get(connection_id)
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            _TUNNELS.pop(connection_id, None)
+    row["updated_at"] = now
+    if changed:
+        _save(rows)
+    if not ok and reconnect_async and row.get("enabled", True):
+        connect_async(connection_id)
+    return row
 
 
 def _port_accepting(local_port: int, timeout: float = 0.35) -> bool:

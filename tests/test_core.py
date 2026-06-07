@@ -12,6 +12,7 @@ from leojarvis.judge.engine import judge_and_store
 from leojarvis.localize import to_chinese
 from leojarvis.main import app
 from leojarvis import user_settings
+from leojarvis.api.routes import _apply_remote_device_states
 
 
 def test_health_endpoint():
@@ -150,6 +151,45 @@ def test_x_monitor_defaults_include_ai_tech_sources():
     assert "GoogleDeepMind" in cfg["users"]
     feeds = x_monitor_feeds()
     assert any(feed["name"] == "X · @OpenAI" for feed in feeds)
+
+
+def test_remote_cortex_connection_overrides_stale_device_heartbeat():
+    now = 1_780_000_000
+    rows = [{
+        "device_id": "rc-pytest",
+        "device_name": "pytest remote",
+        "host_name": "pytest.local",
+        "model": "Mac",
+        "role": "remote-leojarvis",
+        "generated_at": now - 5000,
+        "last_seen_ts": now - 5000,
+        "health": 96,
+        "status": "健康",
+        "metrics": {},
+        "modules": {},
+        "services": {"online": 1, "total": 1},
+        "risks": [],
+    }]
+    connections = [{"id": "rc-pytest", "name": "pytest remote", "host": "pytest.local", "enabled": True, "connected": True, "last_error": ""}]
+
+    merged = _apply_remote_device_states(rows, connections, now=now)
+
+    assert merged[0]["online"] is True
+    assert merged[0]["age_seconds"] == 5000
+    assert merged[0]["status"] == "健康"
+
+
+def test_remote_cortex_disconnected_device_gets_explicit_risk():
+    now = 1_780_000_000
+    rows: list[dict] = []
+    connections = [{"id": "rc-pytest", "name": "pytest remote", "host": "pytest.local", "enabled": True, "connected": False, "last_error": "Connection refused"}]
+
+    merged = _apply_remote_device_states(rows, connections, now=now)
+
+    assert len(merged) == 1
+    assert merged[0]["online"] is False
+    assert merged[0]["status"] == "离线"
+    assert "Connection refused" in merged[0]["risks"][0]["advice"]
 
 
 def test_localize_fallback_uses_display_safe_label():
