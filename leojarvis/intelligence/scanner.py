@@ -5,6 +5,7 @@ import hashlib
 import html
 import json
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from ..memory.store import remember_event
 from ..notify.hub import hub
 
 USER_AGENT = "LeoJarvis-Intelligence/0.1 (+https://github.com/leoyb1010/LeoJarvis)"
+_SCAN_LOCK = threading.Lock()
 
 
 def _now_iso() -> str:
@@ -239,7 +241,7 @@ def _x_score(title: str, content: str) -> tuple[float, list[str]]:
     return round(score, 3), reasons
 
 
-async def _store_x_item(item: RawItem) -> tuple[str | None, Judgment | None]:
+def _store_x_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, dict | None]:
     score, reasons = _x_score(item.title, item.content)
     triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
     source_name = str(item.meta.get("feed_name") or item.source).replace("X · ", "")
@@ -263,11 +265,11 @@ async def _store_x_item(item: RawItem) -> tuple[str | None, Judgment | None]:
         dedup_key=item.dedup_key,
     )
     if event_id is None:
-        return None, None
+        return None, None, None
     db.insert_judgment(event_id=event_id, score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
     judgment = Judgment(score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
     if triage == "notify":
-        await hub.push({
+        return event_id, judgment, {
             "type": "notify",
             "source": "X Monitor",
             "event_id": event_id,
@@ -275,7 +277,14 @@ async def _store_x_item(item: RawItem) -> tuple[str | None, Judgment | None]:
             "take": analysis["take"],
             "url": item.url,
             "score": score,
-        })
+        }
+    return event_id, judgment, None
+
+
+async def _store_x_item(item: RawItem) -> tuple[str | None, Judgment | None]:
+    event_id, judgment, payload = await asyncio.to_thread(_store_x_item_sync, item)
+    if payload:
+        await hub.push(payload)
     return event_id, judgment
 
 
@@ -292,7 +301,7 @@ def _news_score(title: str, content: str) -> tuple[float, list[str]]:
     return round(score, 3), reasons
 
 
-async def _store_news_item(item: RawItem) -> tuple[str | None, Judgment | None]:
+def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, dict | None]:
     score, reasons = _news_score(item.title, item.content)
     triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
     summary = to_chinese(item.content or item.title, context="资讯简报摘要", max_chars=240, allow_llm=False)
@@ -317,11 +326,11 @@ async def _store_news_item(item: RawItem) -> tuple[str | None, Judgment | None]:
         dedup_key=item.dedup_key,
     )
     if event_id is None:
-        return None, None
+        return None, None, None
     db.insert_judgment(event_id=event_id, score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
     judgment = Judgment(score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
     if triage == "notify":
-        await hub.push({
+        return event_id, judgment, {
             "type": "notify",
             "source": "RSS Intelligence",
             "event_id": event_id,
@@ -329,7 +338,14 @@ async def _store_news_item(item: RawItem) -> tuple[str | None, Judgment | None]:
             "take": analysis["take"],
             "url": item.url,
             "score": score,
-        })
+        }
+    return event_id, judgment, None
+
+
+async def _store_news_item(item: RawItem) -> tuple[str | None, Judgment | None]:
+    event_id, judgment, payload = await asyncio.to_thread(_store_news_item_sync, item)
+    if payload:
+        await hub.push(payload)
     return event_id, judgment
 
 
@@ -568,7 +584,7 @@ def set_source_enabled(source_id: str, enabled: bool) -> dict:
     return item
 
 
-async def _store_raw_item(item: RawItem, *, dedup_key: str | None = None) -> tuple[str | None, Judgment | None]:
+def _store_raw_item_sync(item: RawItem, *, dedup_key: str | None = None) -> tuple[str | None, Judgment | None, dict | None]:
     event_id = db.insert_event(
         source=item.source,
         domain=item.domain,
@@ -580,11 +596,11 @@ async def _store_raw_item(item: RawItem, *, dedup_key: str | None = None) -> tup
         dedup_key=dedup_key or item.dedup_key,
     )
     if event_id is None:
-        return None, None
+        return None, None, None
     remember_event(event_id, f"{item.title}\n{item.content[:900]}")
     judgment = judge_and_store(event_id, item)
     if judgment.triage == "notify":
-        await hub.push({
+        return event_id, judgment, {
             "type": "notify",
             "source": "Intelligence",
             "event_id": event_id,
@@ -592,7 +608,14 @@ async def _store_raw_item(item: RawItem, *, dedup_key: str | None = None) -> tup
             "take": judgment.take,
             "url": item.url,
             "score": judgment.score,
-        })
+        }
+    return event_id, judgment, None
+
+
+async def _store_raw_item(item: RawItem, *, dedup_key: str | None = None) -> tuple[str | None, Judgment | None]:
+    event_id, judgment, payload = await asyncio.to_thread(_store_raw_item_sync, item, dedup_key=dedup_key)
+    if payload:
+        await hub.push(payload)
     return event_id, judgment
 
 
@@ -1026,23 +1049,28 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
 
 async def run_intelligence_scan(*, include_rss: bool = True, include_web: bool = True,
                                 include_github: bool = True) -> dict:
-    seed_defaults()
-    started = _now_iso()
-    stats: dict[str, Any] = {"started_at": started, "rss": None, "web": None, "github": None}
-    async with httpx.AsyncClient(
-        timeout=18,
-        follow_redirects=True,
-        headers={"User-Agent": USER_AGENT},
-        trust_env=False,
-    ) as client:
-        if include_rss:
-            stats["rss"] = await _scan_rss_sources(client)
-        if include_web:
-            stats["web"] = await _scan_web_sources(client)
-        if include_github:
-            stats["github"] = await _scan_github(client)
-    stats["finished_at"] = _now_iso()
-    return stats
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return {"ok": True, "skipped": "already_running", "started_at": _now_iso()}
+    try:
+        seed_defaults()
+        started = _now_iso()
+        stats: dict[str, Any] = {"started_at": started, "rss": None, "web": None, "github": None}
+        async with httpx.AsyncClient(
+            timeout=18,
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT},
+            trust_env=False,
+        ) as client:
+            if include_rss:
+                stats["rss"] = await _scan_rss_sources(client)
+            if include_web:
+                stats["web"] = await _scan_web_sources(client)
+            if include_github:
+                stats["github"] = await _scan_github(client)
+        stats["finished_at"] = _now_iso()
+        return stats
+    finally:
+        _SCAN_LOCK.release()
 
 
 def github_radar(limit: int = 24) -> list[dict]:

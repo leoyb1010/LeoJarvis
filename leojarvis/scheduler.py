@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from . import db, user_settings
@@ -12,62 +15,83 @@ from .memory.store import remember_event
 from .notify.hub import hub
 
 COLLECTORS = [EmailCollector(), CalendarCollector(), RSSCollector()]
+_INGEST_LOCK = threading.Lock()
+_INTELLIGENCE_LOCK = threading.Lock()
+_GUARD_LOCK = threading.Lock()
+
+
+def _run_ingest_cycle_sync() -> tuple[dict, list[dict]]:
+    if not _INGEST_LOCK.acquire(blocking=False):
+        return {"seen": 0, "inserted": 0, "notify": 0, "errors": [], "skipped": "already_running"}, []
+    stats = {"seen": 0, "inserted": 0, "notify": 0, "errors": []}
+    notifications: list[dict] = []
+    try:
+        for collector in COLLECTORS:
+            try:
+                for item in collector.collect():
+                    stats["seen"] += 1
+                    event_id = db.insert_event(
+                        source=item.source,
+                        domain=item.domain,
+                        kind=item.kind,
+                        title=item.title,
+                        content=item.content,
+                        url=item.url,
+                        meta=item.meta,
+                        dedup_key=item.dedup_key,
+                    )
+                    if event_id is None:
+                        continue
+                    stats["inserted"] += 1
+                    # 本地 Apple Mail 只读取标题/发件人/邮箱，不让首次导入几十封旧邮件阻塞手动采集。
+                    # 这里同时跳过向量记忆与 LLM judge：两者都会在首次导入历史邮件时拖慢 /ingest/run。
+                    # 真正需要推送的 IMAP 未读邮件仍会走 remember + judge。
+                    if str(item.source).startswith("email:Apple Mail"):
+                        db.insert_judgment(
+                            event_id=event_id,
+                            score=0.52,
+                            take=f"邮件：{item.title}。{item.content.splitlines()[0] if item.content else ''}",
+                            triage="digest",
+                            reasons=["Apple Mail 本地邮箱记录"],
+                        )
+                        continue
+                    remember_event(event_id, f"{item.title}\n{item.content[:700]}")
+                    judgment = judge_and_store(event_id, item)
+                    if judgment.triage == "notify":
+                        stats["notify"] += 1
+                        notifications.append({
+                            "type": "notify",
+                            "event_id": event_id,
+                            "title": item.title,
+                            "take": judgment.take,
+                            "url": item.url,
+                            "score": judgment.score,
+                        })
+            except Exception as exc:
+                stats["errors"].append({"collector": collector.name, "error": str(exc)})
+                print(f"[ingest] {collector.name} failed: {exc}")
+        return stats, notifications
+    finally:
+        _INGEST_LOCK.release()
 
 
 async def run_ingest_cycle() -> dict:
-    stats = {"seen": 0, "inserted": 0, "notify": 0, "errors": []}
-    for collector in COLLECTORS:
-        try:
-            for item in collector.collect():
-                stats["seen"] += 1
-                event_id = db.insert_event(
-                    source=item.source,
-                    domain=item.domain,
-                    kind=item.kind,
-                    title=item.title,
-                    content=item.content,
-                    url=item.url,
-                    meta=item.meta,
-                    dedup_key=item.dedup_key,
-                )
-                if event_id is None:
-                    continue
-                stats["inserted"] += 1
-                # 本地 Apple Mail 只读取标题/发件人/邮箱，不让首次导入几十封旧邮件阻塞手动采集。
-                # 这里同时跳过向量记忆与 LLM judge：两者都会在首次导入历史邮件时拖慢 /ingest/run。
-                # 真正需要推送的 IMAP 未读邮件仍会走 remember + judge。
-                if str(item.source).startswith("email:Apple Mail"):
-                    db.insert_judgment(
-                        event_id=event_id,
-                        score=0.52,
-                        take=f"邮件：{item.title}。{item.content.splitlines()[0] if item.content else ''}",
-                        triage="digest",
-                        reasons=["Apple Mail 本地邮箱记录"],
-                    )
-                    continue
-                remember_event(event_id, f"{item.title}\n{item.content[:700]}")
-                judgment = judge_and_store(event_id, item)
-                if judgment.triage == "notify":
-                    stats["notify"] += 1
-                    await hub.push({
-                        "type": "notify",
-                        "event_id": event_id,
-                        "title": item.title,
-                        "take": judgment.take,
-                        "url": item.url,
-                        "score": judgment.score,
-                    })
-        except Exception as exc:
-            stats["errors"].append({"collector": collector.name, "error": str(exc)})
-            print(f"[ingest] {collector.name} failed: {exc}")
+    stats, notifications = await asyncio.to_thread(_run_ingest_cycle_sync)
+    for payload in notifications:
+        await hub.push(payload)
     return stats
 
 
 async def run_intelligence_cycle() -> dict:
     """Personal Intelligence Hub：RSS / 网页变化 / GitHub 项目雷达。"""
-    from .intelligence.scanner import run_intelligence_scan
+    if not _INTELLIGENCE_LOCK.acquire(blocking=False):
+        return {"ok": True, "skipped": "already_running"}
+    try:
+        from .intelligence.scanner import run_intelligence_scan
 
-    result = await run_intelligence_scan()
+        result = await run_intelligence_scan()
+    finally:
+        _INTELLIGENCE_LOCK.release()
     print(f"[intelligence] {result}")
     return result
 
@@ -75,42 +99,52 @@ async def run_intelligence_cycle() -> dict:
 _GUARD_STATE: dict[str, float] = {}
 
 
-async def run_system_guard() -> dict:
-    """SystemGuard 主动传感器：磁盘紧张 / 负载过高 / 已知服务掉线 → 实时推送。"""
+def _run_system_guard_sync() -> tuple[dict, list[dict]]:
+    if not _GUARD_LOCK.acquire(blocking=False):
+        return {"alerts": 0, "skipped": "already_running"}, []
     import shutil
     import os
     from .agent import services
 
-    cfg = user_settings.effective("guard")
-    disk_warn = float(cfg.get("disk_used_pct", 90))
-    load_warn = float(cfg.get("load_per_core", 2.5))
-    alerts = []
-
-    total, used, _ = shutil.disk_usage("/")
-    disk_pct = used / total * 100
-    if disk_pct >= disk_warn and _GUARD_STATE.get("disk", 0) < disk_warn:
-        alerts.append({"title": "磁盘空间紧张", "take": f"/ 已用 {disk_pct:.0f}%，建议清理。问我「磁盘为什么满了」。"})
-    _GUARD_STATE["disk"] = disk_pct
-
     try:
-        l1 = os.getloadavg()[0]
-        per_core = l1 / (os.cpu_count() or 1)
-        if per_core >= load_warn and _GUARD_STATE.get("load", 0) < load_warn:
-            alerts.append({"title": "CPU 负载偏高", "take": f"每核负载 {per_core:.1f}。问我「现在哪个进程最吃 CPU」。"})
-        _GUARD_STATE["load"] = per_core
-    except OSError:
-        _GUARD_STATE["load_unavailable"] = 1.0
+        cfg = user_settings.effective("guard")
+        disk_warn = float(cfg.get("disk_used_pct", 90))
+        load_warn = float(cfg.get("load_per_core", 2.5))
+        alerts = []
 
-    for s in services.status_all():
-        key = f"svc:{s['name']}"
-        was_online = _GUARD_STATE.get(key, 1)
-        if not s["online"] and was_online and s["name"] != "leojarvis":
-            alerts.append({"title": f"服务掉线：{s['name']}", "take": f"{s['name']} (:{s['port']}) 离线了。"})
-        _GUARD_STATE[key] = 1.0 if s["online"] else 0.0
+        total, used, _ = shutil.disk_usage("/")
+        disk_pct = used / total * 100
+        if disk_pct >= disk_warn and _GUARD_STATE.get("disk", 0) < disk_warn:
+            alerts.append({"title": "磁盘空间紧张", "take": f"/ 已用 {disk_pct:.0f}%，建议清理。问我「磁盘为什么满了」。"})
+        _GUARD_STATE["disk"] = disk_pct
 
-    for a in alerts:
-        await hub.push({"type": "notify", "source": "SystemGuard", **a})
-    return {"alerts": len(alerts), "disk_pct": round(disk_pct, 1)}
+        try:
+            l1 = os.getloadavg()[0]
+            per_core = l1 / (os.cpu_count() or 1)
+            if per_core >= load_warn and _GUARD_STATE.get("load", 0) < load_warn:
+                alerts.append({"title": "CPU 负载偏高", "take": f"每核负载 {per_core:.1f}。问我「现在哪个进程最吃 CPU」。"})
+            _GUARD_STATE["load"] = per_core
+        except OSError:
+            _GUARD_STATE["load_unavailable"] = 1.0
+
+        for s in services.status_all():
+            key = f"svc:{s['name']}"
+            was_online = _GUARD_STATE.get(key, 1)
+            if not s["online"] and was_online and s["name"] != "leojarvis":
+                alerts.append({"title": f"服务掉线：{s['name']}", "take": f"{s['name']} (:{s['port']}) 离线了。"})
+            _GUARD_STATE[key] = 1.0 if s["online"] else 0.0
+
+        return {"alerts": len(alerts), "disk_pct": round(disk_pct, 1)}, alerts
+    finally:
+        _GUARD_LOCK.release()
+
+
+async def run_system_guard() -> dict:
+    """SystemGuard 主动传感器：磁盘紧张 / 负载过高 / 已知服务掉线 → 实时推送。"""
+    result, alerts = await asyncio.to_thread(_run_system_guard_sync)
+    for alert in alerts:
+        await hub.push({"type": "notify", "source": "SystemGuard", **alert})
+    return result
 
 
 def run_reflection() -> dict:
@@ -137,7 +171,8 @@ def run_ssh_probe() -> dict:
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = user_settings.effective("schedule")
     intel_cfg = user_settings.effective("intelligence")
-    sched = AsyncIOScheduler()
+    job_defaults = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 60}
+    sched = AsyncIOScheduler(job_defaults=job_defaults)
     sched.add_job(run_ingest_cycle, "interval", minutes=int(cfg.get("ingest_minutes", 30)), id="ingest", replace_existing=True)
     sched.add_job(
         run_intelligence_cycle,

@@ -115,7 +115,7 @@ def gmail_unread_count() -> int | None:
     mailbox_name = cfg.get("mailbox") or "INBOX"
     box = None
     try:
-        box = imaplib.IMAP4_SSL(str(host), int(cfg.get("port") or 993))
+        box = imaplib.IMAP4_SSL(str(host), int(cfg.get("port") or 993), timeout=8)
         box.login(str(user), str(password))
         box.select(str(mailbox_name), readonly=True)
         typ, data = box.search(None, "UNSEEN")
@@ -199,7 +199,7 @@ class EmailCollector(Collector):
             password = account.get("password")
             if not host or not user or not password:
                 continue
-            mailbox = imaplib.IMAP4_SSL(str(host), int(account.get("port") or 993))
+            mailbox = imaplib.IMAP4_SSL(str(host), int(account.get("port") or 993), timeout=8)
             try:
                 mailbox.login(str(user), str(password))
                 mailbox.select(str(account.get("mailbox") or "INBOX"))

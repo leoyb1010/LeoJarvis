@@ -27,7 +27,12 @@ def chat(task: str, messages: list[dict], **kw) -> str:
     model_cfg = _pick(task)
     if _looks_unconfigured(model_cfg):
         raise RuntimeError("Model endpoint is not configured yet")
-    client = OpenAI(base_url=model_cfg["base_url"], api_key=model_cfg["api_key"])
+    client = OpenAI(
+        base_url=model_cfg["base_url"],
+        api_key=model_cfg["api_key"],
+        timeout=float(model_cfg.get("timeout", 20)),
+        max_retries=int(model_cfg.get("max_retries", 0)),
+    )
     resp = client.chat.completions.create(
         model=model_cfg.get("model_id", model_cfg["name"]),
         messages=messages,

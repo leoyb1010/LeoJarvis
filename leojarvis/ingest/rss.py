@@ -89,38 +89,42 @@ class RSSCollector(Collector):
 
     def collect(self) -> list[RawItem]:
         items: list[RawItem] = []
-        for feed in _all_feeds():
-            try:
-                parsed = feedparser.parse(feed["url"])
-            except Exception:
-                continue
-            for entry in parsed.entries[: int(feed.get("limit", 15))]:
-                content = getattr(entry, "summary", "") or ""
-                link = getattr(entry, "link", "") or ""
-                if feed.get("fulltext") and link:
-                    try:
-                        html = httpx.get(link, timeout=10, follow_redirects=True).text
-                        content = trafilatura.extract(html) or content
-                    except Exception:
-                        content = content or "正文抓取失败，保留摘要。"
-                title = getattr(entry, "title", "") or "（无标题）"
-                published = getattr(entry, "published", "") or getattr(entry, "updated", "")
-                is_x = (feed.get("category") == "X社媒") or ((feed.get("meta") or {}).get("channel") == "x_monitor")
-                display_title = to_chinese(title, context="X 监控动态标题" if is_x else "RSS 资讯标题", max_chars=140) if is_x else title
-                display_content = to_chinese(content or title, context="X 监控动态摘要" if is_x else "RSS 资讯摘要", max_chars=1200) if is_x else (content or title)
-                items.append(RawItem(
-                    source=f"rss:{feed.get('name', 'unnamed')}",
-                    domain=feed.get("domain", "business"),
-                    kind="x_post" if is_x else "news",
-                    title=display_title,
-                    content=display_content,
-                    url=link,
-                    meta={
-                        "category": feed.get("category", "综合资讯"),
-                        "feed_name": feed.get("name", "RSS"),
-                        "original_title": title,
-                        "published": published,
-                        **(feed.get("meta") or {}),
-                    },
-                ))
+        timeout = httpx.Timeout(8.0, connect=4.0)
+        with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False) as client:
+            for feed in _all_feeds():
+                try:
+                    res = client.get(feed["url"])
+                    res.raise_for_status()
+                    parsed = feedparser.parse(res.content)
+                except Exception:
+                    continue
+                for entry in parsed.entries[: int(feed.get("limit", 15))]:
+                    content = getattr(entry, "summary", "") or ""
+                    link = getattr(entry, "link", "") or ""
+                    if feed.get("fulltext") and link:
+                        try:
+                            html = client.get(link, timeout=httpx.Timeout(10.0, connect=4.0)).text
+                            content = trafilatura.extract(html) or content
+                        except Exception:
+                            content = content or "正文抓取失败，保留摘要。"
+                    title = getattr(entry, "title", "") or "（无标题）"
+                    published = getattr(entry, "published", "") or getattr(entry, "updated", "")
+                    is_x = (feed.get("category") == "X社媒") or ((feed.get("meta") or {}).get("channel") == "x_monitor")
+                    display_title = to_chinese(title, context="X 监控动态标题" if is_x else "RSS 资讯标题", max_chars=140) if is_x else title
+                    display_content = to_chinese(content or title, context="X 监控动态摘要" if is_x else "RSS 资讯摘要", max_chars=1200) if is_x else (content or title)
+                    items.append(RawItem(
+                        source=f"rss:{feed.get('name', 'unnamed')}",
+                        domain=feed.get("domain", "business"),
+                        kind="x_post" if is_x else "news",
+                        title=display_title,
+                        content=display_content,
+                        url=link,
+                        meta={
+                            "category": feed.get("category", "综合资讯"),
+                            "feed_name": feed.get("name", "RSS"),
+                            "original_title": title,
+                            "published": published,
+                            **(feed.get("meta") or {}),
+                        },
+                    ))
         return items

@@ -182,10 +182,9 @@ def conn():
     # timeout=30 + busy_timeout 让并发写入排队等待而不是直接抛 "database is locked"。
     c = sqlite3.connect(DB_PATH, timeout=30.0)
     c.row_factory = sqlite3.Row
-    # WAL 必须在“非事务”状态下、每个连接显式开启：放在 SCHEMA 的 executescript 里会被
-    # 隐式事务吞掉而失效（之前根本没生成 -wal 文件 = 仍是 rollback 模式，读写互锁导致服务挂）。
     c.execute("PRAGMA busy_timeout=30000")
-    c.execute("PRAGMA journal_mode=WAL")
+    if not globals().get("_SCHEMA_READY", False):
+        c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
     try:
         yield c
@@ -213,7 +212,9 @@ def _init_db_impl() -> None:
         memory_cols = {r["name"] for r in c.execute("PRAGMA table_info(memories)").fetchall()}
         if "status" not in memory_cols:
             c.execute("ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'")
-        c.execute("UPDATE memories SET status='active' WHERE status IS NULL OR status=''")
+        missing_status = c.execute("SELECT COUNT(*) FROM memories WHERE status IS NULL OR status=''").fetchone()[0]
+        if missing_status:
+            c.execute("UPDATE memories SET status='active' WHERE status IS NULL OR status=''")
         note_cols = {r["name"] for r in c.execute("PRAGMA table_info(personal_notes)").fetchall()}
         for col, ddl in {
             "source_url": "ALTER TABLE personal_notes ADD COLUMN source_url TEXT",
