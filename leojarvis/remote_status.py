@@ -261,8 +261,11 @@ def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
 
 
 def probe_all() -> dict[str, Any]:
-    results = []
-    for row in configured_hosts():
-        if row.get("enabled", True):
-            results.append(probe(row))
+    # 并行探测：每台机器走独立 SSH，串行会让设备页一直转圈（N×12s）。
+    from concurrent.futures import ThreadPoolExecutor
+    rows = [row for row in configured_hosts() if row.get("enabled", True)]
+    if not rows:
+        return {"ok": True, "count": 0, "results": []}
+    with ThreadPoolExecutor(max_workers=min(6, len(rows))) as pool:
+        results = list(pool.map(probe, rows))
     return {"ok": True, "count": len(results), "results": results}

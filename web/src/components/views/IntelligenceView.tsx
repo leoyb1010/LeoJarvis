@@ -351,7 +351,7 @@ export function IntelligenceView() {
           </div>
           {newsItems.length === 0 ? <div className="empty">当前筛选没有新闻简报条目。</div> : (
             <div className="sig-grid editorial">
-              {newsItems.map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
+              {newsItems.slice(0, 24).map((item, index) => <SignalBlock item={item} onOpen={setActiveSignal} key={item.event_id} featured={index === 0} />)}
             </div>
           )}
         </section>

@@ -187,11 +187,6 @@ export function SystemView() {
     setLoading(true);
     setError("");
     try {
-      if (Date.now() - lastProbe.current > 45000) {
-        lastProbe.current = Date.now();
-        await sendSelfHeartbeat().catch(() => {});
-        await probeSshDevices().catch(() => {});
-      }
       const [overview, serviceRows, deviceRows] = await Promise.all([getSystemOverview(), getServices(), getDevices()]);
       setData(overview);
       setServices(serviceRows);
@@ -201,6 +196,15 @@ export function SystemView() {
       setError(String(err));
     } finally {
       setLoading(false);
+    }
+    // 远端 SSH 探测是慢操作（逐台连接），放到首屏渲染之后后台执行，
+    // 完成后只静默刷新设备列表，避免“点击后很久才刷新出页面”。
+    if (Date.now() - lastProbe.current > 45000) {
+      lastProbe.current = Date.now();
+      sendSelfHeartbeat().catch(() => {});
+      probeSshDevices()
+        .then(() => getDevices().then(setDevices).catch(() => {}))
+        .catch(() => {});
     }
   };
 

@@ -332,7 +332,7 @@ def devices(limit: int = 50) -> list[dict]:
     def _remote_summary(conn: dict) -> dict | None:
         conn_id = str(conn.get("id") or "")
         try:
-            res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=3.5)
+            res = remote_cortex.fetch_connected(conn, "/device/summary", timeout=2.5)
             if res.get("ok") and res.get("data"):
                 summary = dict(res["data"])
                 summary["device_id"] = conn_id

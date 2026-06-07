@@ -284,7 +284,12 @@ def overview() -> dict:
         "briefing": {
             "business": len(briefing.get("business", [])),
             "life": len(briefing.get("life", [])),
-            "top": (briefing.get("business", []) + briefing.get("life", []))[:5],
+            # 驾驶舱「资讯情报」只放真正的资讯：排除 GitHub 项目（它有独立雷达栏）
+            # 和邮件，按评分顺序给足条目，避免前端过滤后只剩两三条。
+            "top": [
+                it for it in (briefing.get("business", []) + briefing.get("life", []))
+                if it.get("kind") != "github_repo"
+            ][:12],
         },
         "intelligence": {
             "events": len(intel_events),

@@ -278,6 +278,10 @@ export function Dashboard() {
 
   useEffect(() => {
     let alive = true;
+    // 远端连接状态会随隧道建立从“未连接”变“已连接”，必须随轮询刷新，
+    // 否则首屏拿到的离线状态会一直留在下拉里，远端永远显示离线。
+    const refreshRemotes = () =>
+      listRemoteLeoJarvis().then((rows) => { if (alive) setRemotes(rows); }).catch(() => {});
     const load = () => {
       setDeviceError("");
       const dataPromise = activeDevice === "local"
@@ -301,9 +305,9 @@ export function Dashboard() {
         })
         .catch((err) => { if (alive) { setError(String(err)); setDeviceError(String(err)); } });
     };
-    listRemoteLeoJarvis().then((rows) => { if (alive) setRemotes(rows); }).catch(() => {});
+    refreshRemotes();
     load();
-    const t = window.setInterval(load, 8000);
+    const t = window.setInterval(() => { load(); refreshRemotes(); }, 8000);
     return () => { alive = false; window.clearInterval(t); };
   }, [activeDevice]);
 
@@ -381,8 +385,13 @@ export function Dashboard() {
     </div>
   );
 
-  if (error && !data) return <div className="dash">{deviceSwitch}<div className="error">{error}</div></div>;
-  if (!data) return <PageSkeleton cards={8} />;
+  // 切换设备时保持设备切换条常驻，下方再显示骨架/错误，避免整页骨架把下拉藏起来。
+  if (!data) return (
+    <div className="dash">
+      {deviceSwitch}
+      {error ? <div className="error">{error}</div> : <PageSkeleton head={false} hero={false} cards={6} />}
+    </div>
+  );
 
   const notifications = data.notifications?.apps || [];
   const topBriefing = (data.briefing.top || []).filter((b) => b.kind !== "github_repo");

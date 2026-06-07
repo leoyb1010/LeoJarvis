@@ -44,14 +44,16 @@ def list_connections(*, auto_connect: bool = True) -> list[dict[str, Any]]:
         rid = row.get("id")
         proc = _TUNNELS.get(str(rid))
         local_port = int(row.get("local_port") or 0)
+        # 仅用「本地端口是否在监听」判定连通：SSH 隧道在监听即视为已连接，
+        # 0.35s 即可返回。之前每次都走 HTTP /api/health（2s + 4s 重试），
+        # 两台机器就会让 /devices、/remote-cortex 卡 12~15s（设备页/驾驶舱转圈）。
+        # 真正的远端取数（cockpit/system/summary）失败时仍会单独标红。
         if not local_port:
             health_err = "missing local port"
-        elif not _port_accepting(local_port):
-            health_err = "Connection refused"
+        elif _port_accepting(local_port):
+            health_err = ""
         else:
-            health_err = _probe_local_health(local_port, timeout=2.0)
-            if health_err and "timed out" in health_err:
-                health_err = _probe_local_health(local_port, timeout=4.0)
+            health_err = "Connection refused"
         connected = not bool(health_err)
         if not connected and row.get("connected") is True and local_port and _port_accepting(local_port):
             # A single slow health response should not make a previously healthy
