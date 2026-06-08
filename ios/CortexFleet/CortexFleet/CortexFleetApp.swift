@@ -33,13 +33,6 @@ struct RootView: View {
             }
 
             NavigationStack {
-                MobileBriefingView()
-            }
-            .tabItem {
-                Label("简报", systemImage: "newspaper")
-            }
-
-            NavigationStack {
                 FleetDashboardView()
             }
             .tabItem {

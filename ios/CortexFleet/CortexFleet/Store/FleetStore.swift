@@ -9,7 +9,6 @@ final class FleetStore: ObservableObject {
     @Published private(set) var jarvisOverview = JarvisOverview.empty
     @Published private(set) var mobileNotes: [MobileNote] = []
     @Published private(set) var mobileNoteStats = MobileNoteStats.empty
-    @Published private(set) var mobileBriefing = MobileBriefingPayload()
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
     @Published private(set) var isRefreshing = false
     @Published private(set) var isLoadingJarvis = false
@@ -225,12 +224,10 @@ final class FleetStore: ObservableObject {
             let token = try keychain.bridgeToken()
             async let overview = mobileBridge.loadOverview(settings: bridgeSettings, token: token)
             async let notes = mobileBridge.loadNotes(settings: bridgeSettings, token: token)
-            async let briefing = mobileBridge.loadBriefing(settings: bridgeSettings, token: token)
-            let (overviewValue, notesValue, briefingValue) = try await (overview, notes, briefing)
+            let (overviewValue, notesValue) = try await (overview, notes)
             jarvisOverview = overviewValue
             mobileNotes = notesValue.notes
             mobileNoteStats = notesValue.stats
-            mobileBriefing = briefingValue
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -252,6 +249,7 @@ final class FleetStore: ObservableObject {
             jarvisOverview = JarvisOverview(
                 generatedAt: jarvisOverview.generatedAt,
                 health: jarvisOverview.health,
+                weather: jarvisOverview.weather,
                 runtime: jarvisOverview.runtime,
                 notes: result.stats,
                 briefing: jarvisOverview.briefing,

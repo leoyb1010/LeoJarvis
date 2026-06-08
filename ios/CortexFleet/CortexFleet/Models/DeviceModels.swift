@@ -152,7 +152,7 @@ struct HostDraft: Equatable {
 struct BridgeSettings: Codable, Equatable {
     var enabled: Bool = true
     var name: String = "Mac mini Bridge"
-    var baseURL: String = "http://192.168.3.107:8788"
+    var baseURL: String = "http://192.168.3.8:8788"
 
     var normalizedBaseURL: String {
         baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -570,6 +570,98 @@ struct MobileBriefingPayload: Decodable, Equatable {
     }
 }
 
+struct MobileWeather: Decodable, Equatable {
+    let ok: Bool
+    let city: String
+    let temperature: Double?
+    let feelsLike: Double?
+    let humidity: Double?
+    let wind: Double?
+    let text: String
+    let high: Double?
+    let low: Double?
+    let generatedAt: Int?
+
+    static let empty = MobileWeather(
+        ok: false,
+        city: "-",
+        temperature: nil,
+        feelsLike: nil,
+        humidity: nil,
+        wind: nil,
+        text: "暂无天气",
+        high: nil,
+        low: nil,
+        generatedAt: nil
+    )
+
+    var temperatureText: String {
+        guard let temperature else { return "-" }
+        return "\(Int(temperature.rounded()))°"
+    }
+
+    var rangeText: String {
+        guard let high, let low else { return "暂无温度区间" }
+        return "\(Int(low.rounded()))°-\(Int(high.rounded()))°"
+    }
+
+    var humidityText: String {
+        guard let humidity else { return "湿度 -" }
+        return "湿度 \(Int(humidity.rounded()))%"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case city
+        case temperature
+        case feelsLike
+        case humidity
+        case wind
+        case text
+        case high
+        case low
+        case generatedAt
+    }
+
+    init(
+        ok: Bool,
+        city: String,
+        temperature: Double?,
+        feelsLike: Double?,
+        humidity: Double?,
+        wind: Double?,
+        text: String,
+        high: Double?,
+        low: Double?,
+        generatedAt: Int?
+    ) {
+        self.ok = ok
+        self.city = city
+        self.temperature = temperature
+        self.feelsLike = feelsLike
+        self.humidity = humidity
+        self.wind = wind
+        self.text = text
+        self.high = high
+        self.low = low
+        self.generatedAt = generatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
+        city = try c.decodeIfPresent(String.self, forKey: .city) ?? "-"
+        temperature = try c.decodeIfPresent(Double.self, forKey: .temperature)
+        feelsLike = try c.decodeIfPresent(Double.self, forKey: .feelsLike)
+        humidity = try c.decodeIfPresent(Double.self, forKey: .humidity)
+        wind = try c.decodeIfPresent(Double.self, forKey: .wind)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? "暂无天气"
+        high = try c.decodeIfPresent(Double.self, forKey: .high)
+        low = try c.decodeIfPresent(Double.self, forKey: .low)
+        generatedAt = try c.decodeIfPresent(Int.self, forKey: .generatedAt)
+    }
+}
+
 struct JarvisHealthSummary: Decodable, Equatable {
     let score: Double
     let servicesOnline: Int
@@ -623,6 +715,7 @@ struct JarvisMemorySummary: Decodable, Equatable {
 struct JarvisOverview: Decodable, Equatable {
     let generatedAt: Int
     let health: JarvisHealthSummary
+    let weather: MobileWeather
     let runtime: JarvisRuntimeSummary
     let notes: MobileNoteStats
     let briefing: JarvisBriefingSummary
@@ -633,6 +726,7 @@ struct JarvisOverview: Decodable, Equatable {
     static let empty = JarvisOverview(
         generatedAt: 0,
         health: .empty,
+        weather: .empty,
         runtime: .empty,
         notes: .empty,
         briefing: .empty,
@@ -644,6 +738,7 @@ struct JarvisOverview: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case generatedAt
         case health
+        case weather
         case runtime
         case notes
         case briefing
@@ -655,6 +750,7 @@ struct JarvisOverview: Decodable, Equatable {
     init(
         generatedAt: Int,
         health: JarvisHealthSummary,
+        weather: MobileWeather,
         runtime: JarvisRuntimeSummary,
         notes: MobileNoteStats,
         briefing: JarvisBriefingSummary,
@@ -664,6 +760,7 @@ struct JarvisOverview: Decodable, Equatable {
     ) {
         self.generatedAt = generatedAt
         self.health = health
+        self.weather = weather
         self.runtime = runtime
         self.notes = notes
         self.briefing = briefing
@@ -676,6 +773,7 @@ struct JarvisOverview: Decodable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         generatedAt = try c.decodeIfPresent(Int.self, forKey: .generatedAt) ?? 0
         health = try c.decodeIfPresent(JarvisHealthSummary.self, forKey: .health) ?? .empty
+        weather = try c.decodeIfPresent(MobileWeather.self, forKey: .weather) ?? .empty
         runtime = try c.decodeIfPresent(JarvisRuntimeSummary.self, forKey: .runtime) ?? .empty
         notes = try c.decodeIfPresent(MobileNoteStats.self, forKey: .notes) ?? .empty
         briefing = try c.decodeIfPresent(JarvisBriefingSummary.self, forKey: .briefing) ?? .empty

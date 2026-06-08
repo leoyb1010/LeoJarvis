@@ -14,7 +14,8 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from . import db, user_settings
+from . import db, personal_notes, user_settings
+from .agent import services, sysinfo
 
 _DEFAULT_HOST = "0.0.0.0"
 _DEFAULT_PORT = 8788
@@ -469,6 +470,110 @@ def _local_addresses() -> list[str]:
     return rows
 
 
+def _parse_local_system(raw: str) -> dict[str, Any]:
+    disk = re.search(r"\((\d+)%\)", raw)
+    load = re.search(r"负载\(1/5/15min\):\s*([\d.]+)\s*/\s*([\d.]+)\s*/\s*([\d.]+).*CPU 核数 (\d+)", raw)
+    mem = re.search(r"内存:.*?(\d+)%", raw)
+    disk_pct = int(disk.group(1)) if disk else None
+    load_value = float(load.group(1)) if load else None
+    cores = int(load.group(4)) if load else None
+    mem_free = int(mem.group(1)) if mem else None
+    return {
+        "raw": raw,
+        "disk_pct": disk_pct,
+        "load": load_value,
+        "load_5": float(load.group(2)) if load else None,
+        "load_15": float(load.group(3)) if load else None,
+        "cores": cores,
+        "load_pct": round(load_value / max(1, cores) * 100, 1) if load_value is not None and cores else None,
+        "memory_free_pct": mem_free,
+        "memory_used_pct": 100 - mem_free if mem_free is not None else None,
+    }
+
+
+def _memory_stats() -> dict[str, int]:
+    with db.conn() as c:
+        rows = c.execute("SELECT status, COUNT(*) AS count FROM memories GROUP BY status").fetchall()
+    result = {"active": 0, "pending": 0, "later": 0, "rejected": 0}
+    for row in rows:
+        result[str(row["status"] or "active")] = int(row["count"] or 0)
+    return result
+
+
+def _mobile_overview() -> dict[str, Any]:
+    system = _parse_local_system(sysinfo.system_status())
+    service_rows = services.status_all()
+    weather = sysinfo.weather()
+    notes = personal_notes.note_stats()
+    memory = _memory_stats()
+
+    online = sum(1 for row in service_rows if row.get("online"))
+    health_score = 100
+    attention_items: list[dict[str, str]] = []
+    disk_pct = system.get("disk_pct")
+    load_pct = system.get("load_pct")
+    memory_used_pct = system.get("memory_used_pct")
+
+    if isinstance(disk_pct, int) and disk_pct >= 90:
+        health_score -= 22
+        attention_items.append({"label": "SSD 空间紧张", "level": "异常", "detail": f"系统盘已使用 {disk_pct}%，建议清理缓存、下载和大型项目。"})
+    elif isinstance(disk_pct, int) and disk_pct >= 82:
+        health_score -= 10
+        attention_items.append({"label": "SSD 接近高水位", "level": "注意", "detail": f"系统盘已使用 {disk_pct}%，建议保留更多空闲空间。"})
+
+    if isinstance(load_pct, (int, float)) and load_pct >= 120:
+        health_score -= 14
+        attention_items.append({"label": "CPU 负载偏高", "level": "异常", "detail": f"1 分钟负载约为核心数的 {load_pct}%。"})
+    elif isinstance(load_pct, (int, float)) and load_pct >= 80:
+        health_score -= 7
+        attention_items.append({"label": "CPU 负载需观察", "level": "注意", "detail": f"1 分钟负载约为核心数的 {load_pct}%。"})
+
+    if isinstance(memory_used_pct, int) and memory_used_pct >= 90:
+        health_score -= 10
+        attention_items.append({"label": "RAM 压力偏高", "level": "注意", "detail": f"内存使用约 {memory_used_pct}%。"})
+
+    if service_rows:
+        offline = [row for row in service_rows if not row.get("online")]
+        health_score -= int(len(offline) / len(service_rows) * 18)
+        for service in offline[:4]:
+            attention_items.append({
+                "label": f"{service.get('name') or '服务'} 离线",
+                "level": "注意",
+                "detail": f"127.0.0.1:{service.get('port') or '-'} 未监听。",
+            })
+
+    if memory["pending"] > 10:
+        health_score -= 8
+        attention_items.append({"label": "待确认记忆过多", "level": "注意", "detail": f"有 {memory['pending']} 条长期记忆候选需要确认。"})
+
+    return {
+        "generated_at": int(time.time()),
+        "health": {
+            "score": max(0, min(100, health_score)),
+            "system": system,
+            "services_online": online,
+            "services_total": len(service_rows),
+            "attention_items": attention_items,
+        },
+        "services": service_rows,
+        "weather": weather,
+        "runtime": {
+            "services_online": online,
+            "services_total": len(service_rows),
+            "tools_ready": 0,
+            "tools_total": 0,
+            "tools_running": 0,
+            "agents_running": 0,
+            "agents_total": 0,
+        },
+        "notes": notes,
+        "briefing": {"business": 0, "life": 0, "top": []},
+        "intelligence": {"events": 0, "github_repos": 0},
+        "memory": memory,
+        "timeline": [],
+    }
+
+
 app = FastAPI(title="LeoJarvis Mobile Bridge", version="0.1.0")
 
 
@@ -510,9 +615,7 @@ def config(authorization: str | None = Header(default=None)) -> dict[str, Any]:
 @app.get("/mobile/jarvis/overview")
 def jarvis_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_token(authorization)
-    from .cockpit import overview
-
-    return {"ok": True, "overview": overview(), "bridge": health()}
+    return {"ok": True, "overview": _mobile_overview(), "bridge": health()}
 
 
 @app.get("/mobile/jarvis/notes")

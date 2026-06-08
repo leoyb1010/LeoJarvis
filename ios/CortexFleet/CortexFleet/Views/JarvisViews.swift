@@ -15,7 +15,7 @@ struct JarvisHomeView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("LeoJarvis")
                             .font(.title2.weight(.bold))
-                        Text("个人中枢 · 设备状态 · 简报记忆")
+                        Text("个人中枢 · 设备状态 · 个人记事")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -37,7 +37,12 @@ struct JarvisHomeView: View {
                 }
 
                 HStack(spacing: 10) {
-                    MobileMetricTile(title: "简报", value: "\(store.jarvisOverview.briefing.business + store.jarvisOverview.briefing.life)", detail: "业务 \(store.jarvisOverview.briefing.business) · 生活 \(store.jarvisOverview.briefing.life)", symbol: "newspaper")
+                    MobileMetricTile(title: "天气", value: store.jarvisOverview.weather.temperatureText, detail: weatherDetail, symbol: "cloud.sun")
+                    MobileMetricTile(title: "日期", value: dateValue, detail: "\(weekdayText) · 更新 \(updatedText)", symbol: "calendar")
+                }
+
+                HStack(spacing: 10) {
+                    MobileMetricTile(title: "三台主机", value: "\(store.remoteOnlineCount)/\(store.hosts.count)", detail: "\(store.activeBridgeName) 探测", symbol: "server.rack")
                     MobileMetricTile(title: "记忆", value: "\(store.jarvisOverview.memory.active)", detail: "待确认 \(store.jarvisOverview.memory.pending)", symbol: "brain.head.profile")
                 }
 
@@ -50,15 +55,6 @@ struct JarvisHomeView: View {
                     }
                 }
 
-                SectionHeader(title: "近期动态")
-                if store.jarvisOverview.timeline.isEmpty {
-                    Text("暂无近期动态")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.jarvisOverview.timeline.prefix(6)) { item in
-                        BriefingCompactRow(item: item)
-                    }
-                }
             }
             .padding(16)
         }
@@ -77,6 +73,25 @@ struct JarvisHomeView: View {
         .task {
             await store.refreshJarvisContent()
         }
+    }
+
+    private var weatherDetail: String {
+        let weather = store.jarvisOverview.weather
+        return "\(weather.city) · \(weather.text) · \(weather.humidityText)"
+    }
+
+    private var dateValue: String {
+        Date.now.formatted(.dateTime.month(.defaultDigits).day(.defaultDigits))
+    }
+
+    private var weekdayText: String {
+        Date.now.formatted(.dateTime.weekday(.wide))
+    }
+
+    private var updatedText: String {
+        guard store.jarvisOverview.generatedAt > 0 else { return "等待同步" }
+        let date = Date(timeIntervalSince1970: TimeInterval(store.jarvisOverview.generatedAt))
+        return date.formatted(.dateTime.hour().minute())
     }
 }
 
@@ -150,48 +165,6 @@ struct MobileNotesView: View {
             NavigationStack {
                 MobileNoteComposerView()
             }
-        }
-    }
-}
-
-struct MobileBriefingView: View {
-    @EnvironmentObject private var store: FleetStore
-
-    var body: some View {
-        List {
-            Section {
-                HStack(spacing: 10) {
-                    MobileMetricTile(title: "业务", value: "\(store.mobileBriefing.business.count)", detail: "今日简报", symbol: "briefcase")
-                    MobileMetricTile(title: "生活", value: "\(store.mobileBriefing.life.count)", detail: "今日简报", symbol: "person.crop.circle")
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            }
-
-            Section("重点") {
-                if store.mobileBriefing.topItems.isEmpty {
-                    Text("暂无简报内容")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.mobileBriefing.topItems) { item in
-                        BriefingCompactRow(item: item)
-                    }
-                }
-            }
-        }
-        .navigationTitle("简报")
-        .toolbar {
-            Button {
-                Task { await store.refreshJarvisContent() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-        }
-        .refreshable {
-            await store.refreshJarvisContent()
-        }
-        .task {
-            await store.refreshJarvisContent()
         }
     }
 }

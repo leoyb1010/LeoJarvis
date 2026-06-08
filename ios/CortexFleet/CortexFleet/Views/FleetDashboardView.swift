@@ -143,65 +143,81 @@ private struct BrandHeader: View {
 
 struct LocalDeviceCard: View {
     let snapshot: LocalDeviceSnapshot
+    @State private var isExpanded = false
 
     private var tone: HealthTone { .local(health: snapshot.health) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("本机", systemImage: "iphone")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(snapshot.name)
-                        .font(.title2.weight(.bold))
-                    Text("\(snapshot.interfaceIdiom) · \(snapshot.modelIdentifier)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text("\(snapshot.systemVersion) · build \(snapshot.osBuild)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+        VStack(alignment: .leading, spacing: 14) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    isExpanded.toggle()
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(Int(snapshot.health.rounded()))")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(tone.color)
-                    Text("本机健康")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            } label: {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("本机", systemImage: "iphone")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(snapshot.name)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text("\(snapshot.interfaceIdiom) · \(snapshot.modelIdentifier)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text("\(snapshot.systemVersion) · build \(snapshot.osBuild)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("\(Int(snapshot.health.rounded()))")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(tone.color)
+                        HStack(spacing: 4) {
+                            Text("本机健康")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
+            .buttonStyle(.plain)
 
             HStack(spacing: 10) {
                 MetricTile(title: "电量", value: batteryText, detail: snapshot.batteryState, systemImage: "battery.75percent")
-                MetricTile(title: "电池健康", value: snapshot.batteryHealth, detail: snapshot.batteryHealthDetail, systemImage: "heart.text.square")
+                MetricTile(title: "存储", value: percent(snapshot.storageUsedPercent), detail: "可用 \(format(snapshot.storageFreeGB))G", systemImage: "internaldrive")
             }
 
-            HStack(spacing: 10) {
-                MetricTile(title: "存储", value: percent(snapshot.storageUsedPercent), detail: "重要可用 \(format(snapshot.storageFreeGB))G", systemImage: "internaldrive")
-                MetricTile(title: "可清理空间", value: "\(format(snapshot.storageAvailableOpportunisticGB))G", detail: "系统评估", systemImage: "arrow.triangle.2.circlepath")
-            }
+            if isExpanded {
+                HStack(spacing: 10) {
+                    MetricTile(title: "电池健康", value: snapshot.batteryHealth, detail: snapshot.batteryHealthDetail, systemImage: "heart.text.square")
+                    MetricTile(title: "可清理空间", value: "\(format(snapshot.storageAvailableOpportunisticGB))G", detail: "系统评估", systemImage: "arrow.triangle.2.circlepath")
+                }
 
-            HStack(spacing: 10) {
-                MetricTile(title: "内存", value: "\(format(snapshot.memoryTotalGB))G", detail: "物理内存", systemImage: "memorychip")
-                MetricTile(title: "CPU", value: "\(snapshot.activeProcessorCount)/\(snapshot.processorCount)", detail: "活跃/总核心", systemImage: "cpu")
-            }
+                HStack(spacing: 10) {
+                    MetricTile(title: "内存", value: "\(format(snapshot.memoryTotalGB))G", detail: "物理内存", systemImage: "memorychip")
+                    MetricTile(title: "CPU", value: "\(snapshot.activeProcessorCount)/\(snapshot.processorCount)", detail: "活跃/总核心", systemImage: "cpu")
+                }
 
-            HStack(spacing: 10) {
-                MetricTile(title: "屏幕", value: snapshot.screenDescription, detail: screenDetail, systemImage: "display")
-                MetricTile(title: "温控", value: snapshot.thermalState, detail: snapshot.lowPowerMode ? "低电量模式" : "正常功耗", systemImage: "thermometer.medium")
-            }
+                HStack(spacing: 10) {
+                    MetricTile(title: "屏幕", value: snapshot.screenDescription, detail: screenDetail, systemImage: "display")
+                    MetricTile(title: "温控", value: snapshot.thermalState, detail: snapshot.lowPowerMode ? "低电量模式" : "正常功耗", systemImage: "thermometer.medium")
+                }
 
-            HStack(spacing: 10) {
-                MetricTile(title: "运行时间", value: uptimeText, detail: "本次开机", systemImage: "clock")
-                MetricTile(title: "地区", value: snapshot.localeIdentifier, detail: snapshot.timeZoneIdentifier, systemImage: "globe.asia.australia")
-            }
+                HStack(spacing: 10) {
+                    MetricTile(title: "运行时间", value: uptimeText, detail: "本次开机", systemImage: "clock")
+                    MetricTile(title: "地区", value: snapshot.localeIdentifier, detail: snapshot.timeZoneIdentifier, systemImage: "globe.asia.australia")
+                }
 
-            ForEach(snapshot.risks.prefix(2)) { risk in
-                RiskLine(risk: risk)
+                ForEach(snapshot.risks.prefix(2)) { risk in
+                    RiskLine(risk: risk)
+                }
             }
         }
         .padding(16)
