@@ -8,7 +8,7 @@ from . import db, personal_notes
 from .agent import services, sysinfo
 from .briefing.builder import build_today
 from .intelligence.scanner import github_radar, recent_intelligence_events
-from .localize import chinese_tags as _chinese_tags, to_chinese as _to_chinese
+from .localize import chinese_tags as _chinese_tags, has_noisy_english, to_chinese as _to_chinese
 
 
 # 驾驶舱每 8 秒被前端轮询，展示路径禁止实时 LLM；本地化只做无网络回退。
@@ -160,7 +160,12 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
         if not name or name in seen:
             continue
         seen.add(name)
-        description = to_chinese(repo.get("description") or name, context="驾驶舱 GitHub 项目介绍", max_chars=180)
+        raw_description = str(repo.get("description") or "").strip()
+        description = to_chinese(raw_description or name, context="驾驶舱 GitHub 项目介绍", max_chars=180)
+        if not raw_description:
+            description = repo.get("summary_zh") or repo.get("display_description") or f"{name} 暂未提供仓库介绍，需打开 README 判断实际用途。"
+        elif "英文来源摘要" in str(description) or has_noisy_english(str(description)):
+            description = f"{name}：{raw_description[:240]}"
         cards.append({
             "name": name,
             "title": f"{name} · GitHub 项目雷达",

@@ -64,9 +64,18 @@ app.include_router(router, prefix="/api")
 if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
     app.mount("/assets", StaticFiles(directory=str(_WEB_DIST / "assets")), name="assets")
 
+    def _index_response() -> FileResponse:
+        return FileResponse(
+            str(_WEB_DIST / "index.html"),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
+
     @app.get("/")
     def _serve_index() -> FileResponse:
-        return FileResponse(str(_WEB_DIST / "index.html"))
+        return _index_response()
 
     @app.get("/{full_path:path}")
     def _spa_fallback(full_path: str) -> FileResponse:
@@ -74,7 +83,7 @@ if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
         candidate = _WEB_DIST / full_path
         if candidate.is_file():
             return FileResponse(str(candidate))
-        return FileResponse(str(_WEB_DIST / "index.html"))
+        return _index_response()
 
 
 def run() -> None:

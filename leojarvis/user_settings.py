@@ -48,6 +48,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "remote_devices": [],
     "remote_cortex": [],
+    "mobile_bridge": {"enabled": True, "host": "0.0.0.0", "port": 8788, "token": ""},
     # 高级阈值/节奏：留空表示沿用 settings.toml。UI 在这里写入即可覆盖，
     # 改动定时任务节奏需要重启后端生效（任务在启动时注册）。
     "overrides": {},

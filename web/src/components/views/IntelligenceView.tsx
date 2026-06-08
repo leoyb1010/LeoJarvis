@@ -148,6 +148,13 @@ function ChipFilter({
   );
 }
 
+function evidenceList(item: BriefingItem) {
+  const rows = (item.reasons || []).filter(Boolean);
+  if (rows.length) return rows.slice(0, 4);
+  if (item.why_important) return [item.why_important];
+  return ["该条目已通过情报评分进入简报。"];
+}
+
 export function IntelligenceView() {
   const [intel, setIntel] = useState<IntelligenceOverview | null>(null);
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
@@ -472,14 +479,28 @@ export function IntelligenceView() {
           </div>
         ) : null}>
         {activeSignal ? (
-          <div className="modal-rich">
-            <p className="lead">{activeSignal.take}</p>
-            {activeSignal.detail ? <div className="modal-detail"><span>有用详情</span><p>{activeSignal.detail}</p></div> : null}
-            <div className="modal-grid">
-              <div><span>为什么重要</span><p>{activeSignal.why_important || "该信息已通过情报评分进入简报。"}</p></div>
-              <div><span>和我有什么关系</span><p>{activeSignal.relation || "与你配置的关注项、历史偏好相关。"}</p></div>
-              <div><span>下一步建议</span><p>{activeSignal.next_step || "阅读原文，判断是否写入个人记事或持续关注。"}</p></div>
+          <div className="modal-rich intel-detail-sheet">
+            <div className="detail-primary">
+              <span>核心摘要</span>
+              <p>{activeSignal.take}</p>
             </div>
+            {activeSignal.detail ? (
+              <div className="detail-facts">
+                <span>来源事实</span>
+                <p>{activeSignal.detail}</p>
+              </div>
+            ) : null}
+            <div className="detail-compact-grid">
+              <div>
+                <span>判断依据</span>
+                <ul>{evidenceList(activeSignal).map((row, i) => <li key={i}>{row}</li>)}</ul>
+              </div>
+              <div>
+                <span>处理建议</span>
+                <p>{activeSignal.next_step || "阅读原文，判断是否写入个人记事或持续关注。"}</p>
+              </div>
+            </div>
+            {activeSignal.relation ? <p className="modal-note relation-note">{activeSignal.relation}</p> : null}
             <div className="modal-meta">
               <span>{activeSignal.source}</span>
               <span>{activeSignal.domain_label || "情报"}</span>
@@ -495,8 +516,11 @@ export function IntelligenceView() {
       <Modal open={!!activeRepo} onClose={() => setActiveRepo(null)} kicker="GitHub 项目" title={activeRepo?.name}
         footer={activeRepo?.url ? <a className="btn sm primary" href={activeRepo.url} target="_blank" rel="noreferrer">打开项目</a> : null}>
         {activeRepo ? (
-          <div className="modal-rich">
-            <p className="lead">{activeRepo.summary}</p>
+          <div className="modal-rich intel-detail-sheet">
+            <div className="detail-primary">
+              <span>仓库介绍</span>
+              <p>{activeRepo.summary}</p>
+            </div>
             <div className="modal-meta">
               <span>{activeRepo.stars ? `${activeRepo.stars.toLocaleString()} 星标` : "星标观察中"}</span>
               <span>{formatRepoSpeed(activeRepo.speed)}</span>
@@ -506,11 +530,11 @@ export function IntelligenceView() {
             {(activeRepo.star_history?.length ?? 0) >= 2 ? (
               <div className="modal-spark"><Sparkline points={activeRepo.star_history || []} width={480} height={56} /></div>
             ) : null}
-            <div className="modal-grid">
-              <div><span>推荐理由</span><p>{activeRepo.why}</p></div>
-              <div><span>与我相关</span><p>{activeRepo.relation}</p></div>
-              <div><span>下一步</span><p>{activeRepo.next_step}</p></div>
+            <div className="detail-compact-grid">
+              <div><span>推荐依据</span><p>{activeRepo.why}</p></div>
+              <div><span>验证清单</span><p>{activeRepo.next_step}</p></div>
             </div>
+            {activeRepo.relation ? <p className="modal-note relation-note">{activeRepo.relation}</p> : null}
             {activeRepo.tags?.length ? <div className="modal-tags">{activeRepo.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
           </div>
         ) : null}

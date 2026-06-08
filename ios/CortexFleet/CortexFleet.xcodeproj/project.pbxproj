@@ -1,0 +1,424 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0F0001012C00000000000001 /* CortexFleetApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002012C00000000000001 /* CortexFleetApp.swift */; };
+		0F0001022C00000000000001 /* DeviceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002022C00000000000001 /* DeviceModels.swift */; };
+		0F0001032C00000000000001 /* CortexAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002032C00000000000001 /* CortexAPIClient.swift */; };
+		0F0001042C00000000000001 /* FleetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002042C00000000000001 /* FleetStore.swift */; };
+		0F0001052C00000000000001 /* FleetDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002052C00000000000001 /* FleetDashboardView.swift */; };
+		0F0001062C00000000000001 /* DeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002062C00000000000001 /* DeviceCardView.swift */; };
+		0F0001072C00000000000001 /* DeviceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002072C00000000000001 /* DeviceDetailView.swift */; };
+		0F0001082C00000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002082C00000000000001 /* SettingsView.swift */; };
+		0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002092C00000000000001 /* AddSSHDeviceView.swift */; };
+		0F00010A2C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0F00020A2C00000000000001 /* Assets.xcassets */; };
+		0F00010B2C00000000000001 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 0F000A012C00000000000001 /* Citadel */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0F0002012C00000000000001 /* CortexFleetApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexFleetApp.swift; sourceTree = "<group>"; };
+		0F0002022C00000000000001 /* DeviceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceModels.swift; sourceTree = "<group>"; };
+		0F0002032C00000000000001 /* CortexAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexAPIClient.swift; sourceTree = "<group>"; };
+		0F0002042C00000000000001 /* FleetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetStore.swift; sourceTree = "<group>"; };
+		0F0002052C00000000000001 /* FleetDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetDashboardView.swift; sourceTree = "<group>"; };
+		0F0002062C00000000000001 /* DeviceCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCardView.swift; sourceTree = "<group>"; };
+		0F0002072C00000000000001 /* DeviceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDetailView.swift; sourceTree = "<group>"; };
+		0F0002082C00000000000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0F0002092C00000000000001 /* AddSSHDeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSSHDeviceView.swift; sourceTree = "<group>"; };
+		0F00020A2C00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0F00020B2C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0F00020C2C00000000000001 /* CortexFleet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CortexFleet.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0F0003012C00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F00010B2C00000000000001 /* Citadel in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0F0004012C00000000000001 = {
+			isa = PBXGroup;
+			children = (
+				0F0004022C00000000000001 /* CortexFleet */,
+				0F0004032C00000000000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		0F0004022C00000000000001 /* CortexFleet */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002012C00000000000001 /* CortexFleetApp.swift */,
+				0F0004042C00000000000001 /* Models */,
+				0F0004052C00000000000001 /* Services */,
+				0F0004062C00000000000001 /* Store */,
+				0F0004072C00000000000001 /* Views */,
+				0F0004082C00000000000001 /* Resources */,
+				0F00020B2C00000000000001 /* Info.plist */,
+			);
+			path = CortexFleet;
+			sourceTree = "<group>";
+		};
+		0F0004032C00000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0F00020C2C00000000000001 /* CortexFleet.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0F0004042C00000000000001 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002022C00000000000001 /* DeviceModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		0F0004052C00000000000001 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002032C00000000000001 /* CortexAPIClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		0F0004062C00000000000001 /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002042C00000000000001 /* FleetStore.swift */,
+			);
+			path = Store;
+			sourceTree = "<group>";
+		};
+		0F0004072C00000000000001 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002052C00000000000001 /* FleetDashboardView.swift */,
+				0F0002062C00000000000001 /* DeviceCardView.swift */,
+				0F0002072C00000000000001 /* DeviceDetailView.swift */,
+				0F0002082C00000000000001 /* SettingsView.swift */,
+				0F0002092C00000000000001 /* AddSSHDeviceView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		0F0004082C00000000000001 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				0F00020A2C00000000000001 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0F0005012C00000000000001 /* CortexFleet */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0F0009012C00000000000001 /* Build configuration list for PBXNativeTarget "CortexFleet" */;
+			buildPhases = (
+				0F0007012C00000000000001 /* Sources */,
+				0F0003012C00000000000001 /* Frameworks */,
+				0F0007022C00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CortexFleet;
+			productName = CortexFleet;
+			productReference = 0F00020C2C00000000000001 /* CortexFleet.app */;
+			packageProductDependencies = (
+				0F000A012C00000000000001 /* Citadel */,
+			);
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0F0006012C00000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					0F0005012C00000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 0F0009022C00000000000001 /* Build configuration list for PBXProject "CortexFleet" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh-Hans;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				zh-Hans,
+				en,
+				Base,
+			);
+			mainGroup = 0F0004012C00000000000001;
+			packageReferences = (
+				0F000B012C00000000000001 /* XCRemoteSwiftPackageReference "Citadel" */,
+			);
+			productRefGroup = 0F0004032C00000000000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0F0005012C00000000000001 /* CortexFleet */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0F0007022C00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F00010A2C00000000000001 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0F0007012C00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F0001012C00000000000001 /* CortexFleetApp.swift in Sources */,
+				0F0001022C00000000000001 /* DeviceModels.swift in Sources */,
+				0F0001032C00000000000001 /* CortexAPIClient.swift in Sources */,
+				0F0001042C00000000000001 /* FleetStore.swift in Sources */,
+				0F0001052C00000000000001 /* FleetDashboardView.swift in Sources */,
+				0F0001062C00000000000001 /* DeviceCardView.swift in Sources */,
+				0F0001072C00000000000001 /* DeviceDetailView.swift in Sources */,
+				0F0001082C00000000000001 /* SettingsView.swift in Sources */,
+				0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0F0008012C00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0F0008022C00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		0F0008032C00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 48H5Y3LNUK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CortexFleet/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leo.cortexfleet;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0F0008042C00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 48H5Y3LNUK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CortexFleet/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leo.cortexfleet;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0F0009012C00000000000001 /* Build configuration list for PBXNativeTarget "CortexFleet" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F0008032C00000000000001 /* Debug */,
+				0F0008042C00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0F0009022C00000000000001 /* Build configuration list for PBXProject "CortexFleet" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F0008012C00000000000001 /* Debug */,
+				0F0008022C00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0F000B012C00000000000001 /* XCRemoteSwiftPackageReference "Citadel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/orlandos-nl/Citadel.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0F000A012C00000000000001 /* Citadel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0F000B012C00000000000001 /* XCRemoteSwiftPackageReference "Citadel" */;
+			productName = Citadel;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 0F0006012C00000000000001 /* Project object */;
+}

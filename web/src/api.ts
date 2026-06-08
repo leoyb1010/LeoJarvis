@@ -777,6 +777,8 @@ export type NoteAttachment = {
   mime_type?: string;
   size: number;
   path: string;
+  url?: string;
+  is_image?: boolean;
   summary: string;
   created_ts: number;
 };

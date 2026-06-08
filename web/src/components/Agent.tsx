@@ -21,6 +21,108 @@ const SUGGESTIONS = [
 
 const enter = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { ease: "easeOut" as const } };
 
+function cleanLLMText(value: string) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .replace(/```[a-zA-Z0-9_-]*\n?/g, "")
+    .replace(/```/g, "")
+    .split("\n")
+    .map((line) => line
+      .replace(/^\s*(assistant|final|analysis|commentary)\s*[:：]\s*/i, "")
+      .replace(/^\s{0,3}#{1,6}\s+/, "")
+      .replace(/^\s*>\s?/, "")
+      .replace(/^\s*[-*]\s+/, "• ")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function tryJson(value: string) {
+  const text = value.trim();
+  if (!/^[\[{]/.test(text)) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function valuePreview(value: unknown): string {
+  if (value == null || value === "") return "-";
+  if (typeof value === "string") return cleanLLMText(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(valuePreview).join("，");
+  return JSON.stringify(value, null, 2);
+}
+
+function JsonSummary({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    return (
+      <div className="agent-json-summary">
+        {value.slice(0, 8).map((item, i) => (
+          <div className="agent-json-row" key={i}>
+            <b>{String(i + 1).padStart(2, "0")}</b>
+            <span>{valuePreview(item)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (!isPlainObject(value)) return <p>{valuePreview(value)}</p>;
+  return (
+    <div className="agent-json-summary">
+      {Object.entries(value).slice(0, 12).map(([key, raw]) => (
+        <div className="agent-json-row" key={key}>
+          <b>{key}</b>
+          <span>{valuePreview(raw)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RichMessage({ text }: { text: string }) {
+  const cleaned = cleanLLMText(text);
+  if (!cleaned) return null;
+  const json = tryJson(cleaned);
+  if (json) return <JsonSummary value={json} />;
+  const blocks = cleaned.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+  return (
+    <div className="rich-message">
+      {blocks.map((block, i) => {
+        const lines = block.split("\n").map((x) => x.trim()).filter(Boolean);
+        const bulletLines = lines.filter((line) => /^(•|\d+[.)])\s+/.test(line));
+        const kvLines = lines
+          .map((line) => line.match(/^([^：:\n]{2,22})[：:]\s*(.+)$/))
+          .filter(Boolean) as RegExpMatchArray[];
+        const blockJson = tryJson(block);
+        if (blockJson) return <JsonSummary value={blockJson} key={i} />;
+        if (lines.length > 1 && bulletLines.length === lines.length) {
+          return (
+            <ul key={i}>
+              {lines.map((line, idx) => <li key={idx}>{line.replace(/^(•|\d+[.)])\s+/, "")}</li>)}
+            </ul>
+          );
+        }
+        if (lines.length > 1 && kvLines.length >= Math.max(2, lines.length - 1)) {
+          return (
+            <div className="agent-kv" key={i}>
+              {kvLines.map((m, idx) => (
+                <div key={idx}><b>{m[1]}</b><span>{m[2]}</span></div>
+              ))}
+            </div>
+          );
+        }
+        return <p key={i}>{block}</p>;
+      })}
+    </div>
+  );
+}
+
 function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose?: () => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -82,7 +184,9 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
             {turns.map((turn, i) => {
               if (turn.kind === "msg")
                 return (
-                  <motion.div key={i} className={`bubble ${turn.role}`} {...enter}>{turn.content}</motion.div>
+                  <motion.div key={i} className={`bubble ${turn.role}`} {...enter}>
+                    {turn.role === "assistant" ? <RichMessage text={turn.content} /> : turn.content}
+                  </motion.div>
                 );
               if (turn.kind === "steps")
                 return (
@@ -91,13 +195,13 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
                       <motion.div key={j} className={`step ${s.status}`}
                         initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: j * 0.06 }}>
                         <code>{s.tool}</code><span className="stepStatus">{s.status}</span>
-                        {s.result && <pre>{s.result}</pre>}
+                        {s.result && <div className="step-output"><RichMessage text={s.result} /></div>}
                       </motion.div>
                     ))}
                   </motion.div>
                 );
               if (turn.kind === "result")
-                return <motion.pre key={i} className="toolResult" {...enter}>{turn.text}</motion.pre>;
+                return <motion.div key={i} className="toolResult" {...enter}><RichMessage text={turn.text} /></motion.div>;
               return (
                 <motion.div key={i} className="card approve-card" {...enter}>
                   <div style={{ fontWeight: 700, marginBottom: 8 }}>待你确认</div>
@@ -106,7 +210,7 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
                       <div className="meta" style={{ color: "var(--muted)", fontSize: 13 }}>
                         工具 <code style={{ color: "var(--accent)" }}>{a.tool}</code> · {a.reason}
                       </div>
-                      <pre>{JSON.stringify(a.args, null, 2)}</pre>
+                      <div className="approve-args"><JsonSummary value={a.args} /></div>
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                         <button className="btn primary sm" onClick={() => decide(a, "approve")}>批准执行</button>
                         <button className="btn danger sm" onClick={() => decide(a, "reject")}>拒绝</button>

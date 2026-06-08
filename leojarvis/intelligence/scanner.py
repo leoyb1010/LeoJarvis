@@ -173,11 +173,17 @@ def _repo_summary_zh(name: str, description: str | None, topics: list[str] | Non
     translated = to_chinese(raw, context="GitHub 项目中文介绍", max_chars=220, allow_llm=False) if raw else ""
     if translated and "英文来源摘要" not in translated and not translated.startswith("中文摘要：") and not has_noisy_english(translated):
         return translated
+    if raw:
+        topic_tags = _repo_topic_tags(topics, language, limit=3)
+        prefix = f"{name}：{raw[:260]}"
+        if topic_tags:
+            prefix += f"。主题：{'、'.join(topic_tags)}"
+        return prefix
     tags = _repo_topic_tags(topics, language, limit=4)
     focus = "、".join(tags[:4])
     if not focus:
         focus = f"{language} 生态" if language else "AI 与开发工具生态"
-    return f"{name} 是一个围绕 {focus} 的开源项目。当前描述来自英文仓库，系统已按项目主题、语言和增长信号转成中文摘要，适合作为技术趋势与可复用能力观察对象。"
+    return f"{name}：仓库暂未提供 description。已按语言、主题和增长信号归入 {focus} 方向，需打开 README 判断实际用途。"
 
 
 def _repo_reason_zh(repo: dict, velocity: dict, score: float, reasons: list[str]) -> str:
@@ -205,10 +211,17 @@ def _github_analysis(repo: dict, query: str, velocity: dict, score: float, reaso
     if isinstance(topics, str):
         topics = _json_loads(topics, [])
     summary = _repo_summary_zh(name, repo.get("description") or "", topics, repo.get("language"))
+    stars = int(repo.get("stargazers_count") or repo.get("stars") or 0)
+    forks = int(repo.get("forks_count") or repo.get("forks") or 0)
+    speed = velocity.get("stars_per_day") or velocity.get("cold_stars_per_day")
+    metric = f"星标 {stars:,}；Fork {forks:,}；语言 {repo.get('language') or '未知'}"
+    if speed is not None:
+        metric += f"；动量约 {speed}/天"
     return {
         "title_zh": f"{name} · GitHub 高增速项目",
         "summary": summary,
-        "take": f"{name} 已进入 GitHub 雷达：{summary}",
+        "take": f"{summary}\n{metric}",
+        "detail": f"仓库介绍：{summary}\n项目指标：{metric}\n雷达查询：{to_chinese(query, context='GitHub 搜索词', max_chars=80, allow_llm=False)}",
         "why": _repo_reason_zh(repo, velocity, score, reasons),
         "relation": _repo_relation_zh(repo, query),
         "next_step": _repo_next_step_zh(repo),
@@ -966,8 +979,8 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                     if per_day is not None else "首次观察，先用项目年龄、star 基数和最近活跃度估算动量。"
                 )
                 content = (
-                    f"{analysis['summary']}\n\n"
-                    f"Stars：{stars}；Forks：{forks}；主要语言：{repo.get('language') or '未知'}。\n"
+                    f"仓库介绍：{analysis['summary']}\n\n"
+                    f"项目指标：Stars {stars}；Forks {forks}；主要语言 {repo.get('language') or '未知'}。\n"
                     f"{trend_line}\n"
                     f"主题：{'、'.join(_repo_topic_tags(topics[:10], repo.get('language'))) or '暂无'}。\n"
                     f"雷达查询：{to_chinese(query, context='GitHub 搜索词', max_chars=80, allow_llm=False)}。\n"
@@ -990,6 +1003,7 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                         "topics": topics,
                         "display_topics": _repo_topic_tags(topics, repo.get("language")),
                         "original_description": original_description,
+                        "summary_zh": analysis["summary"],
                         "display_description": analysis["summary"] or description,
                         "why_zh": analysis["why"],
                         "relation_zh": analysis["relation"],

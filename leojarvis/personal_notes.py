@@ -211,7 +211,35 @@ def list_attachments(note_id: str) -> list[dict]:
             "SELECT * FROM personal_note_attachments WHERE note_id=? ORDER BY created_ts DESC",
             (note_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_attachment_row(r) for r in rows]
+
+
+def _attachment_row(row) -> dict:
+    item = dict(row)
+    mime = str(item.get("mime_type") or "")
+    item["is_image"] = mime.startswith("image/")
+    item["url"] = f"/api/personal-notes/attachments/{item['id']}"
+    return item
+
+
+def get_attachment(attachment_id: str) -> dict | None:
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT * FROM personal_note_attachments WHERE id=?",
+            (attachment_id,),
+        ).fetchone()
+    return _attachment_row(row) if row else None
+
+
+def attachment_path(attachment: dict) -> Path | None:
+    raw = str(attachment.get("path") or "")
+    if not raw:
+        return None
+    path = Path(raw).resolve()
+    attachment_root = (DATA_DIR / "attachments").resolve()
+    if attachment_root not in path.parents:
+        return None
+    return path if path.exists() else None
 
 
 def import_url(url: str) -> dict:
@@ -296,7 +324,7 @@ def attach_file(*, file_name: str, mime_type: str = "", data_base64: str = "",
             (attach_id, note_id, safe_name, mime_type, len(raw), str(path), summary, now),
         )
         row = c.execute("SELECT * FROM personal_note_attachments WHERE id=?", (attach_id,)).fetchone()
-    return {"note": get_note(note_id), "attachment": dict(row)}
+    return {"note": get_note(note_id), "attachment": _attachment_row(row)}
 
 
 def note_stats() -> dict:

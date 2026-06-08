@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import db, user_settings
@@ -678,6 +679,22 @@ def personal_note_import_attachment(req: AttachmentImportIn) -> dict:
         text_content=req.text_content,
         note_id=req.note_id,
     )}
+
+
+@router.get("/personal-notes/attachments/{attachment_id}")
+def personal_note_attachment_file(attachment_id: str):
+    from .. import personal_notes
+    attachment = personal_notes.get_attachment(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    path = personal_notes.attachment_path(attachment)
+    if not path:
+        raise HTTPException(status_code=404, detail="attachment file not found")
+    return FileResponse(
+        path,
+        media_type=attachment.get("mime_type") or "application/octet-stream",
+        filename=attachment.get("file_name") or "attachment",
+    )
 
 
 @router.post("/ingest/run")

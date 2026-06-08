@@ -234,10 +234,12 @@ def _detail_from(row: dict, analysis: dict, reasons: list[str], fallback: str) -
     content = html.unescape(re.sub(r"<[^>]+>", " ", str(row.get("content") or ""))).strip()
     if content and content not in " ".join(parts):
         parts.append(content[:900])
-    if reasons:
-        parts.append("判断依据：" + "；".join(str(r) for r in reasons[:4]))
     text = "\n\n".join(dict.fromkeys(parts)) or fallback
-    return to_chinese(text, context="简报详情", max_chars=760)
+    raw_detail = text[:1100].strip()
+    translated = to_chinese(raw_detail, context="简报详情", max_chars=760)
+    if _looks_like_fallback(translated) or ("相关动态" in translated and re.search(r"https?://|Article URL|Comments URL", raw_detail, re.I)):
+        return raw_detail
+    return translated
 
 
 def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict] | None = None) -> dict:
@@ -282,14 +284,13 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         why = repo_snapshot.get("why_zh") or why
         relation = repo_snapshot.get("relation_zh") or relation
         next_step = repo_snapshot.get("next_step_zh") or next_step
-        detail = (
-            f"{take}\n\n"
-            f"项目指标：{stars:,} 星标；"
-            f"{f'动量约 {speed}/天；' if speed is not None else '动量观察中；'}"
-            f"主要语言 {repo_snapshot.get('language') or meta.get('language') or '未知'}；主题 {topics}。\n"
-            f"推荐理由：{why}\n"
-            f"下一步：{next_step}"
-        )
+        metric_parts = [
+            f"{stars:,} 星标",
+            f"动量约 {speed}/天" if speed is not None else "动量观察中",
+            f"主要语言 {repo_snapshot.get('language') or meta.get('language') or '未知'}",
+            f"主题 {topics}",
+        ]
+        detail = f"仓库介绍：{take}\n项目指标：{'；'.join(metric_parts)}。"
     if _is_x(row) and _looks_like_fallback(detail):
         detail = _x_display_summary(row, meta)
     item_tags = _tags(row, meta, reasons)
