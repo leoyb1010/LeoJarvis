@@ -1,19 +1,23 @@
 import { useEffect, useState, type ClipboardEvent, type DragEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  absorbLeonote,
   deletePersonalNote,
+  getLeonoteAbsorbSources,
   getPersonalNote,
   getPersonalNotes,
   importPersonalNoteAttachment,
   importPersonalNoteUrl,
   savePersonalNote,
+  type LeonoteAbsorbResult,
+  type LeonoteSourceInfo,
   type NoteInput,
   type NoteAttachment,
   type PersonalNote,
   type PersonalNoteStats,
 } from "../../api";
 
-const EMPTY_STATS: PersonalNoteStats = { total: 0, favorite: 0, pinned: 0, archived: 0, tags: [], recent: [] };
+const EMPTY_STATS: PersonalNoteStats = { total: 0, favorite: 0, pinned: 0, archived: 0, tags: [], projects: [], recent: [] };
 
 function splitTags(value: string) {
   return value.split(/[\s,，#]+/).map((x) => x.trim()).filter(Boolean).slice(0, 12);
@@ -29,6 +33,7 @@ function sourceLabel(source?: string) {
     link_import: "链接导入",
     attachment_import: "附件导入",
     journal_migration: "旧记录迁移",
+    leonote_absorb: "Leonote 吸收",
   }[source || "manual"] || "手写";
 }
 
@@ -48,10 +53,12 @@ export function PersonalNotesView() {
   const [attachments, setAttachments] = useState<NoteAttachment[]>([]);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState("");
+  const [project, setProject] = useState("");
   const [status, setStatus] = useState("active");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [tagInput, setTagInput] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [favorite, setFavorite] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -61,12 +68,17 @@ export function PersonalNotesView() {
   const [copyState, setCopyState] = useState("");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [absorbOpen, setAbsorbOpen] = useState(false);
+  const [absorbBusy, setAbsorbBusy] = useState(false);
+  const [absorbSources, setAbsorbSources] = useState<LeonoteSourceInfo[]>([]);
+  const [absorbPath, setAbsorbPath] = useState("");
+  const [absorbResult, setAbsorbResult] = useState<LeonoteAbsorbResult | null>(null);
   const activeTags = splitTags(tagInput);
 
-  const load = async (query = q, tagName = tag, noteStatus = status) => {
+  const load = async (query = q, tagName = tag, noteStatus = status, projectFilter = project) => {
     setError("");
     try {
-      const res = await getPersonalNotes(query, tagName, noteStatus);
+      const res = await getPersonalNotes(query, tagName, noteStatus, projectFilter);
       setNotes(res.notes);
       setStats(res.stats);
       if (!selected && res.notes[0]) await pick(res.notes[0]);
@@ -89,6 +101,7 @@ export function PersonalNotesView() {
       setTitle(next.title);
       setContent(next.content);
       setTagInput(next.tags.join(" "));
+      setProjectName(next.project_name || "");
       setFavorite(!!next.favorite);
       setPinned(!!next.pinned);
       setArchived(!!next.archived);
@@ -98,6 +111,7 @@ export function PersonalNotesView() {
       setTitle(note.title);
       setContent(note.content);
       setTagInput(note.tags.join(" "));
+      setProjectName(note.project_name || "");
       setFavorite(!!note.favorite);
       setPinned(!!note.pinned);
       setArchived(!!note.archived);
@@ -110,6 +124,7 @@ export function PersonalNotesView() {
     setTitle("");
     setContent("");
     setTagInput("");
+    setProjectName("");
     setFavorite(false);
     setPinned(false);
     setArchived(false);
@@ -121,6 +136,7 @@ export function PersonalNotesView() {
       title,
       content,
       tags: activeTags,
+      project_name: projectName.trim(),
       source: selected?.source || "manual",
       source_url: selected?.source_url || "",
       source_title: selected?.source_title || "",
@@ -275,6 +291,41 @@ export function PersonalNotesView() {
     await importFiles(files, true);
   }
 
+  async function scanLeonote() {
+    setAbsorbBusy(true);
+    setError("");
+    try {
+      const res = await getLeonoteAbsorbSources();
+      setAbsorbSources(res.sources || []);
+      setAbsorbPath(res.best?.path || absorbPath);
+      setAbsorbResult(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAbsorbBusy(false);
+    }
+  }
+
+  async function runLeonoteAbsorb(dryRun: boolean) {
+    setAbsorbBusy(true);
+    setError("");
+    try {
+      const res = await absorbLeonote({ path: absorbPath, dry_run: dryRun });
+      setAbsorbResult(res);
+      if (!dryRun && res.ok) await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAbsorbBusy(false);
+    }
+  }
+
+  function toggleAbsorb() {
+    const next = !absorbOpen;
+    setAbsorbOpen(next);
+    if (next && absorbSources.length === 0) void scanLeonote();
+  }
+
   return (
     <div>
       <div className="notes-workbar">
@@ -294,19 +345,72 @@ export function PersonalNotesView() {
               <span key={label}><b>{value}</b>{label}</span>
             ))}
           </div>
-          <button className="btn primary" onClick={startNew}>新建记事</button>
+          <div className="notes-workbar-actions">
+            <button className="btn" onClick={toggleAbsorb}>吸收 Leonote</button>
+            <button className="btn primary" onClick={startNew}>新建记事</button>
+          </div>
         </div>
       </div>
 
       {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
+
+      {absorbOpen ? (
+        <div className="leonote-absorb-panel">
+          <div className="leonote-absorb-head">
+            <div>
+              <b>吸收 Leonote</b>
+              <span>一次性迁入 Jarvis 记事库</span>
+            </div>
+            <button className="btn sm" onClick={scanLeonote} disabled={absorbBusy}>{absorbBusy ? "扫描中" : "扫描源库"}</button>
+          </div>
+          <div className="leonote-absorb-grid">
+            {(absorbSources.length ? absorbSources : [{
+              path: "尚未扫描",
+              exists: false,
+              valid: false,
+              note_count: 0,
+              active_note_count: 0,
+              project_count: 0,
+              tag_count: 0,
+              attachment_count: 0,
+              revision_count: 0,
+              latest_note_updated_at: "",
+              message: "",
+            }]).map((src) => (
+              <button
+                key={src.path}
+                className={`leonote-source ${absorbPath === src.path ? "on" : ""} ${src.valid && src.active_note_count > 0 ? "ready" : ""}`}
+                onClick={() => src.exists && setAbsorbPath(src.path)}
+                disabled={!src.exists}
+              >
+                <span>{src.path}</span>
+                <b>{src.active_note_count} 笔记</b>
+                <em>{src.project_count} 项目 · {src.tag_count} 标签 · {src.attachment_count} 附件 · {src.revision_count} 版本</em>
+                <small>{src.message || (src.exists ? "可检查" : "不存在")}</small>
+              </button>
+            ))}
+          </div>
+          <div className="leonote-absorb-controls">
+            <input value={absorbPath} onChange={(e) => setAbsorbPath(e.target.value)} placeholder="Leonote SQLite 路径" />
+            <button className="btn sm" onClick={() => runLeonoteAbsorb(true)} disabled={absorbBusy || !absorbPath}>预演</button>
+            <button className="btn sm primary" onClick={() => runLeonoteAbsorb(false)} disabled={absorbBusy || !absorbPath}>正式吸收</button>
+          </div>
+          {absorbResult ? (
+            <div className={`leonote-absorb-result ${absorbResult.ok ? "ok" : "bad"}`}>
+              <span>{absorbResult.dry_run ? "预演" : "吸收"}：扫描 {absorbResult.scanned ?? 0}，新增 {absorbResult.created ?? 0}，更新 {absorbResult.updated ?? 0}，跳过 {absorbResult.skipped ?? 0}</span>
+              <span>附件 {absorbResult.attachments ?? 0} · 版本 {absorbResult.revisions ?? 0} · 错误 {absorbResult.errors?.length ?? 0}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="notes-shell">
         <section className="notes-browse">
           <div className="note-search">
             <input value={q} placeholder="搜索标题、正文、标签"
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load(q, tag, status)} />
-            <button className="btn sm" onClick={() => load(q, tag, status)}>搜索</button>
+              onKeyDown={(e) => e.key === "Enter" && load(q, tag, status, project)} />
+            <button className="btn sm" onClick={() => load(q, tag, status, project)}>搜索</button>
           </div>
 
           <div className="segmented">
@@ -315,7 +419,7 @@ export function PersonalNotesView() {
               ["all", "全部"],
               ["archived", "归档"],
             ].map(([id, label]) => (
-              <button key={id} className={status === id ? "on" : ""} onClick={() => { setStatus(id); load(q, tag, id); }}>{label}</button>
+              <button key={id} className={status === id ? "on" : ""} onClick={() => { setStatus(id); load(q, tag, id, project); }}>{label}</button>
             ))}
           </div>
 
@@ -336,9 +440,23 @@ export function PersonalNotesView() {
                 <button className={tag === t.tag ? "on" : ""} key={t.tag} onClick={() => {
                   const next = tag === t.tag ? "" : t.tag;
                   setTag(next);
-                  load(q, next, status);
+                  load(q, next, status, project);
                 }}>
                   {t.tag}<b>{t.count}</b>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {stats.projects?.length ? (
+            <div className="project-cloud-large">
+              {stats.projects.map((p) => (
+                <button className={project === p.name ? "on" : ""} key={p.name} onClick={() => {
+                  const next = project === p.name ? "" : p.name;
+                  setProject(next);
+                  load(q, tag, status, next);
+                }}>
+                  {p.name}<b>{p.count}</b>
                 </button>
               ))}
             </div>
@@ -401,6 +519,11 @@ export function PersonalNotesView() {
               <span>标签</span>
               <input className="tag-input" value={tagInput} placeholder="输入标签，用空格、逗号或 # 分隔"
                 onChange={(e) => setTagInput(e.target.value)} />
+            </label>
+            <label className="note-field">
+              <span>项目</span>
+              <input className="tag-input" value={projectName} placeholder="项目名称"
+                onChange={(e) => setProjectName(e.target.value)} />
             </label>
             <div className="source-chain">
               <span>来源：{sourceLabel(selected?.source)}</span>

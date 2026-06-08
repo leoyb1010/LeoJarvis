@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS personal_notes (
   source TEXT,
   source_url TEXT,
   source_title TEXT,
+  project_name TEXT,
+  absorbed_from TEXT,
   import_meta TEXT,
   favorite INTEGER DEFAULT 0,
   pinned INTEGER DEFAULT 0,
@@ -219,6 +221,8 @@ def _init_db_impl() -> None:
         for col, ddl in {
             "source_url": "ALTER TABLE personal_notes ADD COLUMN source_url TEXT",
             "source_title": "ALTER TABLE personal_notes ADD COLUMN source_title TEXT",
+            "project_name": "ALTER TABLE personal_notes ADD COLUMN project_name TEXT",
+            "absorbed_from": "ALTER TABLE personal_notes ADD COLUMN absorbed_from TEXT",
             "import_meta": "ALTER TABLE personal_notes ADD COLUMN import_meta TEXT",
         }.items():
             if col not in note_cols:

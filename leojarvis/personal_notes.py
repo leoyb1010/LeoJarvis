@@ -92,7 +92,7 @@ def migrate_journal_events() -> int:
     return migrated
 
 
-def list_notes(q: str = "", tag: str = "", status: str = "active", limit: int = 100) -> list[dict]:
+def list_notes(q: str = "", tag: str = "", status: str = "active", project: str = "", limit: int = 100) -> list[dict]:
     migrate_journal_events()
     clauses = []
     params: list[Any] = []
@@ -109,6 +109,9 @@ def list_notes(q: str = "", tag: str = "", status: str = "active", limit: int = 
     if tag.strip():
         clauses.append("tags LIKE ?")
         params.append(f"%{tag.strip()}%")
+    if project.strip():
+        clauses.append("project_name=?")
+        params.append(project.strip())
     params.append(max(1, min(limit, 300)))
     with db.conn() as c:
         rows = c.execute(
@@ -144,6 +147,8 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
     source = str(data.get("source") or "manual").strip() or "manual"
     source_url = str(data.get("source_url") or "").strip() or None
     source_title = str(data.get("source_title") or "").strip() or None
+    project_name = str(data.get("project_name") or "").strip() or None
+    absorbed_from = str(data.get("absorbed_from") or "").strip() or None
     import_meta = data.get("import_meta") if isinstance(data.get("import_meta"), dict) else {}
     created_new = note_id is None
 
@@ -161,11 +166,12 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
             c.execute(
                 """UPDATE personal_notes
                    SET title=?, content=?, excerpt=?, tags=?, source=?, source_url=?, source_title=?,
-                       import_meta=?, favorite=?, pinned=?, archived=?, updated_ts=?
+                       project_name=?, absorbed_from=?, import_meta=?, favorite=?, pinned=?, archived=?, updated_ts=?
                    WHERE id=?""",
                 (
                     title, content, excerpt, json.dumps(tags, ensure_ascii=False),
                     source, source_url, source_title,
+                    project_name, absorbed_from,
                     json.dumps(import_meta, ensure_ascii=False),
                     favorite, pinned, archived, now, note_id,
                 ),
@@ -175,11 +181,12 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
             c.execute(
                 """INSERT INTO personal_notes(
                      id,title,content,excerpt,tags,source,source_url,source_title,import_meta,
-                     favorite,pinned,archived,created_ts,updated_ts
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     project_name,absorbed_from,favorite,pinned,archived,created_ts,updated_ts
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     note_id, title, content, excerpt, json.dumps(tags, ensure_ascii=False),
                     source, source_url, source_title, json.dumps(import_meta, ensure_ascii=False),
+                    project_name, absorbed_from,
                     favorite, pinned, archived, now, now,
                 ),
             )
@@ -335,11 +342,18 @@ def note_stats() -> dict:
         for tag in note["tags"]:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
     top_tags = sorted(tag_counts.items(), key=lambda x: (-x[1], x[0]))[:12]
+    project_counts: dict[str, int] = {}
+    for note in notes:
+        project = str(note.get("project_name") or "").strip()
+        if project:
+            project_counts[project] = project_counts.get(project, 0) + 1
+    top_projects = sorted(project_counts.items(), key=lambda x: (-x[1], x[0]))[:12]
     return {
         "total": len(notes),
         "favorite": sum(1 for n in notes if n["favorite"]),
         "pinned": sum(1 for n in notes if n["pinned"]),
         "archived": sum(1 for n in notes if n["archived"]),
         "tags": [{"tag": tag, "count": count} for tag, count in top_tags],
+        "projects": [{"name": name, "count": count} for name, count in top_projects],
         "recent": notes[:8],
     }

@@ -16,17 +16,38 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack {
+                JarvisHomeView()
+            }
+            .tabItem {
+                Label("总览", systemImage: "sparkles")
+            }
+
+            NavigationStack {
+                MobileNotesView()
+            }
+            .tabItem {
+                Label("记事", systemImage: "note.text")
+            }
+
+            NavigationStack {
+                MobileBriefingView()
+            }
+            .tabItem {
+                Label("简报", systemImage: "newspaper")
+            }
+
+            NavigationStack {
                 FleetDashboardView()
             }
             .tabItem {
-                Label("状态", systemImage: "gauge.with.dots.needle.33percent")
+                Label("设备", systemImage: "gauge.with.dots.needle.33percent")
             }
 
             NavigationStack {
                 SettingsView()
             }
             .tabItem {
-                Label("主机", systemImage: "terminal")
+                Label("设置", systemImage: "gearshape")
             }
         }
     }

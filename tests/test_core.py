@@ -1,4 +1,5 @@
 import base64
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from leojarvis.intelligence.scanner import github_radar
 from leojarvis.judge.engine import judge_and_store
 from leojarvis.localize import to_chinese
 from leojarvis.main import app
-from leojarvis import user_settings
+from leojarvis import leonote_absorb, user_settings
 from leojarvis.api.routes import _apply_remote_device_states
 
 
@@ -263,6 +264,124 @@ def test_cockpit_and_personal_notes_endpoints():
                     c.execute("DELETE FROM events WHERE dedup_key=?", (f"note:{note_id}",))
                 if attachment_path:
                     Path(attachment_path).unlink(missing_ok=True)
+
+
+def test_leonote_absorb_imports_notes_projects_attachments_and_revisions(tmp_path):
+    db.init_db()
+    source = tmp_path / "leonote.db"
+    attachment_rel = Path("u1") / "n1" / "hello.md"
+    attachment_path = tmp_path / "attachments" / attachment_rel
+    attachment_path.parent.mkdir(parents=True)
+    attachment_path.write_text("Leonote 附件正文", encoding="utf-8")
+    created = "2026-06-01T10:00:00.000Z"
+    updated = "2026-06-02T10:00:00.000Z"
+
+    with sqlite3.connect(source) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE Note (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              content TEXT NOT NULL DEFAULT '',
+              excerpt TEXT NOT NULL DEFAULT '',
+              isFavorite BOOLEAN NOT NULL DEFAULT false,
+              isPinned BOOLEAN NOT NULL DEFAULT false,
+              isArchived BOOLEAN NOT NULL DEFAULT false,
+              deletedAt DATETIME,
+              createdAt DATETIME NOT NULL,
+              updatedAt DATETIME NOT NULL,
+              userId TEXT NOT NULL,
+              projectId TEXT
+            );
+            CREATE TABLE Project (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE Tag (id TEXT PRIMARY KEY, name TEXT NOT NULL, userId TEXT NOT NULL);
+            CREATE TABLE NoteTag (noteId TEXT NOT NULL, tagId TEXT NOT NULL);
+            CREATE TABLE NoteRevision (
+              id TEXT PRIMARY KEY,
+              noteId TEXT NOT NULL,
+              userId TEXT NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT NOT NULL,
+              excerpt TEXT NOT NULL DEFAULT '',
+              reason TEXT NOT NULL DEFAULT 'save',
+              createdAt DATETIME NOT NULL
+            );
+            CREATE TABLE NoteAttachment (
+              id TEXT PRIMARY KEY,
+              noteId TEXT NOT NULL,
+              userId TEXT NOT NULL,
+              filename TEXT NOT NULL,
+              mimeType TEXT NOT NULL,
+              size INTEGER NOT NULL,
+              storagePath TEXT NOT NULL,
+              createdAt DATETIME NOT NULL
+            );
+            """
+        )
+        conn.execute("INSERT INTO Project(id,name) VALUES('p1','职业项目')")
+        conn.execute("INSERT INTO Tag(id,name,userId) VALUES('t1','AI','u1')")
+        conn.execute(
+            """INSERT INTO Note(id,title,content,excerpt,isFavorite,isPinned,isArchived,createdAt,updatedAt,userId,projectId)
+               VALUES('n1','Leonote 笔记','正文内容','摘要',1,1,0,?,?,?,?)""",
+            (created, updated, "u1", "p1"),
+        )
+        conn.execute("INSERT INTO NoteTag(noteId,tagId) VALUES('n1','t1')")
+        conn.execute(
+            """INSERT INTO NoteRevision(id,noteId,userId,title,content,excerpt,reason,createdAt)
+               VALUES('r1','n1','u1','旧标题','旧正文','旧摘要','autosave',?)""",
+            (created,),
+        )
+        conn.execute(
+            """INSERT INTO NoteAttachment(id,noteId,userId,filename,mimeType,size,storagePath,createdAt)
+               VALUES('a1','n1','u1','hello.md','text/markdown',?, ?, ?)""",
+            (attachment_path.stat().st_size, str(attachment_rel), updated),
+        )
+
+    with db.conn() as c:
+        existing = c.execute("SELECT id FROM personal_notes WHERE source_url='leonote://n1'").fetchone()
+        if existing:
+            c.execute("DELETE FROM personal_note_attachments WHERE note_id=?", (existing["id"],))
+            c.execute("DELETE FROM personal_note_revisions WHERE note_id=?", (existing["id"],))
+            c.execute("DELETE FROM personal_notes WHERE id=?", (existing["id"],))
+
+    preview = leonote_absorb.absorb(path=str(source), dry_run=True)
+    assert preview["created"] == 1
+
+    result = leonote_absorb.absorb(path=str(source))
+    assert result["ok"] is True
+    assert result["created"] == 1
+    assert result["attachments"] == 1
+    assert result["revisions"] == 1
+
+    note_id = None
+    copied_path = None
+    try:
+        with db.conn() as c:
+            note = c.execute("SELECT * FROM personal_notes WHERE source_url='leonote://n1'").fetchone()
+            assert note is not None
+            note_id = note["id"]
+            assert note["project_name"] == "职业项目"
+            assert note["favorite"] == 1
+            assert "AI" in note["tags"]
+            assert "职业项目" in note["tags"]
+            attachment = c.execute("SELECT * FROM personal_note_attachments WHERE note_id=?", (note_id,)).fetchone()
+            assert attachment is not None
+            copied_path = attachment["path"]
+            assert Path(copied_path).read_text(encoding="utf-8") == "Leonote 附件正文"
+            assert c.execute("SELECT COUNT(*) FROM personal_note_revisions WHERE note_id=?", (note_id,)).fetchone()[0] == 1
+
+        with TestClient(app) as client:
+            listed = client.get("/personal-notes?project=职业项目")
+        assert listed.status_code == 200
+        assert any(row["id"] == note_id for row in listed.json()["notes"])
+    finally:
+        if note_id:
+            with db.conn() as c:
+                c.execute("DELETE FROM personal_note_attachments WHERE note_id=?", (note_id,))
+                c.execute("DELETE FROM personal_note_revisions WHERE note_id=?", (note_id,))
+                c.execute("DELETE FROM personal_notes WHERE id=?", (note_id,))
+        if copied_path:
+            Path(copied_path).unlink(missing_ok=True)
 
 
 def test_intelligence_overview_and_configuration_endpoints():

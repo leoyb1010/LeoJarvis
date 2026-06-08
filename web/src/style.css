@@ -3544,6 +3544,102 @@ textarea,
   border-radius: 13px;
   padding: 10px 16px;
 }
+.notes-workbar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.leonote-absorb-panel {
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card-bg), var(--accent-soft) 18%);
+}
+.leonote-absorb-head,
+.leonote-absorb-controls,
+.leonote-absorb-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.leonote-absorb-head b {
+  display: block;
+  color: var(--fg);
+  font: 760 15px var(--font-body);
+}
+.leonote-absorb-head span,
+.leonote-source em,
+.leonote-source small,
+.leonote-absorb-result span {
+  color: var(--muted);
+  font: 600 12px/1.45 var(--font-body);
+}
+.leonote-absorb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.leonote-source {
+  text-align: left;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--inset);
+  color: var(--fg);
+  padding: 11px 12px;
+  display: grid;
+  gap: 5px;
+}
+.leonote-source:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.leonote-source.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent), transparent 62%);
+}
+.leonote-source.ready b {
+  color: var(--accent);
+}
+.leonote-source span {
+  font: 650 12px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.leonote-source b {
+  font-size: 18px;
+}
+.leonote-absorb-controls {
+  margin-top: 12px;
+}
+.leonote-absorb-controls input {
+  flex: 1;
+  min-width: 180px;
+  min-height: 38px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--inset);
+  color: var(--fg);
+  padding: 0 12px;
+  font: 600 12px var(--font-mono);
+}
+.leonote-absorb-result {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--inset);
+}
+.leonote-absorb-result.ok {
+  border-color: color-mix(in oklab, #34c759, var(--border-soft) 45%);
+}
+.leonote-absorb-result.bad {
+  border-color: color-mix(in oklab, #ff453a, var(--border-soft) 45%);
+}
 .notes-shell {
   grid-template-columns: minmax(220px, 252px) minmax(0, 1fr);
   gap: 10px;
@@ -3563,6 +3659,31 @@ textarea,
 }
 .notes-import-inline .file-import.compact {
   min-height: 32px;
+}
+.project-cloud-large {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+.project-cloud-large button {
+  min-height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--fg-2);
+  padding: 6px 11px;
+  font: 700 12px var(--font-body);
+}
+.project-cloud-large button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.project-cloud-large b {
+  margin-left: 6px;
+  color: var(--meta);
+  font: 700 11px var(--font-mono);
 }
 .notes-list {
   max-height: calc(100vh - 296px);

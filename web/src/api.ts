@@ -713,6 +713,8 @@ export type PersonalNote = {
   source?: string;
   source_url?: string | null;
   source_title?: string | null;
+  project_name?: string | null;
+  absorbed_from?: string | null;
   import_meta?: Record<string, any>;
   favorite: boolean;
   pinned: boolean;
@@ -727,6 +729,7 @@ export type PersonalNoteStats = {
   pinned: number;
   archived: number;
   tags: { tag: string; count: number }[];
+  projects?: { name: string; count: number }[];
   recent: PersonalNote[];
 };
 
@@ -741,6 +744,7 @@ export type NoteInput = {
   content?: string;
   excerpt?: string;
   tags?: string[];
+  project_name?: string;
   source?: string;
   source_url?: string;
   source_title?: string;
@@ -750,11 +754,12 @@ export type NoteInput = {
   archived?: boolean;
 };
 
-export async function getPersonalNotes(q = "", tag = "", status = "active"): Promise<PersonalNotesResponse> {
+export async function getPersonalNotes(q = "", tag = "", status = "active", project = ""): Promise<PersonalNotesResponse> {
   const url = apiUrl("/personal-notes");
   if (q) url.searchParams.set("q", q);
   if (tag) url.searchParams.set("tag", tag);
   if (status) url.searchParams.set("status", status);
+  if (project) url.searchParams.set("project", project);
   return readJson(await fetch(url), "读取个人记事");
 }
 
@@ -810,6 +815,48 @@ export async function importPersonalNoteAttachment(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }), "导入附件");
+}
+
+export type LeonoteSourceInfo = {
+  path: string;
+  exists: boolean;
+  valid: boolean;
+  note_count: number;
+  active_note_count: number;
+  project_count: number;
+  tag_count: number;
+  attachment_count: number;
+  revision_count: number;
+  latest_note_updated_at: string;
+  message: string;
+};
+
+export type LeonoteAbsorbResult = {
+  ok: boolean;
+  dry_run?: boolean;
+  source_path?: string;
+  scanned?: number;
+  created?: number;
+  updated?: number;
+  skipped?: number;
+  attachments?: number;
+  revisions?: number;
+  errors?: { note_id: string; error: string }[];
+  sources?: LeonoteSourceInfo[];
+  best?: LeonoteSourceInfo | null;
+  message?: string;
+};
+
+export async function getLeonoteAbsorbSources(): Promise<{ ok: boolean; sources: LeonoteSourceInfo[]; best: LeonoteSourceInfo | null }> {
+  return readJson(await fetch(`${BASE}/personal-notes/leonote/sources`), "扫描 Leonote 源库");
+}
+
+export async function absorbLeonote(input: { path?: string; dry_run?: boolean; limit?: number }): Promise<LeonoteAbsorbResult> {
+  return readJson(await fetch(`${BASE}/personal-notes/leonote/absorb`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "吸收 Leonote");
 }
 
 export type JournalRow = { id: string; ts: number; title: string; content: string };

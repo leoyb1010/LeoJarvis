@@ -448,3 +448,239 @@ enum HealthTone {
         }
     }
 }
+
+struct MobileTagStat: Decodable, Identifiable, Equatable {
+    var id: String { tag }
+    let tag: String
+    let count: Int
+}
+
+struct MobileProjectStat: Decodable, Identifiable, Equatable {
+    var id: String { name }
+    let name: String
+    let count: Int
+}
+
+struct MobileNoteStats: Decodable, Equatable {
+    var total: Int = 0
+    var favorite: Int = 0
+    var pinned: Int = 0
+    var archived: Int = 0
+    var tags: [MobileTagStat] = []
+    var projects: [MobileProjectStat] = []
+
+    static let empty = MobileNoteStats()
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case favorite
+        case pinned
+        case archived
+        case tags
+        case projects
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        favorite = try c.decodeIfPresent(Int.self, forKey: .favorite) ?? 0
+        pinned = try c.decodeIfPresent(Int.self, forKey: .pinned) ?? 0
+        archived = try c.decodeIfPresent(Int.self, forKey: .archived) ?? 0
+        tags = try c.decodeIfPresent([MobileTagStat].self, forKey: .tags) ?? []
+        projects = try c.decodeIfPresent([MobileProjectStat].self, forKey: .projects) ?? []
+    }
+}
+
+struct MobileNote: Decodable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let content: String
+    let excerpt: String
+    let tags: [String]
+    let source: String?
+    let projectName: String?
+    let favorite: Bool
+    let pinned: Bool
+    let archived: Bool
+    let createdTs: Int?
+    let updatedTs: Int?
+
+    var displayTitle: String { title.isEmpty ? "未命名记事" : title }
+    var displayExcerpt: String {
+        if !excerpt.isEmpty { return excerpt }
+        return content.split(separator: "\n").prefix(2).joined(separator: " ")
+    }
+}
+
+struct MobileNotesResponse: Decodable, Equatable {
+    let notes: [MobileNote]
+    let stats: MobileNoteStats
+}
+
+struct MobileBriefingItem: Decodable, Identifiable, Equatable {
+    var id: String { eventId ?? title }
+    let eventId: String?
+    let title: String
+    let source: String?
+    let score: Double?
+    let take: String?
+    let priority: String?
+    let whyImportant: String?
+    let relation: String?
+    let nextStep: String?
+    let ts: Int?
+    let url: String?
+}
+
+struct MobileBriefingPayload: Decodable, Equatable {
+    let business: [MobileBriefingItem]
+    let life: [MobileBriefingItem]
+    let focus: [MobileBriefingItem]
+
+    var topItems: [MobileBriefingItem] {
+        let rows = focus + business + life
+        var seen = Set<String>()
+        return rows.filter { item in
+            let key = item.id
+            if seen.contains(key) { return false }
+            seen.insert(key)
+            return true
+        }.prefix(18).map { $0 }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case business
+        case life
+        case focus
+    }
+
+    init(business: [MobileBriefingItem] = [], life: [MobileBriefingItem] = [], focus: [MobileBriefingItem] = []) {
+        self.business = business
+        self.life = life
+        self.focus = focus
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        business = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .business) ?? []
+        life = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .life) ?? []
+        focus = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .focus) ?? []
+    }
+}
+
+struct JarvisHealthSummary: Decodable, Equatable {
+    let score: Double
+    let servicesOnline: Int
+    let servicesTotal: Int
+    let attentionItems: [AttentionItem]
+
+    struct AttentionItem: Decodable, Identifiable, Equatable {
+        var id: String { "\(label)-\(detail)" }
+        let label: String
+        let level: String
+        let detail: String
+    }
+
+    static let empty = JarvisHealthSummary(score: 0, servicesOnline: 0, servicesTotal: 0, attentionItems: [])
+}
+
+struct JarvisRuntimeSummary: Decodable, Equatable {
+    let toolsReady: Int
+    let toolsTotal: Int
+    let toolsRunning: Int
+    let agentsRunning: Int
+    let agentsTotal: Int
+
+    static let empty = JarvisRuntimeSummary(toolsReady: 0, toolsTotal: 0, toolsRunning: 0, agentsRunning: 0, agentsTotal: 0)
+}
+
+struct JarvisBriefingSummary: Decodable, Equatable {
+    let business: Int
+    let life: Int
+    let top: [MobileBriefingItem]
+
+    static let empty = JarvisBriefingSummary(business: 0, life: 0, top: [])
+}
+
+struct JarvisIntelligenceSummary: Decodable, Equatable {
+    let events: Int
+    let githubRepos: Int
+
+    static let empty = JarvisIntelligenceSummary(events: 0, githubRepos: 0)
+}
+
+struct JarvisMemorySummary: Decodable, Equatable {
+    let active: Int
+    let pending: Int
+    let later: Int
+    let rejected: Int
+
+    static let empty = JarvisMemorySummary(active: 0, pending: 0, later: 0, rejected: 0)
+}
+
+struct JarvisOverview: Decodable, Equatable {
+    let generatedAt: Int
+    let health: JarvisHealthSummary
+    let runtime: JarvisRuntimeSummary
+    let notes: MobileNoteStats
+    let briefing: JarvisBriefingSummary
+    let intelligence: JarvisIntelligenceSummary
+    let memory: JarvisMemorySummary
+    let timeline: [MobileBriefingItem]
+
+    static let empty = JarvisOverview(
+        generatedAt: 0,
+        health: .empty,
+        runtime: .empty,
+        notes: .empty,
+        briefing: .empty,
+        intelligence: .empty,
+        memory: .empty,
+        timeline: []
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case generatedAt
+        case health
+        case runtime
+        case notes
+        case briefing
+        case intelligence
+        case memory
+        case timeline
+    }
+
+    init(
+        generatedAt: Int,
+        health: JarvisHealthSummary,
+        runtime: JarvisRuntimeSummary,
+        notes: MobileNoteStats,
+        briefing: JarvisBriefingSummary,
+        intelligence: JarvisIntelligenceSummary,
+        memory: JarvisMemorySummary,
+        timeline: [MobileBriefingItem]
+    ) {
+        self.generatedAt = generatedAt
+        self.health = health
+        self.runtime = runtime
+        self.notes = notes
+        self.briefing = briefing
+        self.intelligence = intelligence
+        self.memory = memory
+        self.timeline = timeline
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decodeIfPresent(Int.self, forKey: .generatedAt) ?? 0
+        health = try c.decodeIfPresent(JarvisHealthSummary.self, forKey: .health) ?? .empty
+        runtime = try c.decodeIfPresent(JarvisRuntimeSummary.self, forKey: .runtime) ?? .empty
+        notes = try c.decodeIfPresent(MobileNoteStats.self, forKey: .notes) ?? .empty
+        briefing = try c.decodeIfPresent(JarvisBriefingSummary.self, forKey: .briefing) ?? .empty
+        intelligence = try c.decodeIfPresent(JarvisIntelligenceSummary.self, forKey: .intelligence) ?? .empty
+        memory = try c.decodeIfPresent(JarvisMemorySummary.self, forKey: .memory) ?? .empty
+        timeline = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .timeline) ?? []
+    }
+}

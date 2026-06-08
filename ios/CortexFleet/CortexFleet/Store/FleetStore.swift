@@ -6,8 +6,13 @@ final class FleetStore: ObservableObject {
     @Published private(set) var hosts: [MonitoredHost] = []
     @Published private(set) var snapshots: [String: HostSnapshot] = [:]
     @Published private(set) var bridgeSettings = BridgeSettings()
+    @Published private(set) var jarvisOverview = JarvisOverview.empty
+    @Published private(set) var mobileNotes: [MobileNote] = []
+    @Published private(set) var mobileNoteStats = MobileNoteStats.empty
+    @Published private(set) var mobileBriefing = MobileBriefingPayload()
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
     @Published private(set) var isRefreshing = false
+    @Published private(set) var isLoadingJarvis = false
     @Published var noticeMessage: String?
     @Published var errorMessage: String?
 
@@ -31,7 +36,6 @@ final class FleetStore: ObservableObject {
             replacingSeeded: defaults.integer(forKey: seedVersionKey) < Self.seedVersion
         )
         self.snapshots = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, HostSnapshot.pending(for: $0)) })
-        Self.bootstrapBridgeTokenIfNeeded(vault)
         persistHosts()
         persistBridgeSettings()
         defaults.set(Self.seedVersion, forKey: seedVersionKey)
@@ -57,6 +61,7 @@ final class FleetStore: ObservableObject {
 
     func refreshAll() async {
         refreshLocal()
+        await refreshJarvisContent(showLoading: false)
         isRefreshing = true
         errorMessage = nil
 
@@ -181,6 +186,89 @@ final class FleetStore: ObservableObject {
         keychain.hasBridgeToken()
     }
 
+    func refreshJarvisContent(showLoading: Bool = true) async {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return
+        }
+        if showLoading {
+            isLoadingJarvis = true
+        }
+        defer {
+            if showLoading {
+                isLoadingJarvis = false
+            }
+        }
+        do {
+            let token = try keychain.bridgeToken()
+            async let overview = mobileBridge.loadOverview(settings: bridgeSettings, token: token)
+            async let notes = mobileBridge.loadNotes(settings: bridgeSettings, token: token)
+            async let briefing = mobileBridge.loadBriefing(settings: bridgeSettings, token: token)
+            let (overviewValue, notesValue, briefingValue) = try await (overview, notes, briefing)
+            jarvisOverview = overviewValue
+            mobileNotes = notesValue.notes
+            mobileNoteStats = notesValue.stats
+            mobileBriefing = briefingValue
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshMobileNotes() async {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return
+        }
+        isLoadingJarvis = true
+        defer { isLoadingJarvis = false }
+        do {
+            let token = try keychain.bridgeToken()
+            let result = try await mobileBridge.loadNotes(settings: bridgeSettings, token: token)
+            mobileNotes = result.notes
+            mobileNoteStats = result.stats
+            jarvisOverview = JarvisOverview(
+                generatedAt: jarvisOverview.generatedAt,
+                health: jarvisOverview.health,
+                runtime: jarvisOverview.runtime,
+                notes: result.stats,
+                briefing: jarvisOverview.briefing,
+                intelligence: jarvisOverview.intelligence,
+                memory: jarvisOverview.memory,
+                timeline: jarvisOverview.timeline
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func createMobileNote(title: String, content: String, tags: [String], projectName: String) async -> Bool {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return false
+        }
+        do {
+            let token = try keychain.bridgeToken()
+            let note = try await mobileBridge.createNote(
+                settings: bridgeSettings,
+                token: token,
+                title: title,
+                content: content,
+                tags: tags,
+                projectName: projectName
+            )
+            mobileNotes.insert(note, at: 0)
+            await refreshMobileNotes()
+            noticeMessage = "记事已保存到 Jarvis。"
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     private func refreshViaBridge() async {
         guard bridgeSettings.isUsable else {
             errorMessage = FleetError.invalidBridgeURL.localizedDescription
@@ -269,11 +357,6 @@ final class FleetStore: ObservableObject {
         return settings
     }
 
-    private static func bootstrapBridgeTokenIfNeeded(_ vault: KeychainVault) {
-        guard !vault.hasBridgeToken() else { return }
-        try? vault.saveBridgeToken(Self.bundledBridgeToken)
-    }
-
     private static func mergeSeededHosts(into stored: [MonitoredHost], replacingSeeded: Bool) -> [MonitoredHost] {
         var rows = replacingSeeded ? stored.filter { !$0.id.hasPrefix("seed-") } : stored
         for seed in seededHosts where !rows.contains(where: { $0.id == seed.id || $0.host == seed.host }) {
@@ -283,8 +366,6 @@ final class FleetStore: ObservableObject {
     }
 
     private static let seedVersion = 3
-
-    private static let bundledBridgeToken = "JAvFqw08MWtICezTtZxOad99bDTxI_nTDKsUNnKBn2A"
 
     private static let seededHosts: [MonitoredHost] = [
         MonitoredHost(

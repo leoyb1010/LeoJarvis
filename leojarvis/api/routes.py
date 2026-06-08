@@ -602,6 +602,7 @@ class PersonalNoteIn(BaseModel):
     content: str = ""
     excerpt: str = ""
     tags: list[str] = Field(default_factory=list)
+    project_name: str = ""
     source: str = "manual"
     source_url: str = ""
     source_title: str = ""
@@ -623,12 +624,18 @@ class AttachmentImportIn(BaseModel):
     note_id: str | None = None
 
 
+class LeonoteAbsorbIn(BaseModel):
+    path: str = ""
+    dry_run: bool = False
+    limit: int = 0
+
+
 @router.get("/personal-notes")
-def personal_note_list(q: str = "", tag: str = "", status: str = "active") -> dict:
+def personal_note_list(q: str = "", tag: str = "", status: str = "active", project: str = "") -> dict:
     from .. import personal_notes
     return {
         "ok": True,
-        "notes": personal_notes.list_notes(q=q, tag=tag, status=status),
+        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project),
         "stats": personal_notes.note_stats(),
     }
 
@@ -637,6 +644,18 @@ def personal_note_list(q: str = "", tag: str = "", status: str = "active") -> di
 def personal_note_create(note: PersonalNoteIn) -> dict:
     from .. import personal_notes
     return {"ok": True, "note": personal_notes.save_note(note.model_dump())}
+
+
+@router.get("/personal-notes/leonote/sources")
+def personal_note_leonote_sources() -> dict:
+    from .. import leonote_absorb
+    return leonote_absorb.inspect_sources()
+
+
+@router.post("/personal-notes/leonote/absorb")
+def personal_note_leonote_absorb(req: LeonoteAbsorbIn) -> dict:
+    from .. import leonote_absorb
+    return leonote_absorb.absorb(path=req.path, dry_run=req.dry_run, limit=req.limit)
 
 
 @router.get("/personal-notes/{note_id}")

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
 from . import db, user_settings
 
@@ -471,6 +472,15 @@ def _local_addresses() -> list[str]:
 app = FastAPI(title="LeoJarvis Mobile Bridge", version="0.1.0")
 
 
+class MobileNoteIn(BaseModel):
+    title: str = ""
+    content: str = ""
+    tags: list[str] = Field(default_factory=list)
+    project_name: str = ""
+    favorite: bool = False
+    pinned: bool = False
+
+
 @app.get("/mobile/bridge/health")
 def health() -> dict[str, Any]:
     cfg = _bridge_settings()
@@ -495,6 +505,74 @@ def config(authorization: str | None = Header(default=None)) -> dict[str, Any]:
         "bridge": health(),
         "hosts": [_host_payload(row) for row in _configured_hosts()],
     }
+
+
+@app.get("/mobile/jarvis/overview")
+def jarvis_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .cockpit import overview
+
+    return {"ok": True, "overview": overview(), "bridge": health()}
+
+
+@app.get("/mobile/jarvis/notes")
+def jarvis_notes(
+    q: str = "",
+    tag: str = "",
+    status: str = "active",
+    project: str = "",
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    return {
+        "ok": True,
+        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, limit=80),
+        "stats": personal_notes.note_stats(),
+    }
+
+
+@app.post("/mobile/jarvis/notes")
+def jarvis_note_create(req: MobileNoteIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    note = personal_notes.save_note({
+        "title": req.title,
+        "content": req.content,
+        "tags": req.tags,
+        "project_name": req.project_name,
+        "favorite": req.favorite,
+        "pinned": req.pinned,
+        "source": "ios",
+        "source_title": "LeoJarvis iOS",
+    })
+    return {"ok": True, "note": note}
+
+
+@app.get("/mobile/jarvis/notes/{note_id}")
+def jarvis_note_detail(note_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    note = personal_notes.get_note(note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="note not found")
+    return {
+        "ok": True,
+        "note": note,
+        "attachments": personal_notes.list_attachments(note_id),
+        "revisions": personal_notes.list_revisions(note_id),
+    }
+
+
+@app.get("/mobile/jarvis/briefing/today")
+def jarvis_briefing_today(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .briefing.builder import build_today
+
+    return {"ok": True, "briefing": build_today()}
 
 
 @app.post("/mobile/bridge/probe")

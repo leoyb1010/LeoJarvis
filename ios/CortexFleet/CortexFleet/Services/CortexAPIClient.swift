@@ -757,6 +757,116 @@ struct MobileBridgeClient {
             throw FleetError.bridgeUnavailable(error.localizedDescription)
         }
     }
+
+    func loadOverview(settings: BridgeSettings, token: String) async throws -> JarvisOverview {
+        let payload: JarvisOverviewResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/overview",
+            method: "GET",
+            timeout: 18
+        )
+        return payload.overview
+    }
+
+    func loadNotes(settings: BridgeSettings, token: String) async throws -> MobileNotesResponse {
+        try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes",
+            method: "GET",
+            timeout: 14
+        )
+    }
+
+    func loadBriefing(settings: BridgeSettings, token: String) async throws -> MobileBriefingPayload {
+        let payload: JarvisBriefingResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/briefing/today",
+            method: "GET",
+            timeout: 18
+        )
+        return payload.briefing
+    }
+
+    func createNote(
+        settings: BridgeSettings,
+        token: String,
+        title: String,
+        content: String,
+        tags: [String],
+        projectName: String
+    ) async throws -> MobileNote {
+        let body: [String: Any] = [
+            "title": title,
+            "content": content,
+            "tags": tags,
+            "project_name": projectName,
+        ]
+        let payload: JarvisNoteCreateResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 16
+        )
+        return payload.note
+    }
+
+    private func send<T: Decodable>(
+        settings: BridgeSettings,
+        token: String,
+        path: String,
+        method: String,
+        body: Data? = nil,
+        timeout: TimeInterval
+    ) async throws -> T {
+        guard settings.isUsable, let url = URL(string: settings.normalizedBaseURL + path) else {
+            throw FleetError.invalidBridgeURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw FleetError.bridgeUnavailable("没有收到 HTTP 响应。")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                throw FleetError.bridgeUnavailable(message)
+            }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(T.self, from: data)
+        } catch let error as FleetError {
+            throw error
+        } catch {
+            throw FleetError.bridgeUnavailable(error.localizedDescription)
+        }
+    }
+}
+
+private struct JarvisOverviewResponse: Decodable {
+    let overview: JarvisOverview
+}
+
+private struct JarvisBriefingResponse: Decodable {
+    let briefing: MobileBriefingPayload
+}
+
+private struct JarvisNoteCreateResponse: Decodable {
+    let note: MobileNote
 }
 
 private struct MobileBridgeProbeResponse: Decodable {

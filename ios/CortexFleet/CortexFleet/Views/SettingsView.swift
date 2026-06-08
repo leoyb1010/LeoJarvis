@@ -105,7 +105,7 @@ struct SettingsView: View {
                 Text("主机 \(store.hosts.count)/3")
             }
         }
-        .navigationTitle("SSH 主机")
+        .navigationTitle("设置")
         .toolbar {
             Button {
                 editor = HostEditorState(draft: HostDraft())
