@@ -151,8 +151,8 @@ struct HostDraft: Equatable {
 
 struct BridgeSettings: Codable, Equatable {
     var enabled: Bool = true
-    var name: String = "Mac mini Bridge"
-    var baseURL: String = "http://192.168.3.8:8788"
+    var name: String = "MacBook HTTPS Bridge"
+    var baseURL: String = "https://leoyuanmacbook-pro.tail23de22.ts.net"
 
     var normalizedBaseURL: String {
         baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))

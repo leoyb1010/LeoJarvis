@@ -50,6 +50,54 @@ enum FleetError: LocalizedError {
     }
 }
 
+enum BridgeDiagnostics {
+    private static let formatter = ISO8601DateFormatter()
+
+    static func record(_ message: String) {
+        do {
+            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            guard let url = directory?.appendingPathComponent("bridge-diagnostics.log") else { return }
+            let line = "\(formatter.string(from: Date())) \(message)\n"
+            let data = Data(line.utf8)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+            } else {
+                try data.write(to: url, options: .atomic)
+            }
+        } catch {
+            // Diagnostics must never affect app behavior.
+        }
+    }
+}
+
+enum LocalNetworkPermissionProbe {
+    private static var browser: NWBrowser?
+
+    static func trigger() {
+        #if os(iOS)
+        guard browser == nil else { return }
+        let descriptor = NWBrowser.Descriptor.bonjour(type: "_http._tcp", domain: nil)
+        let next = NWBrowser(for: descriptor, using: .tcp)
+        browser = next
+        BridgeDiagnostics.record("local-network-probe start")
+        next.stateUpdateHandler = { state in
+            BridgeDiagnostics.record("local-network-probe state=\(state)")
+        }
+        next.start(queue: .global(qos: .utility))
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.5) {
+            next.cancel()
+            if let current = browser, current === next {
+                browser = nil
+            }
+            BridgeDiagnostics.record("local-network-probe stop")
+        }
+        #endif
+    }
+}
+
 final class KeychainVault {
     private let service = "com.leo.cortexfleet.ssh-password"
     private let bridgeService = "com.leo.cortexfleet.mobile-bridge"
@@ -721,6 +769,7 @@ struct MobileBridgeClient {
             throw FleetError.invalidBridgeURL
         }
 
+        BridgeDiagnostics.record("probe request url=\(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 24
@@ -730,16 +779,20 @@ struct MobileBridgeClient {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                BridgeDiagnostics.record("probe failed no-http-response")
                 throw FleetError.bridgeUnavailable("没有收到 HTTP 响应。")
             }
+            BridgeDiagnostics.record("probe response status=\(http.statusCode) bytes=\(data.count)")
             guard (200..<300).contains(http.statusCode) else {
                 let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                BridgeDiagnostics.record("probe failed http=\(http.statusCode) message=\(message.prefix(160))")
                 throw FleetError.bridgeUnavailable(message)
             }
 
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             let payload = try decoder.decode(MobileBridgeProbeResponse.self, from: data)
+            BridgeDiagnostics.record("probe decoded hosts=\(payload.hosts.count) results=\(payload.results.count) online=\(payload.results.filter(\.ok).count)")
             let hosts = payload.hosts.map(\.monitoredHost)
             let hostByID = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0) })
             let snapshots = payload.results.map { result in
@@ -752,8 +805,10 @@ struct MobileBridgeClient {
                 snapshots: snapshots
             )
         } catch let error as FleetError {
+            BridgeDiagnostics.record("probe fleet-error=\(error.localizedDescription)")
             throw error
         } catch {
+            BridgeDiagnostics.record("probe error=\(error.localizedDescription)")
             throw FleetError.bridgeUnavailable(error.localizedDescription)
         }
     }
@@ -827,6 +882,7 @@ struct MobileBridgeClient {
             throw FleetError.invalidBridgeURL
         }
 
+        BridgeDiagnostics.record("send request path=\(path) url=\(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = timeout
@@ -840,18 +896,28 @@ struct MobileBridgeClient {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                BridgeDiagnostics.record("send failed path=\(path) no-http-response")
                 throw FleetError.bridgeUnavailable("没有收到 HTTP 响应。")
             }
+            BridgeDiagnostics.record("send response path=\(path) status=\(http.statusCode) bytes=\(data.count)")
             guard (200..<300).contains(http.statusCode) else {
                 let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                BridgeDiagnostics.record("send failed path=\(path) http=\(http.statusCode) message=\(message.prefix(160))")
                 throw FleetError.bridgeUnavailable(message)
             }
-            let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
-            return try decoder.decode(T.self, from: data)
+            do {
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                return try decoder.decode(T.self, from: data)
+            } catch {
+                BridgeDiagnostics.record("send decode-error path=\(path) error=\(error.localizedDescription)")
+                throw error
+            }
         } catch let error as FleetError {
+            BridgeDiagnostics.record("send fleet-error path=\(path) error=\(error.localizedDescription)")
             throw error
         } catch {
+            BridgeDiagnostics.record("send error path=\(path) error=\(error.localizedDescription)")
             throw FleetError.bridgeUnavailable(error.localizedDescription)
         }
     }

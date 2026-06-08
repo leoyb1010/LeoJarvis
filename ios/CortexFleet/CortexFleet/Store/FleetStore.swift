@@ -35,6 +35,7 @@ final class FleetStore: ObservableObject {
             replacingSeeded: defaults.integer(forKey: seedVersionKey) < Self.seedVersion
         )
         self.snapshots = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, HostSnapshot.pending(for: $0)) })
+        applyLaunchBridgeConfigurationIfPresent()
         persistHosts()
         persistBridgeSettings()
         defaults.set(Self.seedVersion, forKey: seedVersionKey)
@@ -65,6 +66,7 @@ final class FleetStore: ObservableObject {
         errorMessage = nil
 
         if bridgeSettings.enabled {
+            LocalNetworkPermissionProbe.trigger()
             await refreshViaBridge()
             isRefreshing = false
             return
@@ -207,6 +209,32 @@ final class FleetStore: ObservableObject {
         keychain.hasBridgeToken()
     }
 
+    private func applyLaunchBridgeConfigurationIfPresent() {
+        let env = ProcessInfo.processInfo.environment
+        let baseURL = (env["LEOJARVIS_BRIDGE_URL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !baseURL.isEmpty else { return }
+
+        var next = bridgeSettings
+        next.enabled = true
+        next.baseURL = baseURL
+        next.name = (env["LEOJARVIS_BRIDGE_NAME"] ?? "MacBook HTTPS Bridge").trimmingCharacters(in: .whitespacesAndNewlines)
+        bridgeSettings = next
+        persistBridgeSettings()
+
+        let token = (env["LEOJARVIS_BRIDGE_TOKEN"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            do {
+                try keychain.saveBridgeToken(token)
+                BridgeDiagnostics.record("launch-env bridge-url applied token=saved")
+            } catch {
+                errorMessage = error.localizedDescription
+                BridgeDiagnostics.record("launch-env bridge-token error=\(error.localizedDescription)")
+            }
+        } else {
+            BridgeDiagnostics.record("launch-env bridge-url applied token=empty")
+        }
+    }
+
     func refreshJarvisContent(showLoading: Bool = true) async {
         guard bridgeSettings.isUsable else {
             errorMessage = FleetError.invalidBridgeURL.localizedDescription
@@ -221,6 +249,7 @@ final class FleetStore: ObservableObject {
             }
         }
         do {
+            LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
             async let overview = mobileBridge.loadOverview(settings: bridgeSettings, token: token)
             async let notes = mobileBridge.loadNotes(settings: bridgeSettings, token: token)
@@ -242,6 +271,7 @@ final class FleetStore: ObservableObject {
         isLoadingJarvis = true
         defer { isLoadingJarvis = false }
         do {
+            LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
             let result = try await mobileBridge.loadNotes(settings: bridgeSettings, token: token)
             mobileNotes = result.notes
@@ -269,6 +299,7 @@ final class FleetStore: ObservableObject {
             return false
         }
         do {
+            LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
             let note = try await mobileBridge.createNote(
                 settings: bridgeSettings,
@@ -296,6 +327,7 @@ final class FleetStore: ObservableObject {
         }
 
         do {
+            LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
             let result = try await mobileBridge.probe(settings: bridgeSettings, token: token)
             activeBridgeName = result.bridgeName

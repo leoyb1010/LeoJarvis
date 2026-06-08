@@ -38,6 +38,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>LeoJarvis 连接 Mac mini Bridge，读取你授权的设备健康状态。</string>
 	<key>UIApplicationSceneManifest</key>

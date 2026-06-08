@@ -16,6 +16,8 @@ struct CortexFleetApp: App {
 }
 
 struct RootView: View {
+    @EnvironmentObject private var store: FleetStore
+
     var body: some View {
         TabView {
             NavigationStack {
@@ -45,6 +47,9 @@ struct RootView: View {
             .tabItem {
                 Label("设置", systemImage: "gearshape")
             }
+        }
+        .task {
+            await store.refreshAll()
         }
     }
 }
