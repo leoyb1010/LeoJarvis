@@ -2,7 +2,7 @@
 
 `ios/CortexFleet` 是 LeoJarvis 的独立原生 SwiftUI iPhone/iPad App。它现在是 Jarvis 原生移动端：通过 Mac mini 上的 LeoJarvis Mobile Bridge 读取 Jarvis 总览、个人记事、今日简报和三台 Mac 状态；备用模式仍保留 iOS 直连 SSH 探测。
 
-产品边界：iOS App 只连接 LeoJarvis，不连接 Leonote，也不要求 Leonote 服务运行。Leonote 的旧数据通过 Jarvis 后端的一次性吸收工具迁入 Jarvis 记事库。
+产品边界：iOS App 只连接 LeoJarvis。个人记事是 Jarvis 自己的原生能力，不依赖其他记事服务运行。
 
 ## 能力
 

@@ -595,7 +595,7 @@ def journal_add(entry: JournalEntry) -> dict:
     return {"ok": bool(eid), "id": eid}
 
 
-# ---------- 个人记事（Leonote-inspired） ----------
+# ---------- Jarvis 个人记事 ----------
 
 class PersonalNoteIn(BaseModel):
     title: str = ""
@@ -624,12 +624,6 @@ class AttachmentImportIn(BaseModel):
     note_id: str | None = None
 
 
-class LeonoteAbsorbIn(BaseModel):
-    path: str = ""
-    dry_run: bool = False
-    limit: int = 0
-
-
 @router.get("/personal-notes")
 def personal_note_list(q: str = "", tag: str = "", status: str = "active", project: str = "") -> dict:
     from .. import personal_notes
@@ -644,18 +638,6 @@ def personal_note_list(q: str = "", tag: str = "", status: str = "active", proje
 def personal_note_create(note: PersonalNoteIn) -> dict:
     from .. import personal_notes
     return {"ok": True, "note": personal_notes.save_note(note.model_dump())}
-
-
-@router.get("/personal-notes/leonote/sources")
-def personal_note_leonote_sources() -> dict:
-    from .. import leonote_absorb
-    return leonote_absorb.inspect_sources()
-
-
-@router.post("/personal-notes/leonote/absorb")
-def personal_note_leonote_absorb(req: LeonoteAbsorbIn) -> dict:
-    from .. import leonote_absorb
-    return leonote_absorb.absorb(path=req.path, dry_run=req.dry_run, limit=req.limit)
 
 
 @router.get("/personal-notes/{note_id}")

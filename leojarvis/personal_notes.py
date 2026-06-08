@@ -58,7 +58,7 @@ def _json(value: str | None, default: Any = None) -> Any:
 
 
 def migrate_journal_events() -> int:
-    """Bring the old Journal event store into the Leonote-like note model."""
+    """Bring the old Journal event store into the Jarvis note model."""
     db.init_db()
     migrated = 0
     with db.conn() as c:
@@ -148,7 +148,6 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
     source_url = str(data.get("source_url") or "").strip() or None
     source_title = str(data.get("source_title") or "").strip() or None
     project_name = str(data.get("project_name") or "").strip() or None
-    absorbed_from = str(data.get("absorbed_from") or "").strip() or None
     import_meta = data.get("import_meta") if isinstance(data.get("import_meta"), dict) else {}
     created_new = note_id is None
 
@@ -166,13 +165,12 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
             c.execute(
                 """UPDATE personal_notes
                    SET title=?, content=?, excerpt=?, tags=?, source=?, source_url=?, source_title=?,
-                       project_name=?, absorbed_from=?, import_meta=?, favorite=?, pinned=?, archived=?, updated_ts=?
+                       project_name=?, import_meta=?, favorite=?, pinned=?, archived=?, updated_ts=?
                    WHERE id=?""",
                 (
                     title, content, excerpt, json.dumps(tags, ensure_ascii=False),
                     source, source_url, source_title,
-                    project_name, absorbed_from,
-                    json.dumps(import_meta, ensure_ascii=False),
+                    project_name, json.dumps(import_meta, ensure_ascii=False),
                     favorite, pinned, archived, now, note_id,
                 ),
             )
@@ -181,13 +179,12 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
             c.execute(
                 """INSERT INTO personal_notes(
                      id,title,content,excerpt,tags,source,source_url,source_title,import_meta,
-                     project_name,absorbed_from,favorite,pinned,archived,created_ts,updated_ts
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     project_name,favorite,pinned,archived,created_ts,updated_ts
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     note_id, title, content, excerpt, json.dumps(tags, ensure_ascii=False),
                     source, source_url, source_title, json.dumps(import_meta, ensure_ascii=False),
-                    project_name, absorbed_from,
-                    favorite, pinned, archived, now, now,
+                    project_name, favorite, pinned, archived, now, now,
                 ),
             )
         row = c.execute("SELECT * FROM personal_notes WHERE id=?", (note_id,)).fetchone()

@@ -1,23 +1,25 @@
-import { useEffect, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  absorbLeonote,
   deletePersonalNote,
-  getLeonoteAbsorbSources,
   getPersonalNote,
   getPersonalNotes,
   importPersonalNoteAttachment,
   importPersonalNoteUrl,
   savePersonalNote,
-  type LeonoteAbsorbResult,
-  type LeonoteSourceInfo,
-  type NoteInput,
   type NoteAttachment,
+  type NoteInput,
   type PersonalNote,
   type PersonalNoteStats,
 } from "../../api";
 
+type FilterMode = "active" | "all" | "pinned" | "important" | "archived";
+type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
+type ViewMode = "write" | "split" | "preview";
+type Range = { start: number; end: number };
+
 const EMPTY_STATS: PersonalNoteStats = { total: 0, favorite: 0, pinned: 0, archived: 0, tags: [], projects: [], recent: [] };
+const AUTOSAVE_KEY = "leojarvis.notes.autosave";
 
 function splitTags(value: string) {
   return value.split(/[\s,，#]+/).map((x) => x.trim()).filter(Boolean).slice(0, 12);
@@ -30,10 +32,9 @@ function fmtTime(ts?: number) {
 function sourceLabel(source?: string) {
   return {
     manual: "手写",
-    link_import: "链接导入",
-    attachment_import: "附件导入",
-    journal_migration: "旧记录迁移",
-    leonote_absorb: "Leonote 吸收",
+    link_import: "链接",
+    attachment_import: "附件",
+    journal_migration: "旧记录",
   }[source || "manual"] || "手写";
 }
 
@@ -46,6 +47,116 @@ function readFileBase64(file: File): Promise<string> {
   });
 }
 
+function insertAtRange(value: string, insertion: string, range: Range) {
+  const start = Math.max(0, Math.min(range.start, value.length));
+  const end = Math.max(start, Math.min(range.end, value.length));
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const prefix = before && !before.endsWith("\n") ? "\n\n" : "";
+  const suffix = after && !after.startsWith("\n") ? "\n\n" : "";
+  return {
+    text: `${before}${prefix}${insertion}${suffix}${after}`,
+    cursor: before.length + prefix.length + insertion.length,
+  };
+}
+
+function attachmentMarkdown(file: NoteAttachment) {
+  const label = (file.file_name || "附件").replace(/[[\]]/g, "");
+  if (file.is_image) return `![${label}](${file.url || ""})`;
+  return `[${label}](${file.url || ""})`;
+}
+
+function renderInline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(!)?\[([^\]]+)\]\(([^)]+)\)/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const [, image, label, url] = match;
+    if (image) {
+      nodes.push(<img key={`${url}-${match.index}`} src={url} alt={label} />);
+    } else {
+      nodes.push(<a key={`${url}-${match.index}`} href={url} target="_blank" rel="noreferrer">{label}</a>);
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+function MarkdownPreview({ content }: { content: string }) {
+  const blocks = useMemo(() => {
+    const lines = content.split(/\r?\n/);
+    const out: ReactNode[] = [];
+    let list: string[] = [];
+    let paragraph: string[] = [];
+    let code: string[] = [];
+    let inCode = false;
+
+    const flushList = () => {
+      if (!list.length) return;
+      const items = list;
+      list = [];
+      out.push(<ul key={`ul-${out.length}`}>{items.map((item, i) => <li key={i}>{renderInline(item)}</li>)}</ul>);
+    };
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      const text = paragraph.join("\n");
+      paragraph = [];
+      out.push(<p key={`p-${out.length}`}>{renderInline(text)}</p>);
+    };
+
+    lines.forEach((line) => {
+      if (line.trim().startsWith("```")) {
+        if (inCode) {
+          out.push(<pre key={`code-${out.length}`}><code>{code.join("\n")}</code></pre>);
+          code = [];
+          inCode = false;
+        } else {
+          flushParagraph();
+          flushList();
+          inCode = true;
+        }
+        return;
+      }
+      if (inCode) {
+        code.push(line);
+        return;
+      }
+      if (!line.trim()) {
+        flushParagraph();
+        flushList();
+        return;
+      }
+      const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        const level = heading[1].length;
+        const body = renderInline(heading[2]);
+        out.push(level === 1
+          ? <h2 key={`h-${out.length}`}>{body}</h2>
+          : <h3 key={`h-${out.length}`}>{body}</h3>);
+        return;
+      }
+      const item = /^[-*]\s+(.+)$/.exec(line);
+      if (item) {
+        flushParagraph();
+        list.push(item[1]);
+        return;
+      }
+      paragraph.push(line);
+    });
+    flushParagraph();
+    flushList();
+    if (code.length) out.push(<pre key={`code-${out.length}`}><code>{code.join("\n")}</code></pre>);
+    return out;
+  }, [content]);
+
+  return <div className="notes-markdown-preview">{blocks.length ? blocks : <p className="muted">还没有可预览的内容。</p>}</div>;
+}
+
 export function PersonalNotesView() {
   const [notes, setNotes] = useState<PersonalNote[]>([]);
   const [stats, setStats] = useState<PersonalNoteStats>(EMPTY_STATS);
@@ -54,7 +165,7 @@ export function PersonalNotesView() {
   const [q, setQ] = useState("");
   const [tag, setTag] = useState("");
   const [project, setProject] = useState("");
-  const [status, setStatus] = useState("active");
+  const [filter, setFilter] = useState<FilterMode>("active");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [tagInput, setTagInput] = useState("");
@@ -68,67 +179,105 @@ export function PersonalNotesView() {
   const [copyState, setCopyState] = useState("");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
-  const [absorbOpen, setAbsorbOpen] = useState(false);
-  const [absorbBusy, setAbsorbBusy] = useState(false);
-  const [absorbSources, setAbsorbSources] = useState<LeonoteSourceInfo[]>([]);
-  const [absorbPath, setAbsorbPath] = useState("");
-  const [absorbResult, setAbsorbResult] = useState<LeonoteAbsorbResult | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [viewMode, setViewMode] = useState<ViewMode>("write");
+  const [focusMode, setFocusMode] = useState(false);
+  const [autoSave, setAutoSave] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem(AUTOSAVE_KEY);
+    return stored === null ? true : stored === "1";
+  });
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const hydratingRef = useRef(false);
+  const dirtyReadyRef = useRef(false);
   const activeTags = splitTags(tagInput);
+  const charCount = useMemo(() => Array.from(content.replace(/\s+/g, "")).length, [content]);
 
-  const load = async (query = q, tagName = tag, noteStatus = status, projectFilter = project) => {
+  const apiStatus = (mode: FilterMode) => mode === "archived" ? "archived" : mode === "all" ? "all" : "active";
+  const applyClientFilter = (items: PersonalNote[], mode: FilterMode) => {
+    if (mode === "important") return items.filter((note) => note.favorite);
+    if (mode === "pinned") return items.filter((note) => note.pinned);
+    return items;
+  };
+
+  function clearSaveTimer() {
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }
+
+  function hydrate(note: PersonalNote | null, nextAttachments: NoteAttachment[] = [], state: SaveState = "saved") {
+    hydratingRef.current = true;
+    setSelected(note);
+    setTitle(note?.title || "");
+    setContent(note?.content || "");
+    setTagInput(note?.tags.join(" ") || "");
+    setProjectName(note?.project_name || "");
+    setFavorite(!!note?.favorite);
+    setPinned(!!note?.pinned);
+    setArchived(!!note?.archived);
+    setAttachments(nextAttachments);
+    setSaveState(note ? state : "idle");
+    window.requestAnimationFrame(() => {
+      hydratingRef.current = false;
+      dirtyReadyRef.current = true;
+    });
+  }
+
+  async function load(query = q, tagName = tag, noteFilter = filter, projectFilter = project, keepId = selected?.id) {
     setError("");
     try {
-      const res = await getPersonalNotes(query, tagName, noteStatus, projectFilter);
-      setNotes(res.notes);
+      const res = await getPersonalNotes(query, tagName, apiStatus(noteFilter), projectFilter);
+      const visible = applyClientFilter(res.notes, noteFilter);
+      setNotes(visible);
       setStats(res.stats);
-      if (!selected && res.notes[0]) await pick(res.notes[0]);
-      if (selected) {
-        const next = res.notes.find((n) => n.id === selected.id);
-        if (next) await pick(next);
+      const nextId = keepId || visible[0]?.id;
+      if (!selected && visible[0] && !keepId) await pick(visible[0]);
+      if (nextId && selected?.id === nextId) {
+        const next = visible.find((n) => n.id === nextId);
+        if (next) setSelected(next);
       }
     } catch (err) {
       setError(String(err));
     }
-  };
+  }
 
-  useEffect(() => { load("", "", "active"); }, []);
+  useEffect(() => { void load("", "", "active", "", ""); }, []);
+
+  useEffect(() => {
+    if (hydratingRef.current || !dirtyReadyRef.current) return;
+    if (!title.trim() && !content.trim() && !selected) return;
+    setSaveState("dirty");
+    clearSaveTimer();
+    if (!autoSave) return;
+    saveTimerRef.current = window.setTimeout(() => { void saveDraft(false); }, 1900);
+    return () => clearSaveTimer();
+  }, [title, content, tagInput, projectName, favorite, pinned, archived, autoSave]);
 
   async function pick(note: PersonalNote) {
+    clearSaveTimer();
     try {
       const detail = await getPersonalNote(note.id);
-      const next = detail.note || note;
-      setSelected(next);
-      setTitle(next.title);
-      setContent(next.content);
-      setTagInput(next.tags.join(" "));
-      setProjectName(next.project_name || "");
-      setFavorite(!!next.favorite);
-      setPinned(!!next.pinned);
-      setArchived(!!next.archived);
-      setAttachments(detail.attachments || []);
+      hydrate(detail.note || note, detail.attachments || [], "saved");
     } catch {
-      setSelected(note);
-      setTitle(note.title);
-      setContent(note.content);
-      setTagInput(note.tags.join(" "));
-      setProjectName(note.project_name || "");
-      setFavorite(!!note.favorite);
-      setPinned(!!note.pinned);
-      setArchived(!!note.archived);
-      setAttachments([]);
+      hydrate(note, [], "saved");
     }
   }
 
-  function startNew() {
-    setSelected(null);
-    setTitle("");
-    setContent("");
-    setTagInput("");
-    setProjectName("");
-    setFavorite(false);
-    setPinned(false);
-    setArchived(false);
-    setAttachments([]);
+  function startNew(daily = false) {
+    clearSaveTimer();
+    const today = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "-");
+    hydrate(null, [], "idle");
+    if (daily) {
+      setTitle(`${today} 日常记录`);
+      setProjectName("日常记录");
+      setTagInput("每日 生活");
+      setContent(`## ${today}\n\n`);
+      setSaveState("dirty");
+    }
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
   function payload(overrides: Partial<NoteInput> = {}): NoteInput {
@@ -148,37 +297,27 @@ export function PersonalNotesView() {
     };
   }
 
-  async function save() {
-    if (!title.trim() && !content.trim()) return;
+  async function saveDraft(manual = true, overrides: Partial<NoteInput> = {}) {
+    if (!title.trim() && !String(overrides.content ?? content).trim()) return null;
+    clearSaveTimer();
     setBusy(true);
+    setSaveState("saving");
     try {
-      const res = await savePersonalNote(payload(), selected?.id);
+      const res = await savePersonalNote(payload(overrides), selected?.id);
       await pick(res.note);
-      await load();
+      await load(q, tag, filter, project, res.note.id);
+      setSaveState("saved");
+      return res.note;
+    } catch (err) {
+      setSaveState("error");
+      setError(String(err));
+      return null;
     } finally {
       setBusy(false);
+      if (manual) {
+        window.setTimeout(() => setSaveState((state) => state === "saved" ? "idle" : state), 1600);
+      }
     }
-  }
-
-  async function persistDraftForAttachment(fileName = "附件") {
-    if (selected) {
-      const res = await savePersonalNote(payload(), selected.id);
-      await pick(res.note);
-      await load();
-      return res.note;
-    }
-    const draftTitle = title.trim() || `附件：${fileName}`;
-    const draftContent = content.trim() || `已添加附件：${fileName}`;
-    const res = await savePersonalNote(payload({
-      title: draftTitle,
-      content: draftContent,
-      source: "manual",
-      source_title: "",
-      source_url: "",
-    }));
-    await pick(res.note);
-    await load();
-    return res.note;
   }
 
   async function toggle(field: "favorite" | "pinned" | "archived") {
@@ -190,21 +329,15 @@ export function PersonalNotesView() {
     setFavorite(next.favorite);
     setPinned(next.pinned);
     setArchived(next.archived);
-    if (!selected) return;
-    const res = await savePersonalNote(payload(next), selected.id);
-    await pick(res.note);
-    await load();
+    if (selected) await saveDraft(true, next);
   }
 
   async function copyNoteContent() {
     const text = [title.trim(), content.trim()].filter(Boolean).join("\n\n");
     if (!text) return;
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        throw new Error("clipboard api unavailable");
-      }
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      else throw new Error("clipboard api unavailable");
     } catch {
       const el = document.createElement("textarea");
       el.value = text;
@@ -235,7 +368,7 @@ export function PersonalNotesView() {
     try {
       const res = await importPersonalNoteUrl(url);
       setUrlInput("");
-      await load();
+      await load(q, tag, filter, project, res.note.id);
       await pick(res.note);
     } catch (err) {
       setError(String(err));
@@ -244,31 +377,45 @@ export function PersonalNotesView() {
     }
   }
 
-  async function attachFiles(files: File[], noteId?: string) {
-    if (!files.length) return;
-    let lastNote: PersonalNote | null = null;
-    for (const file of files) {
-      const data_base64 = await readFileBase64(file);
-      const res = await importPersonalNoteAttachment({
-        file_name: file.name,
-        mime_type: file.type,
-        data_base64,
-        note_id: noteId,
-      });
-      lastNote = res.note;
-    }
-    await load();
-    if (lastNote) await pick(lastNote);
+  function currentRange(): Range {
+    const target = textareaRef.current;
+    if (!target) return { start: content.length, end: content.length };
+    return { start: target.selectionStart, end: target.selectionEnd };
   }
 
-  async function importFiles(files: FileList | File[] | null, forceCurrentNote = false) {
+  async function importFiles(files: FileList | File[] | null, range = currentRange()) {
     const list = Array.from(files || []);
     if (!list.length) return;
     setImporting(true);
     setError("");
     try {
-      const targetNote = forceCurrentNote ? await persistDraftForAttachment(list[0]?.name) : null;
-      await attachFiles(list, targetNote?.id || selected?.id);
+      const target = selected || await saveDraft(true, {
+        title: title.trim() || `附件：${list[0]?.name || "新记事"}`,
+        content: content.trim() || "",
+        source: "manual",
+      });
+      if (!target?.id) throw new Error("请先保存记事后再添加附件");
+      const uploaded: NoteAttachment[] = [];
+      for (const file of list) {
+        const data_base64 = await readFileBase64(file);
+        const res = await importPersonalNoteAttachment({
+          file_name: file.name,
+          mime_type: file.type,
+          data_base64,
+          note_id: target.id,
+        });
+        uploaded.push(res.attachment);
+      }
+      const snippet = uploaded.map(attachmentMarkdown).join("\n\n");
+      const next = insertAtRange(content, snippet, range);
+      setContent(next.text);
+      const res = await savePersonalNote(payload({ content: next.text }), target.id);
+      await pick(res.note);
+      await load(q, tag, filter, project, res.note.id);
+      window.requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -276,63 +423,55 @@ export function PersonalNotesView() {
     }
   }
 
-  async function handlePaste(e: ClipboardEvent<HTMLElement>) {
-    const imageFiles = Array.from(e.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
-    if (!imageFiles.length) return;
+  async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.files || []);
+    if (!files.length) return;
+    const range = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
     e.preventDefault();
-    await importFiles(imageFiles, true);
+    await importFiles(files, range);
   }
 
-  async function handleDrop(e: DragEvent<HTMLElement>) {
-    e.preventDefault();
-    setDragging(false);
+  async function handleDrop(e: DragEvent<HTMLTextAreaElement>) {
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) return;
-    await importFiles(files, true);
+    e.preventDefault();
+    setDragging(false);
+    await importFiles(files, currentRange());
   }
 
-  async function scanLeonote() {
-    setAbsorbBusy(true);
-    setError("");
-    try {
-      const res = await getLeonoteAbsorbSources();
-      setAbsorbSources(res.sources || []);
-      setAbsorbPath(res.best?.path || absorbPath);
-      setAbsorbResult(null);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setAbsorbBusy(false);
-    }
+  function changeFilter(next: FilterMode) {
+    setFilter(next);
+    void load(q, tag, next, project);
   }
 
-  async function runLeonoteAbsorb(dryRun: boolean) {
-    setAbsorbBusy(true);
-    setError("");
-    try {
-      const res = await absorbLeonote({ path: absorbPath, dry_run: dryRun });
-      setAbsorbResult(res);
-      if (!dryRun && res.ok) await load();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setAbsorbBusy(false);
-    }
+  function changeAutoSave() {
+    const next = !autoSave;
+    setAutoSave(next);
+    window.localStorage.setItem(AUTOSAVE_KEY, next ? "1" : "0");
   }
 
-  function toggleAbsorb() {
-    const next = !absorbOpen;
-    setAbsorbOpen(next);
-    if (next && absorbSources.length === 0) void scanLeonote();
-  }
+  const saveText = {
+    idle: `${charCount} 字`,
+    dirty: "有修改",
+    saving: "保存中",
+    saved: "已保存",
+    error: "保存失败",
+  }[saveState];
+
+  const editorClasses = [
+    "jarvis-notes-editor",
+    focusMode ? "focus" : "",
+    dragging ? "dragging" : "",
+    viewMode === "split" ? "split" : "",
+  ].filter(Boolean).join(" ");
 
   return (
-    <div>
+    <div className="jarvis-notes-product">
       <div className="notes-workbar">
         <div>
-          <div className="kicker">个人知识与生活记录</div>
+          <div className="kicker">Jarvis 个人知识库</div>
           <h1>个人记事</h1>
-          <p>随手记录，结构沉淀。支持编辑、搜索、标签、归档、链接与附件导入。内容只进入记事，不会自动写入长期记忆。</p>
+          <p>打开即写，轻量整理。项目、标签、置顶、重要、归档、图片附件和预览都在一个工作台里完成。</p>
         </div>
         <div className="notes-workbar-side">
           <div className="notes-stat-strip">
@@ -346,133 +485,87 @@ export function PersonalNotesView() {
             ))}
           </div>
           <div className="notes-workbar-actions">
-            <button className="btn" onClick={toggleAbsorb}>吸收 Leonote</button>
-            <button className="btn primary" onClick={startNew}>新建记事</button>
+            <button className="btn" onClick={() => startNew(true)}>今日记事</button>
+            <button className="btn primary" onClick={() => startNew(false)}>新建记事</button>
           </div>
         </div>
       </div>
 
       {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
 
-      {absorbOpen ? (
-        <div className="leonote-absorb-panel">
-          <div className="leonote-absorb-head">
-            <div>
-              <b>吸收 Leonote</b>
-              <span>一次性迁入 Jarvis 记事库</span>
-            </div>
-            <button className="btn sm" onClick={scanLeonote} disabled={absorbBusy}>{absorbBusy ? "扫描中" : "扫描源库"}</button>
-          </div>
-          <div className="leonote-absorb-grid">
-            {(absorbSources.length ? absorbSources : [{
-              path: "尚未扫描",
-              exists: false,
-              valid: false,
-              note_count: 0,
-              active_note_count: 0,
-              project_count: 0,
-              tag_count: 0,
-              attachment_count: 0,
-              revision_count: 0,
-              latest_note_updated_at: "",
-              message: "",
-            }]).map((src) => (
-              <button
-                key={src.path}
-                className={`leonote-source ${absorbPath === src.path ? "on" : ""} ${src.valid && src.active_note_count > 0 ? "ready" : ""}`}
-                onClick={() => src.exists && setAbsorbPath(src.path)}
-                disabled={!src.exists}
-              >
-                <span>{src.path}</span>
-                <b>{src.active_note_count} 笔记</b>
-                <em>{src.project_count} 项目 · {src.tag_count} 标签 · {src.attachment_count} 附件 · {src.revision_count} 版本</em>
-                <small>{src.message || (src.exists ? "可检查" : "不存在")}</small>
-              </button>
-            ))}
-          </div>
-          <div className="leonote-absorb-controls">
-            <input value={absorbPath} onChange={(e) => setAbsorbPath(e.target.value)} placeholder="Leonote SQLite 路径" />
-            <button className="btn sm" onClick={() => runLeonoteAbsorb(true)} disabled={absorbBusy || !absorbPath}>预演</button>
-            <button className="btn sm primary" onClick={() => runLeonoteAbsorb(false)} disabled={absorbBusy || !absorbPath}>正式吸收</button>
-          </div>
-          {absorbResult ? (
-            <div className={`leonote-absorb-result ${absorbResult.ok ? "ok" : "bad"}`}>
-              <span>{absorbResult.dry_run ? "预演" : "吸收"}：扫描 {absorbResult.scanned ?? 0}，新增 {absorbResult.created ?? 0}，更新 {absorbResult.updated ?? 0}，跳过 {absorbResult.skipped ?? 0}</span>
-              <span>附件 {absorbResult.attachments ?? 0} · 版本 {absorbResult.revisions ?? 0} · 错误 {absorbResult.errors?.length ?? 0}</span>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="notes-shell">
-        <section className="notes-browse">
+      <div className="jarvis-notes-shell">
+        <section className="jarvis-notes-sidebar">
           <div className="note-search">
-            <input value={q} placeholder="搜索标题、正文、标签"
+            <input value={q} placeholder="搜索标题、正文、标签、项目"
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load(q, tag, status, project)} />
-            <button className="btn sm" onClick={() => load(q, tag, status, project)}>搜索</button>
+              onKeyDown={(e) => e.key === "Enter" && load(q, tag, filter, project)} />
+            <button className="btn sm" onClick={() => load(q, tag, filter, project)}>搜索</button>
           </div>
 
-          <div className="segmented">
-            {[
+          <div className="notes-filter-grid">
+            {([
               ["active", "当前"],
               ["all", "全部"],
+              ["pinned", "置顶"],
+              ["important", "重要"],
               ["archived", "归档"],
-            ].map(([id, label]) => (
-              <button key={id} className={status === id ? "on" : ""} onClick={() => { setStatus(id); load(q, tag, id, project); }}>{label}</button>
+            ] as [FilterMode, string][]).map(([id, label]) => (
+              <button key={id} className={filter === id ? "on" : ""} onClick={() => changeFilter(id)}>{label}</button>
             ))}
           </div>
 
           <div className="notes-import-inline">
-            <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="粘贴网页链接导入" />
+            <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="粘贴网页链接" />
             <button className="btn sm" onClick={importUrl} disabled={importing || !urlInput.trim()}>
-              {importing ? "导入中" : "导入"}
+              {importing ? "处理中" : "导入"}
             </button>
-            <label className="file-import compact">
-              <input type="file" multiple onChange={(e) => importFiles(e.target.files)} />
-              <span>{importing ? "处理中…" : "附件"}</span>
-            </label>
           </div>
 
-          {stats.tags.length ? (
-            <div className="tag-cloud-large">
-              {stats.tags.map((t) => (
-                <button className={tag === t.tag ? "on" : ""} key={t.tag} onClick={() => {
-                  const next = tag === t.tag ? "" : t.tag;
-                  setTag(next);
-                  load(q, next, status, project);
-                }}>
-                  {t.tag}<b>{t.count}</b>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           {stats.projects?.length ? (
-            <div className="project-cloud-large">
-              {stats.projects.map((p) => (
-                <button className={project === p.name ? "on" : ""} key={p.name} onClick={() => {
-                  const next = project === p.name ? "" : p.name;
-                  setProject(next);
-                  load(q, tag, status, next);
-                }}>
-                  {p.name}<b>{p.count}</b>
-                </button>
-              ))}
+            <div className="notes-chip-panel">
+              <span>项目</span>
+              <div>
+                {stats.projects.map((p) => (
+                  <button className={project === p.name ? "on" : ""} key={p.name} onClick={() => {
+                    const next = project === p.name ? "" : p.name;
+                    setProject(next);
+                    load(q, tag, filter, next);
+                  }}>
+                    {p.name}<b>{p.count}</b>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
-          <div className="notes-list">
+          {stats.tags.length ? (
+            <div className="notes-chip-panel">
+              <span>标签</span>
+              <div>
+                {stats.tags.map((t) => (
+                  <button className={tag === t.tag ? "on" : ""} key={t.tag} onClick={() => {
+                    const next = tag === t.tag ? "" : t.tag;
+                    setTag(next);
+                    load(q, next, filter, project);
+                  }}>
+                    {t.tag}<b>{t.count}</b>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="jarvis-notes-list">
             <AnimatePresence>
               {notes.length === 0 ? <div className="empty">没有匹配的个人记事。</div> : notes.map((note, i) => (
                 <motion.button
                   className={`note-card ${selected?.id === note.id ? "active" : ""}`}
                   key={note.id}
                   onClick={() => { void pick(note); }}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  transition={{ delay: Math.min(i * 0.02, 0.2) }}
+                  transition={{ delay: Math.min(i * 0.015, 0.14) }}
                 >
                   <div className="note-card-top">
                     <span>{fmtTime(note.updated_ts)}</span>
@@ -480,6 +573,7 @@ export function PersonalNotesView() {
                   </div>
                   <b>{note.title || "未命名记事"}</b>
                   <p>{note.excerpt}</p>
+                  {note.project_name ? <div className="note-project-pill">{note.project_name}</div> : null}
                   {note.tags.length ? <div className="note-card-tags">{note.tags.slice(0, 4).map((t) => <span key={t}>{t}</span>)}</div> : null}
                 </motion.button>
               ))}
@@ -487,58 +581,85 @@ export function PersonalNotesView() {
           </div>
         </section>
 
-        <section
-          className={`notes-editor card ${dragging ? "dragging" : ""}`}
-          onPaste={handlePaste}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-        >
-          <div className="editor-top">
-            <div className="editor-title-wrap">
-              <span className="tile-label">{selected ? `更新于 ${fmtTime(selected.updated_ts)}` : "新建草稿"}</span>
-              <input className="title-input" value={title} placeholder="给这条记事一个标题"
-                onChange={(e) => setTitle(e.target.value)} />
-            </div>
-            <div className="editor-actions">
-              <button className={`icon-btn ${pinned ? "on" : ""}`} title="置顶" onClick={() => toggle("pinned")}>置顶</button>
-              <button className={`icon-btn ${favorite ? "on important" : ""}`} title="重要" onClick={() => toggle("favorite")}>重要</button>
-              <button className={`icon-btn ${archived ? "on" : ""}`} title="归档" onClick={() => toggle("archived")}>{archived ? "取消归档" : "归档"}</button>
-              <button className="icon-btn" title="复制正文" onClick={copyNoteContent} disabled={!title.trim() && !content.trim()}>{copyState || "复制"}</button>
-              <label className="icon-btn note-file-action" title="添加图片或附件">
-                <input type="file" multiple accept="image/*,.pdf,.txt,.md,.csv,.json" onChange={(e) => importFiles(e.target.files, true)} />
-                {importing ? "导入中" : "图片/附件"}
-              </label>
-              {selected ? <button className="icon-btn danger" title="删除" onClick={remove}>删除</button> : null}
-              <button className="btn primary sm" onClick={save} disabled={busy || (!title.trim() && !content.trim())}>{busy ? "保存中" : "保存"}</button>
+        <section className={editorClasses}>
+          <div className="jarvis-editor-toolbar">
+            <div className={`save-state ${saveState}`}>{saveText}</div>
+            <div className="jarvis-editor-toolbar-actions">
+              <button className={focusMode ? "on" : ""} onClick={() => setFocusMode(!focusMode)} title="安静写作">专注</button>
+              <button className={autoSave ? "on" : ""} onClick={changeAutoSave} title="自动保存">自动保存</button>
+              {(["write", "split", "preview"] as ViewMode[]).map((mode) => (
+                <button key={mode} className={viewMode === mode ? "on" : ""} onClick={() => setViewMode(mode)}>
+                  {mode === "write" ? "写作" : mode === "split" ? "分屏" : "预览"}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="note-meta-grid">
-            <label className="note-field">
+          <div className="jarvis-editor-head">
+            <input className="title-input" value={title} placeholder="输入标题"
+              onChange={(e) => setTitle(e.target.value)} />
+            <div className="editor-actions">
+              <button className={`icon-btn ${pinned ? "on" : ""}`} onClick={() => toggle("pinned")}>置顶</button>
+              <button className={`icon-btn ${favorite ? "on important" : ""}`} onClick={() => toggle("favorite")}>重要</button>
+              <button className={`icon-btn ${archived ? "on" : ""}`} onClick={() => toggle("archived")}>{archived ? "取消归档" : "归档"}</button>
+              <button className="icon-btn" onClick={copyNoteContent} disabled={!title.trim() && !content.trim()}>{copyState || "复制"}</button>
+              <label className="icon-btn note-file-action">
+                <input type="file" multiple accept="image/*,.pdf,.txt,.md,.csv,.json" onChange={(e) => importFiles(e.target.files)} />
+                {importing ? "导入中" : "图片/附件"}
+              </label>
+              {selected ? <button className="icon-btn danger" onClick={remove}>删除</button> : null}
+              <button className="btn primary sm" onClick={() => saveDraft(true)} disabled={busy || (!title.trim() && !content.trim())}>
+                {busy ? "保存中" : "保存"}
+              </button>
+            </div>
+          </div>
+
+          <div className="jarvis-editor-meta">
+            <label>
+              <span>项目</span>
+              <input className="tag-input" value={projectName} list="jarvis-note-projects" placeholder="项目名称"
+                onChange={(e) => setProjectName(e.target.value)} />
+              <datalist id="jarvis-note-projects">
+                {(stats.projects || []).map((item) => <option key={item.name} value={item.name} />)}
+              </datalist>
+            </label>
+            <label>
               <span>标签</span>
-              <input className="tag-input" value={tagInput} placeholder="输入标签，用空格、逗号或 # 分隔"
+              <input className="tag-input" value={tagInput} placeholder="空格、逗号或 # 分隔"
                 onChange={(e) => setTagInput(e.target.value)} />
             </label>
-            <label className="note-field">
-              <span>项目</span>
-              <input className="tag-input" value={projectName} placeholder="项目名称"
-                onChange={(e) => setProjectName(e.target.value)} />
-            </label>
             <div className="source-chain">
-              <span>来源：{sourceLabel(selected?.source)}</span>
+              <span>{sourceLabel(selected?.source)}</span>
               {selected?.source_url ? <a href={selected.source_url} target="_blank" rel="noreferrer">{selected.source_title || selected.source_url}</a> : null}
             </div>
           </div>
+
           <div className="note-editor-tags">
+            {projectName.trim() ? <span className="project">项目：{projectName.trim()}</span> : null}
             {activeTags.length ? activeTags.map((t) => <span key={t}>#{t}</span>) : <em>还没有标签</em>}
           </div>
-          <div className="note-content-bar">
-            <span>正文</span>
-            <button className="icon-btn" onClick={copyNoteContent} disabled={!title.trim() && !content.trim()}>{copyState || "复制全文"}</button>
+
+          <div
+            className="jarvis-editor-body"
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+          >
+            {viewMode !== "preview" ? (
+              <textarea
+                ref={textareaRef}
+                className="note-textarea"
+                value={content}
+                placeholder="开始写点什么。可以直接粘贴图片、拖入文件，或用 Markdown 写结构。"
+                onChange={(e) => setContent(e.target.value)}
+                onPaste={handlePaste}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+              />
+            ) : null}
+            {viewMode === "split" ? <div className="editor-divider" /> : null}
+            {viewMode !== "write" ? <MarkdownPreview content={content} /> : null}
           </div>
-          <textarea className="note-textarea" value={content} placeholder="写下想法、待办、会议记录、灵感或生活片段…"
-            onChange={(e) => setContent(e.target.value)} />
+
           {attachments.length ? (
             <div className="attachment-panel">
               <div className="panel-subtitle">附件 {attachments.length}</div>

@@ -3550,96 +3550,6 @@ textarea,
   gap: 10px;
   flex-wrap: wrap;
 }
-.leonote-absorb-panel {
-  margin: 0 0 14px;
-  padding: 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--card-bg), var(--accent-soft) 18%);
-}
-.leonote-absorb-head,
-.leonote-absorb-controls,
-.leonote-absorb-result {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.leonote-absorb-head b {
-  display: block;
-  color: var(--fg);
-  font: 760 15px var(--font-body);
-}
-.leonote-absorb-head span,
-.leonote-source em,
-.leonote-source small,
-.leonote-absorb-result span {
-  color: var(--muted);
-  font: 600 12px/1.45 var(--font-body);
-}
-.leonote-absorb-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-.leonote-source {
-  text-align: left;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--inset);
-  color: var(--fg);
-  padding: 11px 12px;
-  display: grid;
-  gap: 5px;
-}
-.leonote-source:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.leonote-source.on {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent), transparent 62%);
-}
-.leonote-source.ready b {
-  color: var(--accent);
-}
-.leonote-source span {
-  font: 650 12px var(--font-mono);
-  overflow-wrap: anywhere;
-}
-.leonote-source b {
-  font-size: 18px;
-}
-.leonote-absorb-controls {
-  margin-top: 12px;
-}
-.leonote-absorb-controls input {
-  flex: 1;
-  min-width: 180px;
-  min-height: 38px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: var(--inset);
-  color: var(--fg);
-  padding: 0 12px;
-  font: 600 12px var(--font-mono);
-}
-.leonote-absorb-result {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  margin-top: 10px;
-  padding: 9px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: var(--inset);
-}
-.leonote-absorb-result.ok {
-  border-color: color-mix(in oklab, #34c759, var(--border-soft) 45%);
-}
-.leonote-absorb-result.bad {
-  border-color: color-mix(in oklab, #ff453a, var(--border-soft) 45%);
-}
 .notes-shell {
   grid-template-columns: minmax(220px, 252px) minmax(0, 1fr);
   gap: 10px;
@@ -3817,6 +3727,345 @@ textarea,
   margin: 0;
   color: var(--muted);
   font: 400 12px/1.45 var(--font-body);
+}
+
+/* ============ Jarvis Notes product workspace ============ */
+.jarvis-notes-product {
+  min-width: 0;
+}
+.jarvis-notes-shell {
+  display: grid;
+  grid-template-columns: minmax(236px, 278px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.jarvis-notes-sidebar {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 9px;
+  max-height: calc(100vh - 132px);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--card-bg), var(--bg) 30%);
+  padding: 10px;
+}
+.notes-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--inset);
+}
+.notes-filter-grid button {
+  min-width: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 4px;
+  cursor: pointer;
+  font: 700 11px var(--font-body);
+}
+.notes-filter-grid button.on {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 8px rgba(0,0,0,.08);
+}
+.notes-chip-panel {
+  display: grid;
+  gap: 7px;
+}
+.notes-chip-panel > span {
+  color: var(--meta);
+  font: 760 10px var(--font-mono);
+}
+.notes-chip-panel > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 90px;
+  overflow: auto;
+}
+.notes-chip-panel button,
+.note-project-pill {
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--muted);
+  padding: 4px 8px;
+  font: 650 11px var(--font-body);
+}
+.notes-chip-panel button {
+  cursor: pointer;
+}
+.notes-chip-panel button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), var(--line) 48%);
+}
+.notes-chip-panel b {
+  margin-left: 5px;
+  color: var(--meta);
+  font: 700 10px var(--font-mono);
+}
+.jarvis-notes-list {
+  display: grid;
+  gap: 7px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.jarvis-notes-list .note-card {
+  padding: 9px 10px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+.jarvis-notes-list .note-card.active {
+  background: color-mix(in oklab, var(--accent-soft), var(--card-bg) 72%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 55%);
+}
+.jarvis-notes-list .note-card p {
+  -webkit-line-clamp: 3;
+}
+.note-project-pill {
+  display: inline-flex;
+  margin: 8px 0 0;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.jarvis-notes-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  min-height: min(760px, calc(100vh - 132px));
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--card-bg);
+  padding: 14px;
+  box-shadow: var(--shadow-card);
+}
+.jarvis-notes-editor.focus {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.jarvis-notes-editor.dragging {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: color-mix(in oklab, var(--accent-soft), var(--card-bg) 78%);
+}
+.jarvis-editor-toolbar,
+.jarvis-editor-head,
+.jarvis-editor-meta,
+.note-editor-tags,
+.jarvis-editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jarvis-editor-toolbar,
+.jarvis-editor-head {
+  justify-content: space-between;
+}
+.save-state {
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--meta);
+  padding: 5px 9px;
+  font: 760 11px var(--font-mono);
+}
+.save-state.dirty { color: var(--warn); }
+.save-state.saving { color: var(--accent); }
+.save-state.saved { color: var(--good); }
+.save-state.error { color: var(--bad); }
+.jarvis-editor-toolbar-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.jarvis-editor-toolbar-actions button {
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  padding: 6px 10px;
+  cursor: pointer;
+  font: 700 11px var(--font-body);
+}
+.jarvis-editor-toolbar-actions button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), var(--line) 50%);
+}
+.jarvis-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.jarvis-editor-head .title-input {
+  min-height: 40px;
+  padding: 0;
+  font: 740 27px/1.12 var(--font-display);
+}
+.jarvis-editor-head .editor-actions {
+  max-width: 700px;
+}
+.jarvis-editor-meta {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(220px, 1fr) auto;
+  align-items: end;
+}
+.jarvis-editor-meta label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.jarvis-editor-meta label span {
+  color: var(--meta);
+  font: 760 10px var(--font-mono);
+}
+.jarvis-editor-meta .tag-input {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+.note-editor-tags {
+  flex-wrap: wrap;
+  min-height: 22px;
+}
+.note-editor-tags .project {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.jarvis-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-height: min(540px, calc(100vh - 360px));
+}
+.jarvis-notes-editor.split .jarvis-editor-body {
+  grid-template-columns: minmax(0, 1fr) 1px minmax(280px, .92fr);
+}
+.editor-divider {
+  background: var(--line-soft);
+}
+.jarvis-editor-body .note-textarea {
+  min-height: min(560px, calc(100vh - 372px));
+  height: 100%;
+  resize: vertical;
+  border-radius: 14px;
+  padding: 15px 16px;
+  background: var(--bg);
+  font: 400 15.5px/1.72 var(--font-body);
+}
+.notes-markdown-preview {
+  min-height: min(420px, calc(100vh - 372px));
+  height: min(560px, calc(100vh - 372px));
+  max-height: min(560px, calc(100vh - 372px));
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--bg);
+  padding: 17px 18px;
+  color: var(--fg-2);
+  line-height: 1.72;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.notes-markdown-preview h2,
+.notes-markdown-preview h3 {
+  margin: 0 0 12px;
+  color: var(--fg);
+  letter-spacing: 0;
+}
+.notes-markdown-preview h2 {
+  font: 760 23px/1.25 var(--font-display);
+}
+.notes-markdown-preview h3 {
+  font: 720 18px/1.35 var(--font-display);
+}
+.notes-markdown-preview p {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+}
+.notes-markdown-preview ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+.notes-markdown-preview li {
+  margin: 4px 0;
+}
+.notes-markdown-preview a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.notes-markdown-preview img {
+  display: block;
+  max-width: min(100%, 720px);
+  max-height: 420px;
+  object-fit: contain;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  margin: 10px 0 14px;
+  background: var(--inset);
+}
+.notes-markdown-preview pre {
+  margin: 0 0 12px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--inset);
+  padding: 12px;
+}
+.notes-markdown-preview code {
+  font: 600 12px/1.6 var(--font-mono);
+}
+
+@media (max-width: 1180px) {
+  .jarvis-notes-shell {
+    grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  }
+  .jarvis-editor-meta {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .jarvis-editor-meta .source-chain {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 920px) {
+  .jarvis-notes-shell,
+  .jarvis-notes-editor.split .jarvis-editor-body,
+  .jarvis-editor-head {
+    grid-template-columns: 1fr;
+  }
+  .jarvis-notes-sidebar {
+    position: static;
+    max-height: none;
+  }
+  .editor-divider {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .jarvis-editor-meta,
+  .notes-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .jarvis-editor-toolbar,
+  .jarvis-editor-head {
+    align-items: stretch;
+  }
+  .jarvis-editor-toolbar-actions,
+  .jarvis-editor-head .editor-actions {
+    justify-content: flex-start;
+  }
+  .jarvis-editor-head .title-input {
+    font-size: 23px;
+  }
 }
 
 /* ============ Intelligence detail sheet ============ */

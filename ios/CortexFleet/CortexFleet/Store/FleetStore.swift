@@ -182,6 +182,28 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    func applyBridgeConfigurationURL(_ url: URL) {
+        guard url.scheme == "leojarvis", url.host == "bridge",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return
+        }
+        let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let baseURL = values["url"] ?? values["baseURL"] ?? values["bridgeURL"] ?? ""
+        let token = values["token"] ?? ""
+        guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return
+        }
+        var next = bridgeSettings
+        next.enabled = true
+        next.name = values["name"]?.removingPercentEncoding ?? "Jarvis Bridge"
+        next.baseURL = baseURL.removingPercentEncoding ?? baseURL
+        saveBridgeSettings(next, token: token.removingPercentEncoding ?? token)
+        Task { await refreshAll() }
+    }
+
     func bridgeTokenIsSaved() -> Bool {
         keychain.hasBridgeToken()
     }

@@ -8,6 +8,9 @@ struct CortexFleetApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .onOpenURL { url in
+                    store.applyBridgeConfigurationURL(url)
+                }
         }
     }
 }
