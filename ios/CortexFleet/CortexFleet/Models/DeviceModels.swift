@@ -744,6 +744,8 @@ struct MobileBriefingItem: Decodable, Identifiable, Equatable {
     let take: String?
     let detail: String?
     let sourceDetail: String?
+    let sourceDetailRaw: String?
+    let sourceDetailTranslated: Bool?
     let sourceDetailMissing: Bool?
     let priority: String?
     let whyImportant: String?

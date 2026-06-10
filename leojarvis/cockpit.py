@@ -6,7 +6,7 @@ from collections import Counter
 
 from . import db, personal_notes
 from .agent import services, sysinfo
-from .briefing.builder import _github_source_detail, build_today
+from .briefing.builder import _github_source_detail, _translate_source_detail, build_today
 from .intelligence.scanner import github_radar, recent_intelligence_events
 from .localize import chinese_tags as _chinese_tags, has_noisy_english, to_chinese as _to_chinese
 
@@ -132,13 +132,18 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
         if str(summary).startswith("这个 GitHub 项目值得进入雷达") or "英文来源摘要" in str(summary):
             summary = repo.get("summary_zh") or repo.get("display_description") or "项目增长和活跃度达到雷达阈值，等待下一轮中文摘要补齐。"
         seen.add(name)
+        source_detail = item.get("source_detail")
+        if not source_detail:
+            source_detail, _ = _translate_source_detail(_github_source_detail(name, {}, repo))
         cards.append({
             "name": name,
             "title": item.get("title"),
             "url": item.get("url"),
             "score": score,
             "summary": summary,
-            "source_detail": item.get("source_detail") or _github_source_detail(name, {}, repo),
+            "source_detail": source_detail,
+            "source_detail_raw": item.get("source_detail_raw") or _github_source_detail(name, {}, repo),
+            "source_detail_translated": item.get("source_detail_translated"),
             "why": repo.get("why_zh") or item.get("why_important") or "增长和活跃度达到驾驶舱展示阈值。",
             "relation": repo.get("relation_zh") or item.get("relation") or "与你的 AI、开发工具或本地助理关注项相关。",
             "next_step": repo.get("next_step_zh") or item.get("next_step") or "打开 README、示例和最近提交，判断是否值得持续监控。",
@@ -167,13 +172,17 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
             description = repo.get("summary_zh") or repo.get("display_description") or f"{name} 暂未提供仓库介绍，需打开 README 判断实际用途。"
         elif "英文来源摘要" in str(description) or has_noisy_english(str(description)):
             description = f"{name}：{raw_description[:240]}"
+        source_detail_raw = _github_source_detail(name, {}, repo)
+        source_detail, translated = _translate_source_detail(source_detail_raw)
         cards.append({
             "name": name,
             "title": f"{name} · GitHub 项目雷达",
             "url": repo.get("url"),
             "score": min(0.98, 0.72 + min(speed / 500, 0.2)),
             "summary": description,
-            "source_detail": _github_source_detail(name, {}, repo),
+            "source_detail": source_detail,
+            "source_detail_raw": source_detail_raw,
+            "source_detail_translated": translated,
             "why": f"项目有 {stars:,} 个星标，当前动量约 {speed}/天，满足驾驶舱高价值阈值。",
             "relation": "与你关注的 AI 工具、本地助理、自动化或开发工作流可能相关。",
             "next_step": "打开项目页看 README 和最近提交，决定是否加入情报关注项或写入个人记事。",

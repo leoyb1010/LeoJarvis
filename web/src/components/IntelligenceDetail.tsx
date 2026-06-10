@@ -27,7 +27,17 @@ function formatRepoSpeed(speed?: number | null) {
   return `${speed > 0 ? "+" : ""}${value}/天`;
 }
 
-export function BriefingSignalDetail({ item, evidence }: { item: BriefingItem; evidence: string[] }) {
+function SourceOriginal({ text }: { text?: string | null }) {
+  if (!hasText(text)) return null;
+  return (
+    <details className="detail-original-source">
+      <summary>查看原文摘录</summary>
+      <p>{text}</p>
+    </details>
+  );
+}
+
+export function BriefingSignalDetail({ item, evidence, loading = false }: { item: BriefingItem; evidence: string[]; loading?: boolean }) {
   const paragraphs = uniqueParagraphs([item.source_detail, item.detail]);
   const tags = (item.tags || []).slice(0, 8);
   const related = item.related_sources || [];
@@ -36,8 +46,11 @@ export function BriefingSignalDetail({ item, evidence }: { item: BriefingItem; e
     <div className="modal-rich intel-detail-sheet detail-reading-sheet">
       <div className="detail-reading-layout">
         <article className="detail-story-panel">
-          <span>真实来源摘录</span>
-          {paragraphs.length ? paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>) : <p className="detail-missing">该来源没有提供可读取的正文摘录，请打开来源查看完整内容。</p>}
+          <span>{item.source_detail_translated ? "中文来源详情 · DeepSeek 翻译" : "中文来源详情"}</span>
+          {loading ? <p className="detail-missing">正在用 DeepSeek 翻译真实来源摘录…</p> : (
+            paragraphs.length ? paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>) : <p className="detail-missing">该来源没有提供可读取的正文摘录，请打开来源查看完整内容。</p>
+          )}
+          {!loading ? <SourceOriginal text={item.source_detail_raw} /> : null}
           {item.original_title && item.original_title !== item.title ? <p className="detail-original-title">原文标题：{item.original_title}</p> : null}
         </article>
 
@@ -101,8 +114,9 @@ export function GithubRepoDetail({ repo }: { repo: CockpitGithubCard }) {
     <div className="modal-rich intel-detail-sheet detail-reading-sheet">
       <div className="detail-reading-layout">
         <article className="detail-story-panel">
-          <span>真实仓库信息</span>
+          <span>{repo.source_detail_translated ? "中文仓库信息 · DeepSeek 翻译" : "中文仓库信息"}</span>
           {paragraphs.length ? paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>) : <p className="detail-missing">GitHub API 没有返回可展示的仓库简介，请打开项目查看 README。</p>}
+          <SourceOriginal text={repo.source_detail_raw} />
         </article>
 
         <aside className="detail-side-rail">

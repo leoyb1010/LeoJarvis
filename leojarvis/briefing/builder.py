@@ -5,17 +5,18 @@ import re
 import time
 import html
 import hashlib
+import os
 import urllib.request
 from collections import Counter, defaultdict
 from typing import Any
 
 from .. import db
 from ..config import DATA_DIR
-from ..localize import chinese_tags as _chinese_tags, to_chinese as _to_chinese
+from ..localize import chinese_tags as _chinese_tags, has_noisy_english, to_chinese as _to_chinese
 
 
-# 简报在每次请求时构建，严禁实时 LLM 调用（翻译/分析已在 judge 阶段落库）。
-# 这里统一把展示路径的本地化降级为无网络回退，保证 /cockpit/overview 秒级返回。
+# 简报在每次请求时构建。标题、摘要等展示路径默认不实时调用 LLM；
+# 真实来源摘录例外：英文来源会用 DeepSeek 做严格翻译并落入本地缓存。
 def to_chinese(text, *, context="通用内容", max_chars=360, allow_llm=False):
     return _to_chinese(text, context=context, max_chars=max_chars, allow_llm=allow_llm)
 
@@ -242,27 +243,45 @@ def _clean_source_detail(text: str | None, *, limit: int = 2200) -> str:
 
 
 _SOURCE_DETAIL_CACHE = DATA_DIR / "source_detail_cache.json"
+_SOURCE_TRANSLATION_CACHE = DATA_DIR / "source_detail_translation_cache.json"
 _SOURCE_FETCH_BUDGET = 0
+_SOURCE_TRANSLATE_BUDGET = 0
 
 
-def _read_source_detail_cache() -> dict[str, dict]:
+def _read_json_cache(path) -> dict[str, dict]:
     try:
-        if not _SOURCE_DETAIL_CACHE.exists():
+        if not path.exists():
             return {}
-        with _SOURCE_DETAIL_CACHE.open("r", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
-def _write_source_detail_cache(cache: dict[str, dict]) -> None:
+def _write_json_cache(path, cache: dict[str, dict]) -> None:
     try:
-        _SOURCE_DETAIL_CACHE.parent.mkdir(exist_ok=True)
-        with _SOURCE_DETAIL_CACHE.open("w", encoding="utf-8") as f:
+        path.parent.mkdir(exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False)
     except Exception:
         pass
+
+
+def _read_source_detail_cache() -> dict[str, dict]:
+    return _read_json_cache(_SOURCE_DETAIL_CACHE)
+
+
+def _write_source_detail_cache(cache: dict[str, dict]) -> None:
+    _write_json_cache(_SOURCE_DETAIL_CACHE, cache)
+
+
+def _read_source_translation_cache() -> dict[str, dict]:
+    return _read_json_cache(_SOURCE_TRANSLATION_CACHE)
+
+
+def _write_source_translation_cache(cache: dict[str, dict]) -> None:
+    _write_json_cache(_SOURCE_TRANSLATION_CACHE, cache)
 
 
 def _attr_from_tag(tag: str, attr: str) -> str:
@@ -365,18 +384,66 @@ def _github_source_detail(repo_name: str, meta: dict, repo_snapshot: dict) -> st
     return "\n".join(parts).strip()
 
 
-def _source_detail_from(row: dict, repo_name: str, repo_snapshot: dict) -> str:
+def _translate_source_detail(raw_detail: str, *, allow_request: bool = True) -> tuple[str, bool]:
+    """Translate real source excerpts only. Never summarize, infer, or add facts."""
+    global _SOURCE_TRANSLATE_BUDGET
+    raw_detail = str(raw_detail or "").strip()
+    if not raw_detail:
+        return "", False
+    if not has_noisy_english(raw_detail):
+        return raw_detail, False
+
+    key = hashlib.sha1(raw_detail.encode("utf-8")).hexdigest()
+    cache = _read_source_translation_cache()
+    cached = cache.get(key)
+    if isinstance(cached, dict) and cached.get("text"):
+        return str(cached["text"]), True
+    if os.getenv("PYTEST_CURRENT_TEST") and os.getenv("LEOJARVIS_ENABLE_TEST_TRANSLATION") != "1":
+        return raw_detail, False
+    if not allow_request or _SOURCE_TRANSLATE_BUDGET <= 0:
+        return raw_detail, False
+    _SOURCE_TRANSLATE_BUDGET -= 1
+
+    try:
+        from ..models_router import chat
+        translated = chat("translate", [
+            {
+                "role": "system",
+                "content": (
+                    "你是 LeoJarvis 的严格翻译器。任务是把真实来源摘录翻译成简体中文。"
+                    "必须逐句忠实翻译，只改变语言，不摘要、不扩写、不推断、不补背景、不加入评价。"
+                    "保留产品名、人名、机构名、URL、数字、版本号、代码名和单位。"
+                    "如果原文有不确定、玩笑或夸张，也按原意翻译，不要纠正。只输出译文。"
+                ),
+            },
+            {"role": "user", "content": raw_detail[:3200]},
+        ], temperature=0.0).strip().strip("`")
+    except Exception:
+        translated = ""
+
+    if not translated:
+        return raw_detail, False
+    translated = re.sub(r"^译文[:：]\s*", "", translated).strip()
+    cache[key] = {"ts": int(time.time()), "text": translated[:3600]}
+    _write_source_translation_cache(cache)
+    return cache[key]["text"], True
+
+
+def _source_detail_from(row: dict, repo_name: str, repo_snapshot: dict, *, translate: bool = False) -> dict[str, Any]:
     if _is_github(row):
-        return _github_source_detail(repo_name, _loads(row.get("meta"), {}) if isinstance(row.get("meta"), str) else (row.get("meta") or {}), repo_snapshot)
+        raw = _github_source_detail(repo_name, _loads(row.get("meta"), {}) if isinstance(row.get("meta"), str) else (row.get("meta") or {}), repo_snapshot)
+        display, translated = _translate_source_detail(raw, allow_request=translate)
+        return {"display": display, "raw": raw, "translated": translated}
     detail = _clean_source_detail(row.get("content"))
     if len(detail) < 120:
         fetched = _fetch_url_source_detail(row.get("url"))
         if fetched:
-            return fetched
-    return detail
+            detail = fetched
+    display, translated = _translate_source_detail(detail, allow_request=translate)
+    return {"display": display, "raw": detail, "translated": translated}
 
 
-def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict] | None = None) -> dict:
+def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict] | None = None, *, translate_source_detail: bool = False) -> dict:
     meta = _loads(row.get("meta"), {})
     reasons = _loads(row.get("reasons"), [])
     if not isinstance(reasons, list):
@@ -409,7 +476,10 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     why = analysis.get("why") or _why(row, reasons)
     relation = analysis.get("relation") or _relation(row, reasons, memories)
     next_step = analysis.get("next_step") or _next_step(row, priority)
-    source_detail = _source_detail_from(row, repo_name, repo_snapshot)
+    source_detail_payload = _source_detail_from(row, repo_name, repo_snapshot, translate=translate_source_detail)
+    source_detail = source_detail_payload["display"]
+    source_detail_raw = source_detail_payload["raw"]
+    source_detail_translated = bool(source_detail_payload["translated"])
     detail = source_detail
     if _is_github(row) and repo_snapshot:
         take = repo_snapshot.get("summary_zh") or repo_snapshot.get("display_description") or take
@@ -417,7 +487,10 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         relation = repo_snapshot.get("relation_zh") or relation
         next_step = repo_snapshot.get("next_step_zh") or next_step
         if not source_detail:
-            source_detail = _github_source_detail(repo_name, meta, repo_snapshot)
+            fallback_payload = _source_detail_from(row, repo_name, repo_snapshot, translate=translate_source_detail)
+            source_detail = fallback_payload["display"]
+            source_detail_raw = fallback_payload["raw"]
+            source_detail_translated = bool(fallback_payload["translated"])
         detail = source_detail
     item_tags = _tags(row, meta, reasons)
     if _is_github(row) and repo_snapshot.get("display_topics"):
@@ -437,7 +510,9 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         "take": take or "暂无摘要。",
         "detail": detail,
         "source_detail": source_detail,
-        "source_detail_missing": not bool(source_detail),
+        "source_detail_raw": source_detail_raw,
+        "source_detail_translated": source_detail_translated,
+        "source_detail_missing": not bool(source_detail_raw),
         "triage": row.get("triage") or "digest",
         "priority": priority,
         "reasons": [to_chinese(str(r), context="简报判断原因", max_chars=100) for r in reasons[:4]],
@@ -607,8 +682,9 @@ def _today_focus_text(items: list[dict]) -> str:
 
 
 def build_today() -> dict:
-    global _SOURCE_FETCH_BUDGET
+    global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
     _SOURCE_FETCH_BUDGET = 5
+    _SOURCE_TRANSLATE_BUDGET = 0
     since = int((time.time() - 24 * 3600) * 1000)
     with db.conn() as c:
         rows = c.execute(
@@ -694,3 +770,33 @@ def build_today() -> dict:
             "next_action": "先看高优先焦点，再把有价值的信息写入个人记事或反馈为重要。",
         },
     }
+
+
+def build_item_detail(event_id: str) -> dict | None:
+    global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
+    _SOURCE_FETCH_BUDGET = 1
+    _SOURCE_TRANSLATE_BUDGET = 2
+    with db.conn() as c:
+        row = c.execute(
+            """
+            SELECT e.id AS event_id, e.title, e.content, e.url, e.domain, e.source, e.kind, e.meta,
+                   j.score, j.take, j.triage, j.reasons, j.analysis, j.ts
+            FROM judgments j JOIN events e ON e.id=j.event_id
+            WHERE e.id=?
+            ORDER BY j.ts DESC
+            LIMIT 1
+            """,
+            (event_id,),
+        ).fetchone()
+    if not row:
+        return None
+
+    memories = _active_memory_snippets()
+    try:
+        from ..intelligence.scanner import github_radar
+        meta = _loads(row["meta"], {}) if isinstance(row["meta"], str) else (row["meta"] or {})
+        repo_name = meta.get("repo") or (row["title"] or "").replace(" · GitHub 项目雷达", "")
+        github_lookup = {r.get("repo_full_name"): r for r in github_radar(limit=120) if r.get("repo_full_name") == repo_name}
+    except Exception:
+        github_lookup = {}
+    return _briefing_item(dict(row), memories, github_lookup, translate_source_detail=True)

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from .. import db, user_settings
 from ..agent.loop import approve_action, run_agent
 from ..agent.tools import TOOLBUS
-from ..briefing.builder import build_today
+from ..briefing.builder import build_item_detail, build_today
 from ..notify.hub import hub
 from ..scheduler import run_ingest_cycle
 
@@ -972,6 +972,14 @@ def intelligence_github(limit: int = 24) -> list[dict]:
 @router.get("/briefing/today")
 def briefing_today() -> dict:
     return build_today()
+
+
+@router.get("/briefing/items/{event_id}")
+def briefing_item_detail(event_id: str) -> dict:
+    item = build_item_detail(event_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="briefing item not found")
+    return {"ok": True, "item": item}
 
 
 class Feedback(BaseModel):

@@ -50,6 +50,8 @@ export type BriefingItem = {
   next_step?: string;
   detail?: string;
   source_detail?: string;
+  source_detail_raw?: string;
+  source_detail_translated?: boolean;
   source_detail_missing?: boolean;
   tags?: string[];
   ts?: number;
@@ -90,6 +92,14 @@ export type BriefingData = {
 
 export async function getBriefing(): Promise<BriefingData> {
   return readJson(await fetch(`${BASE}/briefing/today`), "读取资讯简报");
+}
+
+export async function getBriefingItem(eventId: string): Promise<BriefingItem> {
+  const payload = await readJson<{ ok: boolean; item: BriefingItem }>(
+    await fetch(`${BASE}/briefing/items/${encodeURIComponent(eventId)}`),
+    "读取资讯详情",
+  );
+  return payload.item;
 }
 
 export async function getEvents(hours = 24) {
@@ -443,6 +453,8 @@ export type CockpitGithubCard = {
   score: number;
   summary: string;
   source_detail?: string;
+  source_detail_raw?: string;
+  source_detail_translated?: boolean;
   why: string;
   relation: string;
   next_step: string;

@@ -3,6 +3,7 @@ import {
   addIntelligenceSource,
   addIntelligenceTarget,
   getBriefing,
+  getBriefingItem,
   getCockpitOverview,
   getIntelligenceOverview,
   getReachStatus,
@@ -186,6 +187,7 @@ export function IntelligenceView() {
   const [activeRepo, setActiveRepo] = useState<CockpitGithubCard | null>(null);
   const [activeSource, setActiveSource] = useState<IntelligenceSource | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState("");
+  const [detailLoadingId, setDetailLoadingId] = useState("");
 
   const refresh = async () => {
     setError("");
@@ -297,6 +299,19 @@ export function IntelligenceView() {
     }
   };
 
+  const openSignalDetail = async (item: BriefingItem) => {
+    setActiveSignal(item.source_detail_translated ? item : { ...item, detail: "", source_detail: "", source_detail_missing: false });
+    setDetailLoadingId(item.event_id);
+    try {
+      const detailed = await getBriefingItem(item.event_id);
+      setActiveSignal(detailed);
+    } catch {
+      setActiveSignal({ ...item, detail: "", source_detail: "详情翻译失败，请先打开来源查看原文。", source_detail_missing: false });
+    } finally {
+      setDetailLoadingId("");
+    }
+  };
+
   const inspectRepo = async () => {
     const repo = repoQuery.trim();
     if (!repo) return;
@@ -344,7 +359,7 @@ export function IntelligenceView() {
           </div>
           <div className="focus-row">
             {(briefing?.focus || []).slice(0, 4).map((item) => (
-              <button key={item.event_id} onClick={() => setActiveSignal(item)}>
+              <button key={item.event_id} onClick={() => openSignalDetail(item)}>
                 <span>{item.priority || "观察"}</span>
                 <b>{item.title}</b>
               </button>
@@ -397,8 +412,8 @@ export function IntelligenceView() {
               </div>
               {visibleNews.length === 0 ? <div className="empty">当前筛选没有新闻简报条目。</div> : (
                 <div className="brief-read-list">
-                  {lead ? <LeadStory item={lead} onOpen={setActiveSignal} /> : null}
-                  {restNews.map((item) => <BriefRow item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+                  {lead ? <LeadStory item={lead} onOpen={openSignalDetail} /> : null}
+                  {restNews.map((item) => <BriefRow item={item} onOpen={openSignalDetail} key={item.event_id} />)}
                   {visibleNews.length > 1 + newsLimit ? (
                     <button className="btn ghost brief-more" onClick={() => setNewsLimit((n) => n + 20)}>
                       展开更多（还有 {visibleNews.length - 1 - newsLimit} 条）
@@ -432,7 +447,7 @@ export function IntelligenceView() {
               </div>
               {xItems.length === 0 ? <div className="empty">暂无 X 动态进入简报。点击“采集资讯”重新拉取。</div> : (
                 <div className="brief-read-list">
-                  {xItems.map((item) => <BriefRow item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+                  {xItems.map((item) => <BriefRow item={item} onOpen={openSignalDetail} key={item.event_id} />)}
                 </div>
               )}
             </>
@@ -446,7 +461,7 @@ export function IntelligenceView() {
               </div>
               {mailItems.length === 0 ? <div className="empty compact">当前没有进入观察区的邮件。</div> : (
                 <div className="brief-read-list">
-                  {mailItems.map((item) => <BriefRow item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+                  {mailItems.map((item) => <BriefRow item={item} onOpen={openSignalDetail} key={item.event_id} />)}
                 </div>
               )}
             </>
@@ -475,7 +490,7 @@ export function IntelligenceView() {
                   <span>{xSources.length} 源</span>
                 </div>
                 <div className="rail-list">
-                  {xItems.slice(0, 5).map((item) => <RailSignalRow item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+                  {xItems.slice(0, 5).map((item) => <RailSignalRow item={item} onOpen={openSignalDetail} key={item.event_id} />)}
                   {xItems.length === 0 ? <div className="empty compact">暂无 X 动态。公共 RSSHub 不稳定时系统会用 Nitter 兜底。</div> : null}
                 </div>
               </section>
@@ -488,7 +503,7 @@ export function IntelligenceView() {
                   <span>{mailItems.length} 封</span>
                 </div>
                 <div className="rail-list">
-                  {mailItems.slice(0, 4).map((item) => <RailSignalRow item={item} onOpen={setActiveSignal} key={item.event_id} />)}
+                  {mailItems.slice(0, 4).map((item) => <RailSignalRow item={item} onOpen={openSignalDetail} key={item.event_id} />)}
                   {mailItems.length === 0 ? <div className="empty compact">没有进入观察区的邮件。</div> : null}
                 </div>
               </section>
@@ -627,7 +642,7 @@ export function IntelligenceView() {
           </div>
         ) : null}>
         {activeSignal ? (
-          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} />
+          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} loading={detailLoadingId === activeSignal.event_id} />
         ) : null}
       </Modal>
 

@@ -632,6 +632,17 @@ def jarvis_briefing_today(authorization: str | None = Header(default=None)) -> d
     return {"ok": True, "briefing": build_today()}
 
 
+@app.get("/mobile/jarvis/briefing/items/{event_id}")
+def jarvis_briefing_item_detail(event_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .briefing.builder import build_item_detail
+
+    item = build_item_detail(event_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="briefing item not found")
+    return {"ok": True, "item": item}
+
+
 @app.get("/mobile/device-ops/status")
 def mobile_device_ops_status(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_token(authorization)

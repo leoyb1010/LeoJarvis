@@ -126,9 +126,9 @@ def test_briefing_detail_keeps_readable_source_body():
             analysis={"summary": "长资讯摘要"},
         )
         with TestClient(app) as client:
-            res = client.get("/briefing/today")
+            res = client.get(f"/briefing/items/{event_id}")
         assert res.status_code == 200
-        item = next(row for row in res.json()["items"] if row["event_id"] == event_id)
+        item = res.json()["item"]
         assert len(item["detail"]) > 900
         assert item["detail"] == item["source_detail"]
         assert item["source_detail_missing"] is False
@@ -136,6 +136,58 @@ def test_briefing_detail_keeps_readable_source_body():
         assert "Comments URL" not in item["detail"]
         assert "Points:" not in item["detail"]
         assert "这条资讯详细说明了产品发布背景" in item["detail"]
+    finally:
+        if event_id:
+            with db.conn() as c:
+                c.execute("DELETE FROM judgments WHERE event_id=?", (event_id,))
+                c.execute("DELETE FROM events WHERE id=?", (event_id,))
+
+
+def test_briefing_source_detail_translates_english_without_rewriting(monkeypatch):
+    import leojarvis.models_router as models_router
+
+    db.init_db()
+    event_id = None
+    source_text = (
+        "Pytest unique source detail 20260610 says AlphaTool shipped version 2.1 with offline mode, "
+        "three benchmark results, and a migration guide for existing users. "
+    ) * 8
+
+    def fake_chat(task, messages, **kwargs):
+        assert task == "translate"
+        assert "不摘要、不扩写、不推断" in messages[0]["content"]
+        assert "AlphaTool shipped version 2.1" in messages[1]["content"]
+        return "Pytest 唯一来源详情 20260610 表示 AlphaTool 发布了 2.1 版本，包含离线模式、三项基准结果，以及面向现有用户的迁移指南。"
+
+    monkeypatch.setattr(models_router, "chat", fake_chat)
+    monkeypatch.setenv("LEOJARVIS_ENABLE_TEST_TRANSLATION", "1")
+    try:
+        event_id = db.insert_event(
+            source="rss:pytest",
+            domain="business",
+            kind="news",
+            title="English source detail translation test",
+            content=source_text,
+            dedup_key="pytest-source-detail-translation",
+        )
+        assert event_id
+        db.insert_judgment(
+            event_id=event_id,
+            score=0.91,
+            take="测试英文来源详情翻译。",
+            triage="digest",
+            reasons=["translation"],
+            analysis={"summary": "英文详情翻译测试"},
+        )
+        with TestClient(app) as client:
+            res = client.get(f"/briefing/items/{event_id}")
+        assert res.status_code == 200
+        item = res.json()["item"]
+        assert item["source_detail_translated"] is True
+        assert "AlphaTool 发布了 2.1 版本" in item["source_detail"]
+        assert "AlphaTool shipped version 2.1" not in item["source_detail"]
+        assert "AlphaTool shipped version 2.1" in item["source_detail_raw"]
+        assert item["detail"] == item["source_detail"]
     finally:
         if event_id:
             with db.conn() as c:

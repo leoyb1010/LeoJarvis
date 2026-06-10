@@ -4157,6 +4157,22 @@ textarea,
   color: var(--meta);
   font-style: normal;
 }
+.detail-original-source {
+  margin-top: 16px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+.detail-original-source summary {
+  cursor: pointer;
+  color: var(--meta);
+  font: 650 11px var(--font-mono);
+  letter-spacing: .06em;
+}
+.detail-original-source p {
+  margin-top: 10px;
+  color: var(--muted);
+  font: 400 12.5px/1.65 var(--font-body);
+}
 .detail-side-rail {
   display: grid;
   gap: 10px;

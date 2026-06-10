@@ -19,6 +19,7 @@ import {
   closeTerminalSession,
   connectRemoteLeoJarvis,
   createTerminalSession,
+  getBriefingItem,
   getCockpitOverview,
   getRemoteCockpit,
   getTerminalSessions,
@@ -270,6 +271,7 @@ export function Dashboard() {
   const [error, setError] = useState("");
   const [activeApp, setActiveApp] = useState<LocalNotificationApp | null>(null);
   const [activeSignal, setActiveSignal] = useState<BriefingItem | null>(null);
+  const [detailLoadingId, setDetailLoadingId] = useState("");
   const [activeRepo, setActiveRepo] = useState<CockpitGithubCard | null>(null);
   const [activeTool, setActiveTool] = useState<AiToolStatus | null>(null);
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
@@ -406,6 +408,18 @@ export function Dashboard() {
       setData(null);
     } catch (err) {
       setDeviceError(String(err));
+    }
+  };
+  const openSignalDetail = async (item: BriefingItem) => {
+    setActiveSignal(item.source_detail_translated ? item : { ...item, detail: "", source_detail: "", source_detail_missing: false });
+    setDetailLoadingId(item.event_id);
+    try {
+      const detailed = await getBriefingItem(item.event_id);
+      setActiveSignal(detailed);
+    } catch {
+      setActiveSignal({ ...item, detail: "", source_detail: "详情翻译失败，请先打开来源查看原文。", source_detail_missing: false });
+    } finally {
+      setDetailLoadingId("");
     }
   };
   const deviceSwitch = (
@@ -685,7 +699,7 @@ export function Dashboard() {
           {topBriefing.length === 0 ? <div className="empty compact">暂无足够高价值的信息进入驾驶舱。</div> : (
             <div className="dash-signal-list">
               {topBriefing.slice(0, 6).map((item, index) => (
-                <button className={`dash-signal-item ${index === 0 ? "lead" : ""}`} key={item.event_id} onClick={() => setActiveSignal(item)}>
+                <button className={`dash-signal-item ${index === 0 ? "lead" : ""}`} key={item.event_id} onClick={() => openSignalDetail(item)}>
                   <div>
                     <span className={`dash-pri pri-${item.priority || "观察"}`}>{item.priority || "观察"}</span>
                     <em>{item.source} · {fmtTime(item.ts)}</em>
@@ -796,7 +810,7 @@ export function Dashboard() {
       <Modal open={!!activeSignal} onClose={() => setActiveSignal(null)} kicker={activeSignal?.priority || "情报"} title={activeSignal?.title} width={1040}
         footer={activeSignal?.url ? <a className="btn primary sm" href={activeSignal.url} target="_blank" rel="noreferrer">打开来源</a> : null}>
         {activeSignal ? (
-          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} />
+          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} loading={detailLoadingId === activeSignal.event_id} />
         ) : null}
       </Modal>
 
