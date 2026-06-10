@@ -12,7 +12,7 @@ from typing import Any
 from . import remote_status
 
 
-SAFE_ACTIONS = {"clean", "optimize", "purge", "installers", "analyze", "apps"}
+SAFE_ACTIONS = {"status", "clean", "optimize", "purge", "installers", "analyze", "apps"}
 
 
 def _run(cmd: list[str], *, input_text: str | None = None, timeout: float = 20) -> dict[str, Any]:
@@ -211,6 +211,8 @@ def fleet_status() -> dict[str, Any]:
 
 
 def _action_args(action: str, path: str = "") -> list[str]:
+    if action == "status":
+        return ["status", "--json"]
     if action == "clean":
         return ["clean", "--dry-run"]
     if action == "optimize":
@@ -246,14 +248,14 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
                 "error": "Mole CLI 未安装",
                 "install_hint": "brew install mole",
             }
-        res = _run([mo, *args], timeout=180 if action in {"clean", "purge", "installers", "analyze", "apps"} else 90)
+        res = _run([mo, *args], timeout=180 if action in {"clean", "purge", "installers", "analyze", "apps"} else 45)
     else:
         rows = {str(row.get("id") or ""): row for row in remote_status.configured_hosts()}
         row = rows.get(target_id)
         if not row:
             return {"ok": False, "target_id": target_id, "action": action, "safe_mode": True, "error": "未知目标主机"}
         shell = " ".join(["mo", *[sh_quote(part) for part in args]])
-        res = _run(_ssh_prefix(row) + [shell], timeout=210 if action in {"clean", "purge", "installers", "analyze", "apps"} else 120)
+        res = _run(_ssh_prefix(row) + [shell], timeout=210 if action in {"clean", "purge", "installers", "analyze", "apps"} else 60)
 
     parsed = _parse_json(res["stdout"])
     return {

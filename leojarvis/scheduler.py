@@ -168,6 +168,22 @@ def run_ssh_probe() -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def run_remote_cortex_maintain() -> dict:
+    """远程 LeoJarvis 隧道保活：周期做真实 HTTP 健康校验，断了就后台重连。
+    之前断线只有打开设备页才触发重连；现在睡眠唤醒/网络切换后约一分钟内自愈。"""
+    from . import remote_cortex
+    try:
+        res = remote_cortex.maintain()
+        offline = [r for r in res.get("results", []) if not r.get("connected")]
+        if offline:
+            print(f"[remote-cortex] {len(offline)} connection(s) reconnecting: "
+                  + ", ".join(str(r.get("name") or r.get("id")) for r in offline))
+        return res
+    except Exception as exc:
+        print(f"[remote-cortex] maintain error: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = user_settings.effective("schedule")
     intel_cfg = user_settings.effective("intelligence")
@@ -183,10 +199,18 @@ def setup_scheduler() -> AsyncIOScheduler:
     )
     sched.add_job(run_system_guard, "interval", minutes=int(cfg.get("guard_minutes", 5)), id="guard", replace_existing=True)
     # SSH 设备健康探测：定时刷新远程设备状态；启动后 ~15s 先跑一次，让设备页尽快有数据。
+    # misfire_grace_time 放宽：Mac 睡眠会让 interval 任务大面积 miss，唤醒后补跑一次即可。
     from datetime import datetime, timedelta
     sched.add_job(run_ssh_probe, "interval", minutes=int(cfg.get("ssh_probe_minutes", 5)),
                   id="ssh_probe", replace_existing=True,
+                  misfire_grace_time=300, coalesce=True,
                   next_run_time=datetime.now() + timedelta(seconds=15))
+    # 远程 LeoJarvis 隧道保活：每分钟校验真实 HTTP 健康，断线自动后台重连。
+    sched.add_job(run_remote_cortex_maintain, "interval",
+                  seconds=int(cfg.get("remote_cortex_maintain_seconds", 60)),
+                  id="remote_cortex_maintain", replace_existing=True,
+                  misfire_grace_time=120, coalesce=True,
+                  next_run_time=datetime.now() + timedelta(seconds=25))
     sched.add_job(run_reflection, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=0, id="reflect", replace_existing=True)
     sched.add_job(lambda: print("[briefing] ready"), "cron",
                   hour=int(cfg.get("briefing_hour", 8)),

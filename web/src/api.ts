@@ -55,6 +55,9 @@ export type BriefingItem = {
   repo_speed?: number | null;
   channel?: string | null;
   category?: string | null;
+  // 相似标题聚类：同一事件的其它来源报道折叠在主条目下。
+  dup_count?: number;
+  related_sources?: { event_id?: string; title?: string; source?: string; url?: string }[];
 };
 
 export type BriefingGroup = {
@@ -126,6 +129,8 @@ export type DeviceSummary = {
   services: { online: number; total: number };
   risks: { title: string; advice: string; level: string }[];
   privacy?: string;
+  // 同一台机器的远控通道（remote_cortex）合并进设备卡后的状态徽标。
+  remote_control?: { id: string; name?: string; connected: boolean; error?: string };
 };
 
 export async function getDeviceSummary(): Promise<DeviceSummary> {
@@ -163,6 +168,8 @@ export type RemoteLeoJarvisConnection = {
   enabled: boolean;
   connected?: boolean;
   last_error?: string;
+  last_health_ts?: number;
+  updated_at?: number;
   proxy_command?: string;
   ssh_options?: string[];
 };
@@ -356,18 +363,23 @@ export type ReachChannel = {
   name: string;
   tier: number;
   optional: boolean;
+  setup_level?: string;
   status: "ok" | "warn" | "off" | "error" | string;
   message: string;
   path: string;
   backends: string[];
   description: string;
+  install_hint?: string;
+  read_examples?: string[];
+  search_examples?: string[];
 };
 
 export type ReachStatus = {
   ok: boolean;
   generated_at: number;
-  summary: { ready: number; total: number; core_ready: number; core_total: number };
+  summary: { ready: number; total: number; partial?: number; core_ready: number; core_total: number };
   channels: ReachChannel[];
+  source_matrix?: Array<{ group: string; channels: string[]; use: string }>;
 };
 
 export type ReachGithubRepo = {

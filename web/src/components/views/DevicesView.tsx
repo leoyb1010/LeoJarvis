@@ -40,6 +40,11 @@ function DeviceCard({ device, hero = false }: { device: DeviceSummary; hero?: bo
           <span className="device-kicker">{device.role || "mac"} · {device.model || device.host_name || "Mac"}</span>
           <h3>{device.device_name}</h3>
           <p>{device.host_name || device.device_id}</p>
+          {device.remote_control ? (
+            <span className={`rc-badge ${device.remote_control.connected ? "on" : "off"}`} title={device.remote_control.connected ? "远控隧道已连接，可在驾驶舱切换到这台机器" : device.remote_control.error || "远控通道未连接"}>
+              {device.remote_control.connected ? "远控已连接" : "远控未连接"}
+            </span>
+          ) : null}
         </div>
         <div className="device-score"><b>{Math.round(device.health || 0)}</b><span>{device.online ? device.status : "离线"}</span></div>
       </div>

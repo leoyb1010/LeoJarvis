@@ -359,11 +359,123 @@ def _group_items(items: list[dict]) -> list[dict]:
     return sorted(out, key=lambda g: (-g["top_score"], -g["count"], g["name"]))[:8]
 
 
+_TOKEN_STOPWORDS = {
+    "github", "项目", "发布", "推出", "宣布", "正式", "全新", "重磅", "首个", "首次",
+    "the", "and", "for", "with", "from", "into", "new", "now", "via", "how", "why",
+    "what", "your", "this", "that", "are", "has", "have", "will", "can", "all",
+}
+
+
+def _title_tokens(title: str) -> set[str]:
+    """标题 → 关键词集合：ASCII 词（含单数字版本号）+ 中文双字组，用于相似聚类。"""
+    text = re.sub(r"https?://\S+", "", (title or "").lower())
+    ascii_words = {w for w in re.findall(r"[a-z0-9][a-z0-9_.+-]*", text) if w not in _TOKEN_STOPWORDS}
+    cjk_runs = re.findall(r"[㐀-鿿]{2,}", text)
+    bigrams: set[str] = set()
+    for run in cjk_runs:
+        bigrams.update(b for b in (run[i:i + 2] for i in range(len(run) - 1))
+                       if b not in _TOKEN_STOPWORDS)
+    return ascii_words | bigrams
+
+
+def _cluster_similar(items: list[dict]) -> list[dict]:
+    """把同一事件/同一主角的多来源报道折叠成一条主条目。
+
+    简单标题归一只能去掉完全相同的标题；同一新闻在不同 RSS 源里标题各异
+    （「Anthropic 发布 Claude Fable 5」vs「Claude Fable 5 初步印象」），
+    会让简报里同一件事霸屏。按关键词重合度聚类，主条目取分数最高的一条，
+    其余来源折叠进 related_sources，前端显示「N 个来源同时报道」。
+    """
+    kept: list[dict] = []
+    kept_tokens: list[set[str]] = []
+    for item in items:
+        if item.get("kind") == "github_repo":
+            kept.append(item)
+            kept_tokens.append(set())
+            continue
+        tokens = _title_tokens(str(item.get("title") or "")) | _title_tokens(str(item.get("original_title") or ""))
+        merged = False
+        if len(tokens) >= 2:
+            for idx, other in enumerate(kept_tokens):
+                if not other:
+                    continue
+                overlap = len(tokens & other)
+                if overlap < 2:
+                    continue
+                jaccard = overlap / len(tokens | other)
+                containment = overlap / min(len(tokens), len(other))
+                if jaccard >= 0.4 or containment >= 0.75:
+                    primary = kept[idx]
+                    related = primary.setdefault("related_sources", [])
+                    if len(related) < 8:
+                        related.append({
+                            "event_id": item.get("event_id"),
+                            "title": item.get("title"),
+                            "source": item.get("source"),
+                            "url": item.get("url"),
+                        })
+                    primary["dup_count"] = int(primary.get("dup_count") or 0) + 1
+                    merged = True
+                    break
+        if merged:
+            continue
+        kept.append(item)
+        kept_tokens.append(tokens)
+    return kept
+
+
+def _apply_priority_quota(items: list[dict]) -> None:
+    """重排优先级：高优先是配额制的稀缺标签，不是分数阈值的副产品。
+
+    画像命中型打分会让 AI 主题的整版资讯都≥0.78，结果满屏「高优先」——
+    等于没有优先级。这里按当日分数排名重新分层：notify 触发的保底高优先，
+    其余高优先最多 15%（≤6 条），其后 35% 为中优先，剩下是观察。
+    """
+    news = [it for it in items if it.get("kind") != "github_repo"]
+    repos = [it for it in items if it.get("kind") == "github_repo"]
+    if news:
+        ranked = sorted(news, key=lambda it: -float(it.get("score") or 0))
+        high_quota = max(1, min(6, round(len(ranked) * 0.15)))
+        mid_quota = max(2, round(len(ranked) * 0.35))
+        for idx, item in enumerate(ranked):
+            if item.get("triage") == "notify":
+                item["priority"] = "高优先"
+            elif idx < high_quota and float(item.get("score") or 0) >= 0.6:
+                item["priority"] = "高优先"
+            elif idx < high_quota + mid_quota and float(item.get("score") or 0) >= 0.45:
+                item["priority"] = "中优先"
+            else:
+                item["priority"] = "观察"
+    if repos:
+        # GitHub 雷达有自己的版块和动量排序，优先级只用来挑出头部几个。
+        ranked_repos = sorted(repos, key=lambda it: (-float(it.get("repo_speed") or 0), -float(it.get("score") or 0)))
+        for idx, item in enumerate(ranked_repos):
+            item["priority"] = "高优先" if idx < 5 else ("中优先" if idx < 14 else "观察")
+
+
 def _today_focus_text(items: list[dict]) -> str:
     if not items:
         return "今天还没有足够高价值的情报进入焦点。可以先运行采集或调整 RSS / X 监控源。"
-    top = items[:3]
-    return "今日重点：" + "；".join(f"{it.get('priority', '观察')}｜{it.get('title')}" for it in top)
+    high = [it for it in items if it.get("priority") == "高优先" and it.get("kind") != "github_repo"]
+    top = (high or items)[:3]
+    lead = top[0]
+    lead_take = str(lead.get("take") or "").split("。")[0].strip()
+    if len(lead_take) > 110:
+        # 在最近的次级标点处收口，避免把数字/词语拦腰截断。
+        cut = max(lead_take.rfind(ch, 0, 110) for ch in "，、；,;")
+        lead_take = lead_take[:cut] if cut > 30 else lead_take[:110]
+    parts = [f"今天最值得看的是「{lead.get('title')}」"]
+    if lead_take and lead_take != lead.get("title"):
+        parts.append(f"——{lead_take}。")
+    else:
+        parts.append("。")
+    if len(top) > 1:
+        rest = "、".join(f"「{it.get('title')}」" for it in top[1:])
+        parts.append(f"其次可以关注{rest}。")
+    repo_count = sum(1 for it in items if it.get("kind") == "github_repo")
+    if repo_count:
+        parts.append(f"GitHub 雷达另有 {repo_count} 个高增速项目值得扫一眼。")
+    return "".join(parts)
 
 
 def build_today() -> dict:
@@ -407,6 +519,12 @@ def build_today() -> dict:
             mail_items.append(item)
         else:
             items.append(item)
+
+    clustered_away = len(items)
+    items = _cluster_similar(items)
+    clustered_away -= len(items)
+    duplicate_count += clustered_away
+    _apply_priority_quota(items)
 
     business = [it for it in items if it["domain"] == "business"]
     life = [it for it in items if it["domain"] == "life"]

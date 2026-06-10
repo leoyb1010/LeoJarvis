@@ -299,11 +299,22 @@ def _discovered_services(configured_ports: set[int], configured_names: set[str])
 
     rows: list[dict] = []
     used_names = set(configured_names)
+    # 同一个项目常开多个监听端口（主端口 + websocket + 调试端口），逐端口各占
+    # 一行会把服务区刷成 cloudcli:52654 / cloudcli:52655 …的噪音。按项目名聚合，
+    # 主行取最小端口，其余端口收进 extra_ports 给详情展示。
+    grouped: dict[str, list[tuple[int, dict]]] = {}
     for port, row in sorted(by_port.items(), key=lambda item: (0 if item[0] in _PORT_ALIASES else 1, item[0])):
         command = str(row.get("command") or "")
         full_command = str(row.get("full_command") or "")
         cwd = str(row.get("cwd") or "")
         base_name = _friendly_name(port, command, full_command, cwd)
+        grouped.setdefault(base_name, []).append((port, row))
+    for base_name, entries in grouped.items():
+        port, row = entries[0]
+        extra_ports = [p for p, _ in entries[1:]]
+        command = str(row.get("command") or "")
+        full_command = str(row.get("full_command") or "")
+        cwd = str(row.get("cwd") or "")
         name = base_name
         if name in used_names:
             name = f"{base_name}:{port}"
@@ -311,18 +322,22 @@ def _discovered_services(configured_ports: set[int], configured_names: set[str])
         alias_desc = _PORT_ALIASES.get(port, ("", ""))[1]
         project_desc = _PROJECT_DESCS.get(base_name)
         process_label = command or "未知进程"
+        desc = alias_desc or project_desc or f"自动发现的监听服务 · {process_label}"
+        if extra_ports:
+            desc += f" · 另监听 {', '.join(str(p) for p in extra_ports[:4])}"
         rows.append({
             "name": name,
             "port": port,
             "online": True,
             "pid": str(row.get("pid") or "") or None,
             "can_restart": False,
-            "desc": alias_desc or project_desc or f"自动发现的监听服务 · {process_label}",
+            "desc": desc,
             "source": "自动发现",
             "process": process_label,
             "command": full_command[:240],
             "cwd": cwd,
             "address": row.get("address"),
+            "extra_ports": extra_ports,
         })
         if len(rows) >= 18:
             break

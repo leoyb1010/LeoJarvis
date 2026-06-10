@@ -113,6 +113,14 @@ export function SettingsView() {
 
   useEffect(() => { load(); }, []);
 
+  // 远程连接状态会被后台维护任务自动修复，设置页轮询保持显示同步。
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
+    }, 10000);
+    return () => window.clearInterval(t);
+  }, []);
+
   async function save(next: Partial<LeoJarvisSettings>) {
     setSaving(true);
     setError("");
@@ -327,13 +335,22 @@ export function SettingsView() {
           <div className="panel-title">远程 LeoJarvis 实例（SSH 隧道）</div>
           <p className="settings-note">目标机器也部署 LeoJarvis 后，这里通过 SSH tunnel 连到远程 127.0.0.1:8787，主页驾驶舱可直接切换到那台机器的完整驾驶舱。需目标机已授权本机 SSH key。</p>
           <div className="settings-list">
-            {remoteLeoJarvis.map((r) => (
-              <div className="settings-row remote-row" key={r.id}>
-                <b>{r.name || r.host}</b>
-                <span>{r.user ? `${r.user}@` : ""}{r.host} · {r.connected ? `127.0.0.1:${r.local_port}` : r.last_error || "未连接"}</span>
-                <button className="btn sm" disabled={remoteBusy === r.id} onClick={() => toggleRemote(r)}>{r.connected ? "断开" : "连接"}</button>
-              </div>
-            ))}
+            {remoteLeoJarvis.map((r) => {
+              const verifiedAgo = r.last_health_ts ? Math.max(0, Math.round((Date.now() / 1000 - r.last_health_ts) / 60)) : null;
+              return (
+                <div className="settings-row remote-row" key={r.id}>
+                  <span className={`conn-dot ${r.connected ? "good" : "bad"}`} />
+                  <b>{r.name || r.host}</b>
+                  <span>
+                    {r.user ? `${r.user}@` : ""}{r.host}
+                    {r.connected
+                      ? ` · 已连接 127.0.0.1:${r.local_port}${verifiedAgo != null ? `（${verifiedAgo < 1 ? "刚刚" : `${verifiedAgo} 分钟前`}验证）` : ""}`
+                      : ` · ${r.last_error || "未连接，等待后台重连"}`}
+                  </span>
+                  <button className="btn sm" disabled={remoteBusy === r.id} onClick={() => toggleRemote(r)}>{remoteBusy === r.id ? "处理中" : r.connected ? "断开" : "连接"}</button>
+                </div>
+              );
+            })}
             {remoteLeoJarvis.length === 0 ? <div className="empty">暂无远程 LeoJarvis。先在目标机器部署并运行 LeoJarvis，再添加 SSH 连接。</div> : null}
           </div>
           <div className="settings-form remote-cortex-form">

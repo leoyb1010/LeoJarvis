@@ -27,6 +27,10 @@ async def lifespan(app: FastAPI):
     yield
     if _sched:
         _sched.shutdown()
+    # 退出时关掉本进程拉起的 SSH 隧道，避免孤儿进程占住 local_port，
+    # 下次启动撞上「端口在监听但 HTTP 不通」的半死隧道。
+    from . import remote_cortex
+    remote_cortex.shutdown_all()
 
 
 def _warm_caches() -> None:

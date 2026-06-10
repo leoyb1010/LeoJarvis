@@ -339,3 +339,17 @@ def test_device_ops_and_reach_status_endpoints(monkeypatch):
     assert ops.json()["summary"]["ready"] == 1
     assert channels.status_code == 200
     assert channels.json()["summary"]["core_ready"] == 2
+
+
+def test_reach_catalog_keeps_agent_reach_source_breadth():
+    from leojarvis import reach
+
+    ids = {channel.id for channel in reach.CHANNELS}
+    expected = {
+        "web", "github", "rss", "youtube", "bilibili", "exa_search",
+        "twitter", "reddit", "xiaohongshu", "douyin", "linkedin",
+        "wechat", "weibo", "v2ex", "xueqiu", "xiaoyuzhou",
+    }
+
+    assert expected.issubset(ids)
+    assert len(reach.source_matrix()) >= 4

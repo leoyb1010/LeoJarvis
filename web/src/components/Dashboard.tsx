@@ -17,6 +17,7 @@ import {
 } from "simple-icons";
 import {
   closeTerminalSession,
+  connectRemoteLeoJarvis,
   createTerminalSession,
   getCockpitOverview,
   getRemoteCockpit,
@@ -391,6 +392,21 @@ export function Dashboard() {
     setTerminalInput("");
     setTerminalError("");
   };
+  const reconnectActive = async () => {
+    if (activeDevice === "local") return;
+    setDeviceError("正在重连…");
+    try {
+      const res = await connectRemoteLeoJarvis(activeDevice);
+      if (!res.ok) {
+        setDeviceError(res.error || "重连失败");
+        return;
+      }
+      setDeviceError("");
+      setData(null);
+    } catch (err) {
+      setDeviceError(String(err));
+    }
+  };
   const deviceSwitch = (
     <div className="dash-device-switch card">
       <div>
@@ -402,7 +418,12 @@ export function Dashboard() {
         <option value="local">本机 LeoJarvis</option>
         {validRemotes.length ? <optgroup label="远程 LeoJarvis 实例">{validRemotes.map((r) => <option key={r.id} value={r.id}>{r.name || r.host}{r.connected ? " · 已连接" : " · 未连接"}</option>)}</optgroup> : null}
       </select>
-      {deviceError ? <em>{deviceError}</em> : <em>{isLocalDevice ? "本机实时驾驶舱" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
+      {deviceError ? (
+        <em className="device-error">
+          {deviceError}
+          {!isLocalDevice ? <button className="btn sm ghost" onClick={reconnectActive}>立即重连</button> : null}
+        </em>
+      ) : <em>{isLocalDevice ? "本机实时驾驶舱" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
     </div>
   );
 

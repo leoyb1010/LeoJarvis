@@ -460,10 +460,29 @@ def _network_info() -> dict:
     }
 
 
+_VERSION_ERROR_MARKERS = (
+    "error", "not found", "couldn't", "could not", "unable to", "failed",
+    "exception", "traceback", "usage:", "无法", "失败", "执行失败",
+)
+
+
+def _looks_like_version_error(line: str) -> bool:
+    low = (line or "").lower()
+    return any(marker in low for marker in _VERSION_ERROR_MARKERS)
+
+
 def _cmd_version(path: str, args: list[str] | None = None) -> str:
     args = args or ["--version"]
     out = _run([path, *args], timeout=5)
-    return out.splitlines()[0][:160] if out else "已安装，版本读取失败"
+    if not out:
+        return "已安装，版本读取失败"
+    line = out.splitlines()[0].strip()
+    # CLI 报错文本（如 Cursor 的 “Error: No Cursor installation found”、
+    # macOS Java 桩的 “Unable to locate a Java Runtime”）不能当版本号展示。
+    if _looks_like_version_error(line):
+        m = _VER_RE.search(out)
+        return m.group(0) if m else "已安装，版本读取失败"
+    return line[:160]
 
 
 def _candidate_paths(cmd: str) -> list[str]:
@@ -739,7 +758,10 @@ def _short_version(raw: str) -> str:
     if not raw:
         return ""
     m = _VER_RE.search(raw)
-    return m.group(0) if m else raw.split("\n")[0][:40]
+    if m:
+        return m.group(0)
+    line = raw.split("\n")[0][:40]
+    return "" if _looks_like_version_error(line) else line
 
 
 def _probe_dev_toolchain() -> list[dict]:
@@ -749,7 +771,12 @@ def _probe_dev_toolchain() -> list[dict]:
         version = ""
         if found:
             raw = _cmd_version(found, args)
-            version = _short_version(raw)
+            # macOS 自带 /usr/bin/java 是个桩：没装 JDK 时报
+            # “Unable to locate a Java Runtime”，应视为未安装。
+            if "unable to locate" in raw.lower():
+                found = None
+            else:
+                version = _short_version(raw)
         rows.append({
             "id": tid,
             "name": name,

@@ -35,7 +35,7 @@ function levelClass(level: string) {
 }
 
 const MODULE_ICON: Record<string, string> = {
-  disk: "M4 6h16v4H4zM4 14h16v4H4z",          // 抽象图标，纯描边
+  disk: "M4 6h16v4H4zM4 14h16v4H4z",
   cpu: "M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3M6 6h12v12H6z M9 9h6v6H9z",
   memory: "M4 8h16v8H4z M7 8v8 M11 8v8 M15 8v8",
   network: "M12 4a8 8 0 0 0 0 16 M12 4a8 8 0 0 1 0 16 M4 12h16",
@@ -55,78 +55,69 @@ function moduleProgress(module: SystemModule) {
   return Math.max(4, Math.min(100, pct));
 }
 
-// 扁平进度环：纯 SVG 描边，无渐变。
-function Ring({ pct, tone }: { pct: number; tone: string }) {
+function Ring({ pct, tone, size = 56 }: { pct: number; tone: string; size?: number }) {
   const r = 26;
   const c = 2 * Math.PI * r;
   const off = c * (1 - Math.max(0, Math.min(100, pct)) / 100);
   return (
-    <svg className={`sys-ring tone-${tone}`} viewBox="0 0 64 64" width="56" height="56">
+    <svg className={`sys-ring tone-${tone}`} viewBox="0 0 64 64" width={size} height={size}>
       <circle cx="32" cy="32" r={r} className="ring-track" />
       <circle cx="32" cy="32" r={r} className="ring-bar" strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 32 32)" />
     </svg>
   );
 }
 
-function ModuleCard({ module, index }: { module: SystemModule; index: number }) {
+function MetricCard({ module, index }: { module: SystemModule; index: number }) {
   const tone = levelClass(module.level);
   return (
     <motion.article
-      className={`sys-module ${tone}`}
-      initial={{ opacity: 0, y: 12 }}
+      className={`sys-metric ${tone}`}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.04 }}
+      title={module.advice}
     >
-      <div className="sys-module-ring">
-        <Ring pct={moduleProgress(module)} tone={tone} />
-        <svg className="sys-module-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path d={MODULE_ICON[module.id] || "M4 4h16v16H4z"} />
-        </svg>
-      </div>
-      <div className="sys-module-body">
-        <div className="sys-module-top">
-          <span>{module.name}</span>
-          <em className={`sys-tag ${tone}`}>{module.level}</em>
+      <div className="sys-metric-head">
+        <div className="sys-metric-ring">
+          <Ring pct={moduleProgress(module)} tone={tone} size={46} />
+          <svg className="sys-module-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <path d={MODULE_ICON[module.id] || "M4 4h16v16H4z"} />
+          </svg>
         </div>
-        <b>{module.value}</b>
-        <p>{module.summary}</p>
-        <small>{module.advice}</small>
+        <em className={`sys-tag ${tone}`}>{module.level}</em>
       </div>
+      <span className="sys-metric-name">{module.name}</span>
+      <b className="sys-metric-value">{module.value}</b>
+      <p className="sys-metric-sub">{module.summary}</p>
     </motion.article>
   );
 }
 
-function ServiceTile({ service, onOpen }: { service: ServiceRow; onOpen: (s: ServiceRow) => void }) {
+function SectionHead({ title, desc, meta, children }: { title: string; desc?: string; meta?: string; children?: React.ReactNode }) {
   return (
-    <button className={`sys-service ${service.online ? "good" : "bad"}`} onClick={() => onOpen(service)}>
-      <span className="dot" />
+    <div className="section-head">
       <div>
-        <b>{service.name}</b>
-        <small>{service.desc || "本地服务"} · :{service.port}</small>
+        <h2>{title}</h2>
+        {desc ? <p>{desc}</p> : null}
       </div>
-      <em>{service.online ? "在线" : "离线"}</em>
-    </button>
-  );
-}
-
-function ToolCard({ tool, onOpen }: { tool: AiToolStatus; onOpen: (t: AiToolStatus) => void }) {
-  return (
-    <button className={`sys-tool ${tool.installed ? "installed" : "missing"}`} onClick={() => onOpen(tool)}>
-      <span className="dot" />
-      <div className="sys-tool-main">
-        <b>{tool.name}</b>
-        <em>{tool.installed ? (tool.running ? "运行中" : "已安装") : "未安装"}</em>
+      <div className="section-head-side">
+        {meta ? <span className="section-meta">{meta}</span> : null}
+        {children}
       </div>
-      <div className="sys-tool-meta">
-        <span>v{tool.current_version === "未安装" ? "—" : tool.current_version}</span>
-        <span>{tool.update_state}</span>
-      </div>
-    </button>
+    </div>
   );
 }
 
 function pct(value?: number | null) {
   return value == null ? "—" : `${Math.round(value)}%`;
+}
+
+// 卡片上只放得下短版本号；完整版本字符串在详情弹层里看。
+function shortVersion(raw?: string) {
+  if (!raw || raw === "未安装") return "—";
+  const m = raw.match(/\d+\.\d+(?:\.\d+)?/);
+  if (m) return `v${m[0]}`;
+  return raw.length > 14 ? "已安装" : raw;
 }
 
 function ageLabel(seconds?: number) {
@@ -153,6 +144,11 @@ function DeviceCard({ device }: { device: DeviceSummary }) {
           <span className="device-kicker">{device.role || "mac"} · {device.model || device.host_name || "Mac"}</span>
           <h3>{device.device_name}</h3>
           <p>{device.host_name || device.device_id}</p>
+          {device.remote_control ? (
+            <span className={`rc-badge ${device.remote_control.connected ? "on" : "off"}`} title={device.remote_control.connected ? "远控隧道已连接，可在驾驶舱切换到这台机器" : device.remote_control.error || "远控通道未连接"}>
+              {device.remote_control.connected ? "远控已连接" : "远控未连接"}
+            </span>
+          ) : null}
         </div>
         <div className="device-score"><b>{Math.round(device.health || 0)}</b><span>{device.online ? device.status : "离线"}</span></div>
       </div>
@@ -165,7 +161,7 @@ function DeviceCard({ device }: { device: DeviceSummary }) {
         <div><span>网络</span><b>{m.network_latency_ms != null ? `${m.network_latency_ms}ms` : "—"}</b><em>{m.uptime_hours != null ? `运行 ${m.uptime_hours}h` : "连通性"}</em></div>
       </div>
       <div className="device-risks">
-        {(device.risks || []).slice(0, 2).map((risk) => <span className={risk.level === "异常" ? "bad" : risk.level === "注意" ? "warn" : "good"} key={`${risk.title}-${risk.advice}`}><b>{risk.level}</b>{risk.title}</span>)}
+        {(device.risks || []).slice(0, 2).map((risk) => <span className={risk.level === "异常" ? "bad" : risk.level === "注意" ? "warn" : "good"} key={`${risk.title}-${risk.advice}`} title={risk.advice}><b>{risk.level}</b>{risk.title}</span>)}
         {(device.risks || []).length === 0 ? <span className="good"><b>健康</b>暂无风险项</span> : null}
       </div>
       <div className="device-foot"><span>{device.online ? "在线" : "离线"}</span><span>心跳 {ageLabel(device.age_seconds)}</span></div>
@@ -174,10 +170,12 @@ function DeviceCard({ device }: { device: DeviceSummary }) {
 }
 
 const OPS_ACTIONS = [
+  ["status", "系统状态"],
   ["clean", "缓存清理预览"],
   ["optimize", "系统优化预览"],
   ["purge", "项目垃圾预览"],
   ["installers", "安装包扫描"],
+  ["analyze", "磁盘地图"],
   ["apps", "应用列表"],
 ] as const;
 
@@ -225,8 +223,10 @@ export function SystemView() {
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
   const [opsResult, setOpsResult] = useState<DeviceOpsPreview | null>(null);
   const [opsBusy, setOpsBusy] = useState("");
+  const [showAddDevice, setShowAddDevice] = useState(false);
   const [ssh, setSsh] = useState({ name: "", host: "", user: "" });
   const [sshBusy, setSshBusy] = useState(false);
+  const [sshError, setSshError] = useState("");
   const [devTools, setDevTools] = useState<DevToolchain | null>(null);
   const lastProbe = useRef(0);
 
@@ -267,6 +267,8 @@ export function SystemView() {
     return Math.round((services.filter((s) => s.online).length / services.length) * 100);
   }, [services]);
 
+  const onlineDevices = useMemo(() => devices.filter((d) => d.online).length, [devices]);
+
   async function doUpgradeTool(tool: AiToolStatus) {
     if (!tool.can_upgrade) return;
     setUpgradingTool(tool.id);
@@ -285,13 +287,15 @@ export function SystemView() {
   async function addRemote() {
     if (!ssh.host.trim()) return;
     setSshBusy(true);
+    setSshError("");
     try {
       await addSshDevice({ ...ssh, port: 22, enabled: true });
       await probeSshDevices();
       setSsh({ name: "", host: "", user: "" });
+      setShowAddDevice(false);
       await load();
     } catch (err) {
-      setError(String(err));
+      setSshError(String(err));
     } finally {
       setSshBusy(false);
     }
@@ -324,95 +328,103 @@ export function SystemView() {
 
   if (error && !data) return <div className="error">{error}</div>;
 
+  const scoreTone = data ? (data.score >= 85 ? "good" : data.score >= 65 ? "warn" : "bad") : "good";
+
   return (
-    <div>
+    <div className="system-view">
       <div className="page-head">
         <div>
           <div className="kicker">SystemGuard</div>
           <h1>系统与设备</h1>
-          <p>系统状态和设备健康已合并：先看本机资源、服务与 AI 开发工具，再看本机/远端 Mac 的健康卡。远端设备可通过 SSH 授权后直接采集只读摘要。</p>
-          {data ? (
-            <div className="risk-strip-inline">
-              {data.risks.slice(0, 4).map((risk) => (
-                <span className={levelClass(risk.level)} key={`${risk.title}-${risk.advice}`}>
-                  <b>{risk.level}</b>{risk.title} · {risk.advice}
-                </span>
-              ))}
-            </div>
-          ) : null}
+          <p>先看本机资源与服务，再看所有 Mac 的健康卡。远端设备通过 SSH 只读采集健康摘要。</p>
         </div>
         <button className="btn primary" onClick={load} disabled={loading}>{loading ? "刷新中" : "立即刷新"}</button>
       </div>
 
       {!data ? <PageSkeleton head={false} cards={4} /> : (
         <>
-          <div className="sys-modules">
-            <article className="sys-score">
-              <span>整体健康度</span>
-              <b>{data.score}</b>
-              <small>服务可用率 {serviceHealth}% · 更新 {fmtTime(data.generated_at)}</small>
-            </article>
-            {data.modules.map((module, index) => <ModuleCard module={module} index={index} key={module.id} />)}
+          <section className={`sys-hero card ${scoreTone}`}>
+            <div className="sys-hero-score">
+              <div className="sys-hero-ring">
+                <Ring pct={data.score} tone={scoreTone} size={84} />
+                <b>{data.score}</b>
+              </div>
+              <div>
+                <span className="sys-hero-label">整体健康度</span>
+                <p>服务可用率 {serviceHealth}% · 设备在线 {onlineDevices}/{devices.length || 1} · 更新 {fmtTime(data.generated_at)}</p>
+              </div>
+            </div>
+            <div className="sys-hero-risks">
+              {data.risks.length === 0 ? <span className="risk-chip good"><b>健康</b>系统状态整体正常，继续保持。</span> :
+                data.risks.slice(0, 3).map((risk) => (
+                  <span className={`risk-chip ${levelClass(risk.level)}`} key={`${risk.title}-${risk.advice}`} title={risk.advice}>
+                    <b>{risk.level}</b>{risk.title} · {risk.advice}
+                  </span>
+                ))}
+            </div>
+          </section>
+
+          <div className="sys-metric-grid">
+            {data.modules.map((module, index) => <MetricCard module={module} index={index} key={module.id} />)}
           </div>
 
-          <div className="panel-title" style={{ marginTop: 24 }}>设备健康 / SSH 远端</div>
-          <div className="ssh-add-card card">
-            <div>
-              <b>添加远程机器</b>
-              <span>先在目标机器授权本机 SSH key，然后填 host/user。只读取 CPU、磁盘、健康摘要。</span>
-            </div>
-            <input placeholder="名称" value={ssh.name} onChange={(e) => setSsh({ ...ssh, name: e.target.value })} />
-            <input placeholder="host / IP" value={ssh.host} onChange={(e) => setSsh({ ...ssh, host: e.target.value })} />
-            <input placeholder="user" value={ssh.user} onChange={(e) => setSsh({ ...ssh, user: e.target.value })} />
-            <button className="btn sm primary" onClick={addRemote} disabled={sshBusy || !ssh.host.trim()}>{sshBusy ? "连接中" : "添加并探测"}</button>
-            <button className="btn sm ghost" onClick={refreshDevices} disabled={sshBusy}>刷新设备</button>
-          </div>
+          <SectionHead
+            title="设备健康"
+            desc="每台 Mac 只上报健康摘要，不读取文件内容。"
+            meta={`${onlineDevices}/${devices.length} 在线`}
+          >
+            <button className="btn sm ghost" onClick={refreshDevices} disabled={sshBusy}>{sshBusy ? "探测中" : "重新探测"}</button>
+            <button className="btn sm primary" onClick={() => setShowAddDevice(true)}>添加设备</button>
+          </SectionHead>
           <div className="device-grid compact">
             {devices.map((device) => <DeviceCard device={device} key={device.device_id} />)}
             {devices.length === 0 ? <div className="empty">暂无设备心跳。</div> : null}
           </div>
 
-          <div className="panel-title" style={{ marginTop: 24 }}>设备管家 / Burrow 能力</div>
-          <section className="ops-panel card">
-            <div className="ops-panel-head">
-              <div>
-                <b>清理、卸载、优化、磁盘分析都先走安全预览</b>
-                <span>吸收 Burrow/Mole 的能力：只读状态、dry-run 清理、项目垃圾扫描、安装包扫描和应用列表。真实删除不会在这里自动执行。</span>
-              </div>
-              <em>{deviceOps ? `${deviceOps.summary.ready}/${deviceOps.summary.targets} 就绪` : "检测中"}</em>
-            </div>
-            <div className="ops-grid">
-              {(deviceOps?.targets || []).map((target) => (
-                <DeviceOpsCard target={target} onPreview={runOpsPreview} busy={opsBusy} key={target.target_id} />
-              ))}
-            </div>
-            {opsResult ? (
-              <div className={`ops-result ${opsResult.ok ? "ok" : "bad"}`}>
-                <div>
-                  <b>{opsResult.action} · {opsResult.ok ? "预览完成" : "预览失败"}</b>
-                  <span>{opsResult.command || opsResult.install_hint || opsResult.error}</span>
-                </div>
-                {opsResult.summary?.estimated_gb ? <strong>约 {opsResult.summary.estimated_gb} GB</strong> : null}
-                <pre>{opsResult.summary?.highlights?.join("\n") || opsResult.summary?.raw || opsResult.error || "暂无输出"}</pre>
-              </div>
-            ) : null}
-          </section>
-
-          <div className="panel-title" style={{ marginTop: 24 }}>本地服务状态</div>
+          <SectionHead
+            title="本地服务"
+            desc="配置服务 + 自动发现的本机监听服务。点击查看详情。"
+            meta={`${services.filter((s) => s.online).length}/${services.length} 在线`}
+          />
           <div className="sys-service-grid">
             {services.length === 0 ? <div className="empty">暂无本地服务配置。</div> :
-              services.map((s) => <ServiceTile service={s} onOpen={setActiveService} key={`${s.name}:${s.port}`} />)}
+              services.map((s) => (
+                <button className={`sys-service ${s.online ? "good" : "bad"}`} onClick={() => setActiveService(s)} key={`${s.name}:${s.port}`}>
+                  <span className="dot" />
+                  <div>
+                    <b>{s.name}</b>
+                    <small>{s.desc || "本地服务"} · :{s.port}</small>
+                  </div>
+                  <em>{s.online ? "在线" : "离线"}</em>
+                </button>
+              ))}
           </div>
 
-          <div className="panel-title" style={{ marginTop: 24 }}>本地 AI 开发工具</div>
+          <SectionHead
+            title="AI 开发工具"
+            desc="常用 AI CLI 的安装、运行与版本状态，点击可一键升级。"
+            meta={data.ai_tools.length ? `${data.ai_tools.filter((t) => t.installed).length}/${data.ai_tools.length} 已安装` : undefined}
+          />
           <div className="sys-tool-grid">
-            {data.ai_tools.map((tool) => <ToolCard tool={tool} onOpen={setActiveTool} key={tool.id} />)}
+            {data.ai_tools.map((tool) => (
+              <button className={`sys-tool ${tool.installed ? "installed" : "missing"}`} onClick={() => setActiveTool(tool)} key={tool.id}>
+                <span className="dot" />
+                <div className="sys-tool-main">
+                  <b>{tool.name}</b>
+                  <em>{tool.installed ? (tool.running ? "运行中" : "已安装") : "未安装"}</em>
+                </div>
+                <div className="sys-tool-meta">
+                  <span>{shortVersion(tool.current_version)}</span>
+                  <span>{tool.update_state}</span>
+                </div>
+              </button>
+            ))}
           </div>
 
-          <div className="panel-title" style={{ marginTop: 24 }}>
-            本机编程 / CLI 工具链
-            {devTools ? <span className="tag" style={{ marginLeft: 10 }}>{devTools.summary.installed}/{devTools.summary.total} 已安装</span> : null}
-          </div>
+          <SectionHead
+            title="编程 / CLI 工具链"
+            meta={devTools ? `${devTools.summary.installed}/${devTools.summary.total} 已安装` : "检测中"}
+          />
           {!devTools ? <div className="empty">检测中…</div> : (
             <div className="devtool-cats">
               {Object.entries(devTools.categories).map(([cat, tools]) => (
@@ -432,9 +444,32 @@ export function SystemView() {
             </div>
           )}
 
-          <div className="system-bottom-grid">
-            <section className="card">
-              <div className="panel-title">资源占用排行</div>
+          <div className="sys-bottom-grid">
+            <section className="card sys-bottom-panel">
+              <SectionHead
+                title="设备管家"
+                desc="Burrow/Mole 能力：清理、优化、扫描全部先走安全预览，不直接执行删除。"
+                meta={deviceOps ? `${deviceOps.summary.ready}/${deviceOps.summary.targets} 就绪` : "检测中"}
+              />
+              <div className="ops-grid">
+                {(deviceOps?.targets || []).map((target) => (
+                  <DeviceOpsCard target={target} onPreview={runOpsPreview} busy={opsBusy} key={target.target_id} />
+                ))}
+              </div>
+              {opsResult ? (
+                <div className={`ops-result ${opsResult.ok ? "ok" : "bad"}`}>
+                  <div>
+                    <b>{opsResult.action} · {opsResult.ok ? "预览完成" : "预览失败"}</b>
+                    <span>{opsResult.command || opsResult.install_hint || opsResult.error}</span>
+                  </div>
+                  {opsResult.summary?.estimated_gb ? <strong>约 {opsResult.summary.estimated_gb} GB</strong> : null}
+                  <pre>{opsResult.summary?.highlights?.join("\n") || opsResult.summary?.raw || opsResult.error || "暂无输出"}</pre>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="card sys-bottom-panel">
+              <SectionHead title="资源占用排行" desc="按 CPU 排序的高占用进程。" />
               <div className="process-list">
                 {data.processes.map((proc) => (
                   <div className="process-row" key={`${proc.pid}-${proc.command}`}>
@@ -446,12 +481,24 @@ export function SystemView() {
               </div>
             </section>
           </div>
+
           <details className="raw-details raw-compact">
             <summary>高级详情：查看原始命令输出</summary>
             <pre className="toolResult">{data.raw || "暂无原始输出"}</pre>
           </details>
         </>
       )}
+
+      <Modal open={showAddDevice} onClose={() => { setShowAddDevice(false); setSshError(""); }} kicker="SSH 设备" title="添加远程机器"
+        footer={<button className="btn sm primary" onClick={addRemote} disabled={sshBusy || !ssh.host.trim()}>{sshBusy ? "连接中…" : "添加并探测"}</button>}>
+        <div className="modal-form">
+          <p className="modal-note">先在目标机授权本机 SSH 公钥（ssh-copy-id user@host），LeoJarvis 只读取 CPU、内存、磁盘和服务摘要，不读文件内容。</p>
+          <label><span>名称</span><input placeholder="例如 Mac Studio" value={ssh.name} onChange={(e) => setSsh({ ...ssh, name: e.target.value })} /></label>
+          <label><span>Host / IP</span><input placeholder="192.168.1.10 或 Tailscale IP" value={ssh.host} onChange={(e) => setSsh({ ...ssh, host: e.target.value })} /></label>
+          <label><span>用户名</span><input placeholder="user" value={ssh.user} onChange={(e) => setSsh({ ...ssh, user: e.target.value })} /></label>
+          {sshError ? <div className="error">{sshError}</div> : null}
+        </div>
+      </Modal>
 
       <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker="编程 / Agent 工具" title={activeTool?.name}
         footer={activeTool?.can_upgrade ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>

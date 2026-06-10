@@ -8,157 +8,25 @@ from typing import Any
 
 from . import db, user_settings
 
-# Probe script executed on the remote host via `ssh <target> python3 -` (piped on
-# stdin, so there are no shell-quoting problems with spaces/newlines). It is
-# cross-platform (Linux + macOS) and best-effort: every probe is wrapped so a
-# missing tool never aborts the whole readout. It returns a rich health summary —
-# CPU, RAM, disk, uptime, OS, common service ports and top processes — but never
-# file contents.
-_REMOTE_SCRIPT = r'''
-import json, os, platform, shutil, socket, subprocess, time
-
-def run(cmd):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout.strip()
-    except Exception:
-        return ""
-
-host = socket.gethostname().split('.')[0]
-system = platform.system()  # 'Linux' / 'Darwin'
-
-# ---- CPU load ----
-try:
-    l1, l5, l15 = os.getloadavg()
-except Exception:
-    l1 = l5 = l15 = 0.0
-cores = os.cpu_count() or 1
-load_pct = round(l1 / max(1, cores) * 100, 1)
-
-# ---- Disk ----
-total, used, free = shutil.disk_usage('/')
-disk_pct = round(used / total * 100, 1)
-
-# ---- Memory (cross-platform, best-effort) ----
-ram_total = ram_used = 0.0
-ram_pct = None
-try:
-    if system == 'Linux':
-        info = {}
-        for line in open('/proc/meminfo'):
-            k, _, v = line.partition(':')
-            info[k.strip()] = float(v.strip().split()[0]) * 1024  # kB -> bytes
-        ram_total = info.get('MemTotal', 0)
-        avail = info.get('MemAvailable', info.get('MemFree', 0))
-        ram_used = max(0.0, ram_total - avail)
-    elif system == 'Darwin':
-        ram_total = float(run(['sysctl', '-n', 'hw.memsize']) or 0)
-        page = 4096
-        vm = run(['vm_stat'])
-        free_pages = spec_pages = 0
-        for line in vm.splitlines():
-            if 'page size of' in line:
-                m = [int(s) for s in line.split() if s.isdigit()]
-                if m:
-                    page = m[0]
-            if line.startswith('Pages free') or line.startswith('Pages speculative'):
-                spec_pages += int(''.join(ch for ch in line.split(':')[1] if ch.isdigit()) or 0)
-        free_bytes = spec_pages * page
-        ram_used = max(0.0, ram_total - free_bytes)
-    if ram_total > 0:
-        ram_pct = round(ram_used / ram_total * 100, 1)
-except Exception:
-    pass
-
-# ---- Uptime ----
-uptime_h = None
-try:
-    if system == 'Linux':
-        uptime_h = round(float(open('/proc/uptime').read().split()[0]) / 3600, 1)
-    elif system == 'Darwin':
-        bt = run(['sysctl', '-n', 'kern.boottime'])
-        import re as _re
-        m = _re.search(r'sec\s*=\s*(\d+)', bt)
-        if m:
-            uptime_h = round((time.time() - int(m.group(1))) / 3600, 1)
-except Exception:
-    pass
-
-# ---- Common service ports ----
-PORTS = {'ssh': 22, 'http': 80, 'https': 443, 'leojarvis': 8787, 'ollama': 11434, 'web': 3000, 'api': 8080}
-svc_online = 0
-svc_detail = {}
-for name, port in PORTS.items():
-    ok = False
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.6)
-            ok = s.connect_ex(('127.0.0.1', port)) == 0
-    except Exception:
-        ok = False
-    svc_detail[name] = ok
-    if ok:
-        svc_online += 1
-
-# ---- Top processes (by CPU) ----
-top = []
-try:
-    out = run(['ps', '-axo', 'pid,pcpu,pmem,comm'])
-    rows = [r.split(None, 3) for r in out.splitlines()[1:] if r.strip()]
-    rows = [r for r in rows if len(r) >= 4]
-    rows.sort(key=lambda r: float(r[1]) if r[1].replace('.', '', 1).isdigit() else 0, reverse=True)
-    for r in rows[:5]:
-        top.append({'pid': r[0], 'cpu': r[1], 'mem': r[2], 'command': os.path.basename(r[3])[:40]})
-except Exception:
-    pass
-
-# ---- Health + risks ----
-health = 100
-risks = []
-if disk_pct >= 92:
-    health -= 24; risks.append({'title': '磁盘空间紧张', 'advice': '清理缓存、下载和大型项目。', 'level': '异常'})
-elif disk_pct >= 82:
-    health -= 10; risks.append({'title': '磁盘接近高水位', 'advice': '建议保持 20% 以上空闲空间。', 'level': '注意'})
-if load_pct >= 120:
-    health -= 18; risks.append({'title': 'CPU 负载偏高', 'advice': '检查构建任务或高占用进程。', 'level': '异常'})
-elif load_pct >= 80:
-    health -= 8; risks.append({'title': 'CPU 负载需观察', 'advice': '如持续偏高，查看 top 进程。', 'level': '注意'})
-if ram_pct is not None and ram_pct >= 90:
-    health -= 12; risks.append({'title': '内存吃紧', 'advice': '关闭占用内存较大的进程。', 'level': '注意'})
-
-print(json.dumps({
-    'device_id': 'ssh-' + host,
-    'device_name': host,
-    'host_name': host,
-    'model': platform.machine(),
-    'role': 'ssh',
-    'os': platform.platform(),
-    'generated_at': int(time.time()),
-    'last_seen_ts': int(time.time()),
-    'health': max(0, health),
-    'status': '异常' if any(r['level'] == '异常' for r in risks) else '注意' if risks else '健康',
-    'metrics': {
-        'cpu_load': round(l1, 2), 'cpu_load_pct': load_pct, 'cpu_cores': cores,
-        'ssd_used_pct': disk_pct, 'ssd_free_gb': round(free / (1024**3), 1),
-        'ram_total_gb': round(ram_total / (1024**3), 1) if ram_total else None,
-        'ram_used_gb': round(ram_used / (1024**3), 1) if ram_total else None,
-        'ram_used_pct': ram_pct,
-        'uptime_hours': uptime_h,
-    },
-    'modules': {
-        'top_processes': top,
-        'services_detail': svc_detail,
-        'os': {'value': platform.platform()[:60], 'level': '健康'},
-    },
-    'services': {'online': svc_online, 'total': len(PORTS)},
-    'risks': risks,
-    'privacy': '通过 SSH 只采集设备健康摘要与端口连通性，不读取文件内容。'
-}, ensure_ascii=False))
-'''
+# 远端探测脚本统一放在 mobile_bridge._REMOTE_SCRIPT（功能更全：服务明细、CLI 工具、
+# 进程摘要），通过 `ssh <target> python3 -` 从 stdin 注入执行，避免引号问题。
+# 本模块负责：设备配置 CRUD、SSH 执行、错误翻译、统一 device_id（ssh-{id}）。
 
 
 def configured_hosts() -> list[dict[str, Any]]:
     rows = user_settings.load().get("remote_devices", [])
     return [r for r in rows if isinstance(r, dict)]
+
+
+def device_id_for(row: dict[str, Any]) -> str:
+    """统一的设备心跳 ID：ssh-{配置 id}。
+
+    历史上 remote_status 写 ssh-{id} 而 mobile_bridge 写裸 {id}，同一台机器在
+    设备页出现两张卡（其中一张永远停在旧时间戳显示离线）。所有写入必须走这里。
+    """
+    raw = str(row.get("id") or row.get("host") or row.get("name") or "host")
+    raw = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw)[:80] or "host"
+    return raw if raw.startswith("ssh-") else f"ssh-{raw}"
 
 
 def _clean_options(value: Any) -> list[str]:
@@ -205,8 +73,16 @@ def add_host(*, host: str, name: str = "", user: str = "", port: int = 22, enabl
 
 
 def remove_host(host_id: str) -> dict[str, Any]:
+    removed = [r for r in configured_hosts() if r.get("id") == host_id]
     rows = [r for r in configured_hosts() if r.get("id") != host_id]
     save_hosts(rows)
+    # 同步清掉设备库里的心跳，避免删除后的设备以「离线」幽灵卡片残留。
+    for row in removed:
+        try:
+            db.delete_device_heartbeat(device_id_for(row))
+            db.delete_device_heartbeat(str(row.get("id") or ""))
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -216,10 +92,34 @@ def _target(row: dict[str, Any]) -> str:
     return f"{user}@{host}" if user else host
 
 
-def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
-    target = _target(row)
-    # Pipe the probe script on stdin (python3 -), so spaces/newlines in the
-    # script are never re-split by the remote shell.
+def classify_probe_error(raw: str, row: dict[str, Any] | None = None) -> str:
+    """SSH 探测失败时给出能直接行动的提示，而不是原始 stderr。"""
+    text = (raw or "").strip()
+    low = text.lower()
+    host = str((row or {}).get("host") or "目标机")
+    if not text:
+        return "SSH 探测失败（无输出）。先在终端验证 ssh 免密登录。"
+    if "operation timed out" in low or "timed out" in low:
+        return (f"连接 {host} 超时：目标机可能关机/睡眠，或当前网络到它的直连路径不可达"
+                f"（Tailscale IP 需两端都在线）。可在设备配置里加 ProxyCommand 走中转。")
+    if "permission denied" in low and "publickey" in low:
+        return f"{host} 拒绝了本机公钥：运行 ssh-copy-id 重新授权后再试。"
+    if "host key verification failed" in low:
+        return f"{host} 的 host key 已变化：运行 ssh-keygen -R {host} 清除旧记录。"
+    if "could not resolve hostname" in low:
+        return f"无法解析 {host}：检查主机名拼写或 DNS。"
+    if "connection refused" in low:
+        return f"{host} 的 SSH 端口拒绝连接：确认远端 sshd 在运行、端口正确。"
+    if "batchmode" in low or ("password" in low and "denied" in low):
+        return f"{host} 要求密码登录：LeoJarvis 只用公钥免密，请先 ssh-copy-id 授权。"
+    if "websocket" in low and ("401" in low or "403" in low or "unauthorized" in low):
+        return f"Cloudflare Access 凭证过期：在终端 ssh 一次 {host} 重新走浏览器授权。"
+    if "python3" in low and ("not found" in low or "command not found" in low):
+        return f"{host} 上没有 python3：健康探测需要目标机安装 python3。"
+    return text[:240]
+
+
+def _ssh_command(row: dict[str, Any]) -> list[str]:
     cmd = [
         "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
         "-o", "StrictHostKeyChecking=accept-new",
@@ -229,37 +129,57 @@ def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
         cmd += ["-o", f"ProxyCommand={proxy}"]
     for opt in _clean_options(row.get("ssh_options")):
         cmd += ["-o", opt]
-    cmd += ["-p", str(int(row.get("port") or 22)), target, "python3", "-"]
+    cmd += ["-p", str(int(row.get("port") or 22)), _target(row), "python3", "-"]
+    return cmd
+
+
+def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
+    target = _target(row)
+    device_id = device_id_for(row)
     try:
         from .mobile_bridge import _REMOTE_SCRIPT as rich_remote_script
 
-        out = subprocess.run(cmd, input=rich_remote_script, capture_output=True, text=True, timeout=timeout)
+        out = subprocess.run(_ssh_command(row), input=rich_remote_script,
+                             capture_output=True, text=True, timeout=timeout)
         if out.returncode != 0:
             raise RuntimeError((out.stderr or out.stdout or "ssh failed").strip()[:240])
         data = json.loads(out.stdout.strip().splitlines()[-1])
-        data["device_id"] = f"ssh-{row.get('id') or data.get('host_name')}"
+        data["device_id"] = device_id
+        data["host_id"] = device_id
+        # 远端 gethostname 用于和远控通道（remote_cortex）按机器合并去重。
+        data["reported_hostname"] = str(data.get("host_name") or "").split(".")[0]
         data["device_name"] = str(row.get("name") or data.get("device_name") or target)
+        data["host_name"] = str(row.get("host") or data.get("host_name") or "")
+        data["role"] = "ssh"
         db.upsert_device_heartbeat(data)
         return {"ok": True, "device": data}
+    except subprocess.TimeoutExpired:
+        return _probe_failure(row, device_id, f"连接 {row.get('host')} 超时（{timeout}s）")
     except Exception as exc:
-        now = int(time.time())
-        device = {
-            "device_id": f"ssh-{row.get('id') or row.get('host')}",
-            "device_name": str(row.get("name") or row.get("host") or "SSH 设备"),
-            "host_name": str(row.get("host") or ""),
-            "role": "ssh",
-            "generated_at": now,
-            "last_seen_ts": 0,
-            "health": 0,
-            "status": "离线",
-            "metrics": {},
-            "modules": {},
-            "services": {"online": 0, "total": 0},
-            "risks": [{"title": "SSH 未连接", "advice": str(exc)[:180], "level": "异常"}],
-            "privacy": "SSH 探测失败，未采集远端数据。",
-        }
-        db.upsert_device_heartbeat(device)
-        return {"ok": False, "device": device, "error": str(exc)[:240]}
+        return _probe_failure(row, device_id, str(exc))
+
+
+def _probe_failure(row: dict[str, Any], device_id: str, raw_error: str) -> dict[str, Any]:
+    advice = classify_probe_error(raw_error, row)
+    now = int(time.time())
+    device = {
+        "device_id": device_id,
+        "host_id": device_id,
+        "device_name": str(row.get("name") or row.get("host") or "SSH 设备"),
+        "host_name": str(row.get("host") or ""),
+        "role": "ssh",
+        "generated_at": now,
+        "last_seen_ts": 0,
+        "health": 0,
+        "status": "离线",
+        "metrics": {},
+        "modules": {},
+        "services": {"online": 0, "total": 0},
+        "risks": [{"title": "SSH 未连接", "advice": advice[:200], "level": "异常"}],
+        "privacy": "SSH 探测失败，未采集远端数据。",
+    }
+    db.upsert_device_heartbeat(device)
+    return {"ok": False, "device": device, "error": advice[:240]}
 
 
 def probe_all() -> dict[str, Any]:

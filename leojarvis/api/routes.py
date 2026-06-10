@@ -399,7 +399,10 @@ def _apply_remote_device_states(rows: list[dict], connections: list[dict], *, no
     by_id = {str(row.get("device_id") or ""): row for row in rows}
     remote_by_id = {str(conn.get("id") or ""): conn for conn in connections if conn.get("enabled", True)}
     for row in rows:
-        age = max(0, now - int(row.get("last_seen_ts") or row.get("generated_at") or now))
+        # last_seen_ts=0 表示「从未成功采集」（如 SSH 探测失败），不能回退到
+        # generated_at，否则失败心跳会被当成刚刚在线。
+        last_seen = int(row.get("last_seen_ts") or 0)
+        age = max(0, now - last_seen) if last_seen else now
         row["age_seconds"] = age
         device_id = str(row.get("device_id") or "")
         remote_conn = remote_by_id.get(device_id)
@@ -470,8 +473,110 @@ def devices(limit: int = 50) -> list[dict]:
             _device_refreshing = True
             _threading.Thread(target=_refresh_remote_device_summaries, daemon=True).start()
     rows = db.list_device_heartbeats(limit=limit)
+    rows = _purge_ghost_devices(rows, local_id=str(local.get("device_id") or ""), connections=connections)
     rows = _apply_remote_device_states(rows, connections, now=now)
+    rows = _merge_remote_control_channels(rows, connections)
     return sorted(rows, key=lambda r: (not r.get("online"), -(float(r.get("health") or 0)), -int(r.get("last_seen_ts") or 0)))
+
+
+def _hostname_key(row: dict) -> str:
+    raw = str(row.get("reported_hostname") or row.get("host_name") or "")
+    return raw.split(".")[0].strip().lower()
+
+
+def _merge_remote_control_channels(rows: list[dict], connections: list[dict]) -> list[dict]:
+    """同一台物理机器的「SSH 健康卡」和「远控通道卡」合并成一张。
+
+    Mac Studio 既被 SSH 健康监控（ssh-mac-studio）又是远控实例（rc-*），
+    分开显示让用户以为有两台机器、其中一台永远连不上。按远端上报的
+    hostname 配对（配对结果持久化到连接配置），远控状态变成设备卡上的
+    一个通道徽标；直连 SSH 不可达但远控隧道在线时，设备显示在线并标注。
+    """
+    from .. import remote_cortex
+
+    physical = [r for r in rows if r.get("role") != "remote-leojarvis"]
+    channels = [r for r in rows if r.get("role") == "remote-leojarvis"]
+    conn_by_id = {str(c.get("id") or ""): c for c in connections}
+    out = list(physical)
+    for ch in channels:
+        ch_id = str(ch.get("device_id") or "")
+        conn = conn_by_id.get(ch_id, {})
+        linked_id = str(conn.get("linked_device_id") or "")
+        target = next((p for p in physical if linked_id and str(p.get("device_id")) == linked_id), None)
+        if target is None:
+            key = _hostname_key(ch)
+            target = next((p for p in physical if key and _hostname_key(p) == key), None)
+            if target is not None and ch_id:
+                try:
+                    remote_cortex.set_link(ch_id, str(target.get("device_id") or ""))
+                except Exception:
+                    pass
+        if target is None:
+            out.append(ch)
+            continue
+        channel_online = bool(ch.get("online"))
+        target["remote_control"] = {
+            "id": ch_id,
+            "name": ch.get("device_name"),
+            "connected": channel_online,
+            "error": "" if channel_online else str((conn.get("last_error") or "未连接"))[:160],
+        }
+        if not target.get("online") and channel_online:
+            # 直连 SSH 不可达，但远控隧道活着：用通道遥测点亮设备卡。
+            target["online"] = True
+            target["status"] = ch.get("status") or "健康"
+            target["health"] = max(float(target.get("health") or 0), float(ch.get("health") or 0))
+            if ch.get("metrics"):
+                target["metrics"] = ch["metrics"]
+            if ch.get("services"):
+                target["services"] = ch["services"]
+            if ch.get("last_seen_ts"):
+                target["last_seen_ts"] = ch["last_seen_ts"]
+                target["age_seconds"] = max(0, int(time.time()) - int(ch["last_seen_ts"]))
+            risks = [r for r in (target.get("risks") or []) if r.get("title") != "SSH 未连接"]
+            risks.insert(0, {
+                "title": "直连 SSH 不可达，已走远控通道",
+                "advice": "Tailscale/直连路径当前不通；设备数据来自 SSH 隧道遥测。",
+                "level": "注意",
+            })
+            target["risks"] = risks[:4]
+    return out
+
+
+def _purge_ghost_devices(rows: list[dict], *, local_id: str, connections: list[dict]) -> list[dict]:
+    """只保留「本机 + 已配置 SSH 设备 + 已配置远程 LeoJarvis」的心跳。
+
+    设备 ID 体系迁移（裸 id → ssh-{id}）和删除主机都会留下旧心跳行，它们的
+    last_seen 永远不再更新，在设备页上变成一排「离线」幽灵卡。这里按当前配置
+    过滤，并把数据库里的孤儿行直接删掉。
+    """
+    from .. import remote_status
+
+    allowed: set[str] = {local_id}
+    for host in remote_status.configured_hosts():
+        allowed.add(remote_status.device_id_for(host))
+    for conn in connections:
+        cid = str(conn.get("id") or "")
+        if cid:
+            allowed.add(cid)
+    kept: list[dict] = []
+    for row in rows:
+        device_id = str(row.get("device_id") or "")
+        if device_id in allowed:
+            kept.append(row)
+            continue
+        # 其它 LeoJarvis 实例主动上报的心跳（role=mac，POST /devices/heartbeat）
+        # 不在本机配置里，按新鲜度保留：7 天内见过就显示，过期才清。
+        role = str(row.get("role") or "")
+        last_seen = int(row.get("last_seen_ts") or 0)
+        if role not in {"ssh", "remote-leojarvis"} and last_seen and time.time() - last_seen < 7 * 86400:
+            kept.append(row)
+            continue
+        try:
+            db.delete_device_heartbeat(device_id)
+        except Exception:
+            pass
+    return kept
 
 
 # ---------- Agent 中枢 ----------

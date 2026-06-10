@@ -276,6 +276,8 @@ if ram_pct is not None and ram_pct >= 90:
 
 svc_online = sum(1 for s in service_items if s.get('is_running'))
 print(json.dumps({
+    'host_name': host,
+    'device_name': host,
     'generated_at': int(time.time()),
     'last_seen_ts': int(time.time()),
     'health': max(0, health),
@@ -358,8 +360,11 @@ def _address(row: dict[str, Any]) -> str:
 
 
 def _host_id(row: dict[str, Any]) -> str:
-    raw = str(row.get("id") or row.get("host") or row.get("name") or "")
-    return re.sub(r"[^A-Za-z0-9_.-]+", "-", raw)[:80] or "host"
+    # 与 remote_status.device_id_for 保持同一套 ID（ssh-{id}），否则同一台机器
+    # 会在设备库里出现两条心跳，其中一条永远停在旧时间戳显示「离线」。
+    from . import remote_status
+
+    return remote_status.device_id_for(row)
 
 
 def _host_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -374,72 +379,15 @@ def _host_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ssh_command(row: dict[str, Any]) -> list[str]:
-    cmd = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ServerAliveInterval=5",
-        "-o", "ServerAliveCountMax=1",
-    ]
-    proxy = str(row.get("proxy_command") or "").strip()
-    if proxy:
-        cmd += ["-o", f"ProxyCommand={proxy}"]
-    for opt in _clean_options(row.get("ssh_options")):
-        cmd += ["-o", opt]
-    cmd += ["-p", str(int(row.get("port") or 22)), _target(row), "python3", "-"]
-    return cmd
-
-
-def _failure_device(row: dict[str, Any], error: str) -> dict[str, Any]:
-    now = int(time.time())
-    return {
-        "device_id": _host_id(row),
-        "host_id": _host_id(row),
-        "device_name": str(row.get("name") or row.get("host") or "Mac"),
-        "host_name": str(row.get("host") or ""),
-        "address": _address(row),
-        "role": "ssh",
-        "generated_at": now,
-        "last_seen_ts": 0,
-        "health": 0,
-        "status": "离线",
-        "os": "-",
-        "model": "-",
-        "metrics": {},
-        "modules": {"top_processes": [], "cli_tools": []},
-        "services": {"online": 0, "total": 0, "items": []},
-        "risks": [{"title": "SSH 未连接", "advice": error[:180], "level": "异常"}],
-        "privacy": "Mac mini Bridge 无法连接此主机，未采集远端数据。",
-    }
-
-
 def _probe_host(row: dict[str, Any], timeout: int = 15) -> dict[str, Any]:
-    try:
-        out = subprocess.run(
-            _ssh_command(row),
-            input=_REMOTE_SCRIPT,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if out.returncode != 0:
-            message = (out.stderr or out.stdout or "ssh failed").strip()
-            raise RuntimeError(message[:240])
-        data = json.loads(out.stdout.strip().splitlines()[-1])
-        data["device_id"] = _host_id(row)
-        data["host_id"] = _host_id(row)
-        data["device_name"] = str(row.get("name") or data.get("device_name") or row.get("host") or "Mac")
-        data["host_name"] = str(row.get("host") or data.get("host_name") or "")
-        data["role"] = "ssh"
-        data["address"] = _address(row)
-        db.upsert_device_heartbeat(data)
-        return {"ok": True, "device": data}
-    except Exception as exc:  # noqa: BLE001
-        device = _failure_device(row, str(exc))
-        db.upsert_device_heartbeat(device)
-        return {"ok": False, "device": device, "error": str(exc)[:240]}
+    # 复用 remote_status.probe：同一套 SSH 执行、错误翻译和 ssh-{id} 心跳写入。
+    from . import remote_status
+
+    result = remote_status.probe(row, timeout=timeout)
+    device = result.get("device")
+    if isinstance(device, dict):
+        device.setdefault("address", _address(row))
+    return result
 
 
 def _probe_all() -> list[dict[str, Any]]:
