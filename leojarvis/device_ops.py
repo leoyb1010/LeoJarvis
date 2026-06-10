@@ -13,6 +13,21 @@ from . import remote_status
 
 
 SAFE_ACTIONS = {"status", "clean", "optimize", "purge", "installers", "analyze", "apps"}
+MO_CANDIDATES = (
+    "/opt/homebrew/bin/mo",
+    "/usr/local/bin/mo",
+    "$HOME/.cargo/bin/mo",
+    "mo",
+    "/opt/homebrew/bin/mole",
+    "/usr/local/bin/mole",
+    "$HOME/.cargo/bin/mole",
+    "mole",
+)
+BREW_CANDIDATES = (
+    "/opt/homebrew/bin/brew",
+    "/usr/local/bin/brew",
+    "brew",
+)
 
 
 def _run(cmd: list[str], *, input_text: str | None = None, timeout: float = 20) -> dict[str, Any]:
@@ -45,10 +60,32 @@ def _run(cmd: list[str], *, input_text: str | None = None, timeout: float = 20) 
 
 
 def _mo_path() -> str | None:
-    for candidate in ("/opt/homebrew/bin/mo", "/usr/local/bin/mo", "/usr/bin/mo"):
+    for candidate in MO_CANDIDATES:
+        if candidate.startswith("$HOME/"):
+            candidate = os.path.expandvars(candidate)
         if os.path.exists(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    return shutil.which("mo")
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def _remote_find_binary_shell(var_name: str, candidates: tuple[str, ...]) -> str:
+    checks = " ".join(sh_quote(item) for item in candidates)
+    return (
+        f"{var_name}=''; "
+        f"for p in {checks}; do "
+        "eval p=\"$p\"; "
+        "if [ -x \"$p\" ]; then "
+        f"{var_name}=\"$p\"; break; "
+        "fi; "
+        "found=$(command -v \"$p\" 2>/dev/null || true); "
+        "if [ -n \"$found\" ]; then "
+        f"{var_name}=\"$found\"; break; "
+        "fi; "
+        "done"
+    )
 
 
 def _parse_json(text: str) -> Any:
@@ -247,17 +284,25 @@ def _ssh_prefix(row: dict[str, Any]) -> list[str]:
 
 def remote_status_row(row: dict[str, Any]) -> dict[str, Any]:
     host_id = str(row.get("id") or row.get("host") or "")
-    script = "command -v mo 2>/dev/null || true; mo --version 2>/dev/null || true; command -v brew 2>/dev/null || true"
+    script = "; ".join([
+        _remote_find_binary_shell("MO_BIN", MO_CANDIDATES),
+        _remote_find_binary_shell("BREW_BIN", BREW_CANDIDATES),
+        '[ -n "$MO_BIN" ] && printf "MO_PATH=%s\\n" "$MO_BIN" || true',
+        '[ -n "$MO_BIN" ] && "$MO_BIN" --version 2>/dev/null | sed -n "1p" || true',
+        '[ -n "$BREW_BIN" ] && printf "BREW_PATH=%s\\n" "$BREW_BIN" || true',
+    ])
     res = _run(_ssh_prefix(row) + [script], timeout=12)
     lines = [line.strip() for line in (res["stdout"] or "").splitlines() if line.strip()]
-    mo_path = lines[0] if lines and lines[0].endswith("/mo") else ""
+    mo_path = ""
     version = ""
     brew_path = ""
-    for line in lines[1 if mo_path else 0:]:
-        if "mole" in line.lower() or re.search(r"\d+\.\d+", line):
+    for line in lines:
+        if line.startswith("MO_PATH="):
+            mo_path = line.partition("=")[2]
+        elif line.startswith("BREW_PATH="):
+            brew_path = line.partition("=")[2]
+        elif "mole" in line.lower() or re.search(r"\d+\.\d+", line):
             version = version or line
-        elif line.endswith("/brew"):
-            brew_path = line
     return {
         "target_id": host_id,
         "target_name": str(row.get("name") or row.get("host") or host_id),
@@ -286,7 +331,7 @@ def fleet_status() -> dict[str, Any]:
     hosts = [row for row in remote_status.configured_hosts() if row.get("enabled", True)]
     with ThreadPoolExecutor(max_workers=min(4, max(1, len(hosts)))) as pool:
         remote = list(pool.map(remote_status_row, hosts)) if hosts else []
-    rows = [local_status(), *remote]
+    rows = remote or [local_status()]
     ready = sum(1 for row in rows if row.get("mole_installed"))
     return {
         "ok": True,
@@ -345,7 +390,11 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
         row = rows.get(target_id)
         if not row:
             return {"ok": False, "target_id": target_id, "action": action, "safe_mode": True, "error": "未知目标主机"}
-        shell = " ".join(["mo", *[sh_quote(part) for part in args]])
+        shell = "; ".join([
+            _remote_find_binary_shell("MO_BIN", MO_CANDIDATES),
+            'if [ -z "$MO_BIN" ]; then echo "Mole CLI 未安装" >&2; exit 127; fi',
+            " ".join(['"$MO_BIN"', *[sh_quote(part) for part in args]]),
+        ])
         res = _run(_ssh_prefix(row) + [shell], timeout=210 if action in {"clean", "purge", "installers", "analyze", "apps"} else 60)
 
     parsed = _parse_json(res["stdout"])
