@@ -23,8 +23,8 @@ import {
   type ReachStatus,
 } from "../../api";
 import { PageSkeleton } from "../Skeleton";
-import { Sparkline } from "../Sparkline";
 import { Modal } from "../Modal";
+import { BriefingSignalDetail, GithubRepoDetail } from "../IntelligenceDetail";
 
 function fmtTime(ts?: number | null) {
   if (!ts) return "今日";
@@ -618,7 +618,7 @@ export function IntelligenceView() {
       </details>
 
       {/* 详情悬浮卡片 */}
-      <Modal open={!!activeSignal} onClose={() => setActiveSignal(null)} kicker={activeSignal?.priority || "情报"} title={activeSignal?.title}
+      <Modal open={!!activeSignal} onClose={() => setActiveSignal(null)} kicker={activeSignal?.priority || "情报"} title={activeSignal?.title} width={1040}
         footer={activeSignal ? (
           <div className="modal-actions">
             <button className="btn sm primary" onClick={() => feedback("important")} disabled={!!feedbackBusy}>{feedbackBusy === "important" ? "提交中" : "重要"}</button>
@@ -627,77 +627,14 @@ export function IntelligenceView() {
           </div>
         ) : null}>
         {activeSignal ? (
-          <div className="modal-rich intel-detail-sheet">
-            <div className="detail-primary">
-              <span>核心摘要</span>
-              <p>{activeSignal.take}</p>
-            </div>
-            {activeSignal.detail ? (
-              <div className="detail-facts">
-                <span>来源事实</span>
-                <p>{activeSignal.detail}</p>
-              </div>
-            ) : null}
-            <div className="detail-compact-grid">
-              <div>
-                <span>判断依据</span>
-                <ul>{evidenceList(activeSignal).map((row, i) => <li key={i}>{row}</li>)}</ul>
-              </div>
-              <div>
-                <span>处理建议</span>
-                <p>{activeSignal.next_step || "阅读原文，判断是否写入个人记事或持续关注。"}</p>
-              </div>
-            </div>
-            {(activeSignal.related_sources?.length ?? 0) > 0 ? (
-              <div className="related-sources">
-                <span>同一事件的其它报道</span>
-                <ul>
-                  {activeSignal.related_sources!.slice(0, 6).map((rel, i) => (
-                    <li key={i}>
-                      {rel.url ? <a href={rel.url} target="_blank" rel="noreferrer">{rel.title || rel.source}</a> : (rel.title || rel.source)}
-                      <em> · {rel.source}</em>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {activeSignal.relation ? <p className="modal-note relation-note">{activeSignal.relation}</p> : null}
-            <div className="modal-meta">
-              <span>{activeSignal.source}</span>
-              <span>{activeSignal.domain_label || "情报"}</span>
-              <span>评分 {activeSignal.score?.toFixed(2)}</span>
-              <span>{fmtTime(activeSignal.ts)}</span>
-            </div>
-            {activeSignal.tags?.length ? <div className="modal-tags">{activeSignal.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
-            {activeSignal.original_title && activeSignal.original_title !== activeSignal.title ? <p className="modal-note">原文：{activeSignal.original_title}</p> : null}
-          </div>
+          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} />
         ) : null}
       </Modal>
 
-      <Modal open={!!activeRepo} onClose={() => setActiveRepo(null)} kicker="GitHub 项目" title={activeRepo?.name}
+      <Modal open={!!activeRepo} onClose={() => setActiveRepo(null)} kicker="GitHub 项目" title={activeRepo?.name} width={1040}
         footer={activeRepo?.url ? <a className="btn sm primary" href={activeRepo.url} target="_blank" rel="noreferrer">打开项目</a> : null}>
         {activeRepo ? (
-          <div className="modal-rich intel-detail-sheet">
-            <div className="detail-primary">
-              <span>仓库介绍</span>
-              <p>{activeRepo.summary}</p>
-            </div>
-            <div className="modal-meta">
-              <span>{activeRepo.stars ? `${activeRepo.stars.toLocaleString()} 星标` : "星标观察中"}</span>
-              <span>{formatRepoSpeed(activeRepo.speed)}</span>
-              {activeRepo.language ? <span>{activeRepo.language}</span> : null}
-              <span>评分 {activeRepo.score?.toFixed(2)}</span>
-            </div>
-            {(activeRepo.star_history?.length ?? 0) >= 2 ? (
-              <div className="modal-spark"><Sparkline points={activeRepo.star_history || []} width={480} height={56} /></div>
-            ) : null}
-            <div className="detail-compact-grid">
-              <div><span>推荐依据</span><p>{activeRepo.why}</p></div>
-              <div><span>验证清单</span><p>{activeRepo.next_step}</p></div>
-            </div>
-            {activeRepo.relation ? <p className="modal-note relation-note">{activeRepo.relation}</p> : null}
-            {activeRepo.tags?.length ? <div className="modal-tags">{activeRepo.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
-          </div>
+          <GithubRepoDetail repo={activeRepo} />
         ) : null}
       </Modal>
 

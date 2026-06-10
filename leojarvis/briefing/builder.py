@@ -4,10 +4,13 @@ import json
 import re
 import time
 import html
+import hashlib
+import urllib.request
 from collections import Counter, defaultdict
 from typing import Any
 
 from .. import db
+from ..config import DATA_DIR
 from ..localize import chinese_tags as _chinese_tags, to_chinese as _to_chinese
 
 
@@ -225,21 +228,152 @@ def _tags(row: dict, meta: dict, reasons: list[str]) -> list[str]:
     return tags
 
 
-def _detail_from(row: dict, analysis: dict, reasons: list[str], fallback: str) -> str:
+def _clean_source_detail(text: str | None, *, limit: int = 2200) -> str:
+    """真实来源摘录：只清洗展示噪音，不翻译、不补写、不混入判断。"""
+    raw = html.unescape(str(text or ""))
+    raw = re.sub(r"<(br|p|div|li|tr|h[1-6])\b[^>]*>", "\n", raw, flags=re.I)
+    raw = re.sub(r"<[^>]+>", " ", raw)
+    raw = re.sub(r"\b(?:Article|Comments?) URL:\s*https?://\S+\s*", "", raw, flags=re.I)
+    raw = re.sub(r"\b(?:Points|Comments):\s*\d+\s*#?\s*", "", raw, flags=re.I)
+    raw = re.sub(r"https?://\S+", "", raw)
+    raw = re.sub(r"[ \t]+", " ", raw)
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    return raw.strip()[:limit].strip()
+
+
+_SOURCE_DETAIL_CACHE = DATA_DIR / "source_detail_cache.json"
+_SOURCE_FETCH_BUDGET = 0
+
+
+def _read_source_detail_cache() -> dict[str, dict]:
+    try:
+        if not _SOURCE_DETAIL_CACHE.exists():
+            return {}
+        with _SOURCE_DETAIL_CACHE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_source_detail_cache(cache: dict[str, dict]) -> None:
+    try:
+        _SOURCE_DETAIL_CACHE.parent.mkdir(exist_ok=True)
+        with _SOURCE_DETAIL_CACHE.open("w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _attr_from_tag(tag: str, attr: str) -> str:
+    m = re.search(rf"""{attr}\s*=\s*["']([^"']+)["']""", tag, flags=re.I)
+    return html.unescape(m.group(1)).strip() if m else ""
+
+
+def _extract_real_page_excerpt(markup: str) -> str:
+    if not markup:
+        return ""
+    parts: list[str] = []
+    for tag in re.findall(r"<meta\b[^>]+>", markup, flags=re.I):
+        marker = (_attr_from_tag(tag, "name") or _attr_from_tag(tag, "property")).lower()
+        if marker in {"description", "og:description", "twitter:description"}:
+            value = _clean_source_detail(_attr_from_tag(tag, "content"), limit=520)
+            if len(value) >= 40 and value not in parts:
+                parts.append(value)
+    for paragraph in re.findall(r"<p\b[^>]*>(.*?)</p>", markup, flags=re.I | re.S):
+        value = _clean_source_detail(paragraph, limit=900)
+        if len(value) < 45:
+            continue
+        if value not in parts:
+            parts.append(value)
+        if sum(len(p) for p in parts) >= 1900:
+            break
+    if not parts:
+        cleaned = _clean_source_detail(markup, limit=1800)
+        if len(cleaned) >= 80:
+            parts.append(cleaned)
+    return "\n\n".join(parts)[:2200].strip()
+
+
+def _fetch_url_source_detail(url: str | None) -> str:
+    global _SOURCE_FETCH_BUDGET
+    if not url or not str(url).startswith(("http://", "https://")):
+        return ""
+    url = str(url)
+    key = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    cache = _read_source_detail_cache()
+    now = int(time.time())
+    cached = cache.get(key)
+    if isinstance(cached, dict) and now - int(cached.get("ts") or 0) < 7 * 24 * 3600:
+        return str(cached.get("text") or "")
+    if _SOURCE_FETCH_BUDGET <= 0:
+        return ""
+    _SOURCE_FETCH_BUDGET -= 1
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "LeoJarvis/0.1 (+local source excerpt)",
+            "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2",
+        })
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            raw = resp.read(650_000)
+            content_type = resp.headers.get("content-type") or ""
+        charset = "utf-8"
+        m = re.search(r"charset=([\w.-]+)", content_type, flags=re.I)
+        if m:
+            charset = m.group(1)
+        markup = raw.decode(charset, errors="replace")
+        markup = re.sub(r"<(script|style|svg|noscript)\b.*?</\1>", " ", markup, flags=re.I | re.S)
+        text = _extract_real_page_excerpt(markup)
+    except Exception:
+        text = ""
+    cache[key] = {"url": url, "ts": now, "text": text}
+    _write_source_detail_cache(cache)
+    return text
+
+
+def _github_source_detail(repo_name: str, meta: dict, repo_snapshot: dict) -> str:
+    name = repo_name or repo_snapshot.get("repo_full_name") or meta.get("repo") or ""
+    description = str(repo_snapshot.get("description") or meta.get("description") or "").strip()
+    stars = repo_snapshot.get("stars") or meta.get("stars")
+    forks = repo_snapshot.get("forks") or meta.get("forks")
+    language = repo_snapshot.get("language") or meta.get("language")
+    topics = repo_snapshot.get("topics") or repo_snapshot.get("display_topics") or meta.get("topics") or []
     parts = []
-    for key in ("detail", "impact", "evidence", "background"):
-        value = analysis.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
-    content = html.unescape(re.sub(r"<[^>]+>", " ", str(row.get("content") or ""))).strip()
-    if content and content not in " ".join(parts):
-        parts.append(content[:900])
-    text = "\n\n".join(dict.fromkeys(parts)) or fallback
-    raw_detail = text[:1100].strip()
-    translated = to_chinese(raw_detail, context="简报详情", max_chars=760)
-    if _looks_like_fallback(translated) or ("相关动态" in translated and re.search(r"https?://|Article URL|Comments URL", raw_detail, re.I)):
-        return raw_detail
-    return translated
+    if name:
+        parts.append(f"仓库：{name}")
+    if description:
+        parts.append(f"GitHub 原始简介：{description}")
+    else:
+        parts.append("GitHub API 未提供仓库 description；需要打开 README 查看完整介绍。")
+    metrics = []
+    if stars is not None:
+        try:
+            metrics.append(f"Stars {int(stars):,}")
+        except Exception:
+            metrics.append(f"Stars {stars}")
+    if forks is not None:
+        try:
+            metrics.append(f"Forks {int(forks):,}")
+        except Exception:
+            metrics.append(f"Forks {forks}")
+    if language:
+        metrics.append(f"主要语言 {language}")
+    if topics:
+        metrics.append("Topics " + ", ".join(str(t) for t in topics[:10]))
+    if metrics:
+        parts.append("GitHub 元数据：" + "；".join(metrics) + "。")
+    return "\n".join(parts).strip()
+
+
+def _source_detail_from(row: dict, repo_name: str, repo_snapshot: dict) -> str:
+    if _is_github(row):
+        return _github_source_detail(repo_name, _loads(row.get("meta"), {}) if isinstance(row.get("meta"), str) else (row.get("meta") or {}), repo_snapshot)
+    detail = _clean_source_detail(row.get("content"))
+    if len(detail) < 120:
+        fetched = _fetch_url_source_detail(row.get("url"))
+        if fetched:
+            return fetched
+    return detail
 
 
 def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict] | None = None) -> dict:
@@ -275,24 +409,16 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     why = analysis.get("why") or _why(row, reasons)
     relation = analysis.get("relation") or _relation(row, reasons, memories)
     next_step = analysis.get("next_step") or _next_step(row, priority)
-    detail = _detail_from(row, analysis, reasons, take)
+    source_detail = _source_detail_from(row, repo_name, repo_snapshot)
+    detail = source_detail
     if _is_github(row) and repo_snapshot:
-        stars = int(repo_snapshot.get("stars") or meta.get("stars") or 0)
-        speed = repo_snapshot.get("stars_per_day") or repo_snapshot.get("cold_stars_per_day")
-        topics = "、".join(repo_snapshot.get("display_topics") or []) or "GitHub 项目"
         take = repo_snapshot.get("summary_zh") or repo_snapshot.get("display_description") or take
         why = repo_snapshot.get("why_zh") or why
         relation = repo_snapshot.get("relation_zh") or relation
         next_step = repo_snapshot.get("next_step_zh") or next_step
-        metric_parts = [
-            f"{stars:,} 星标",
-            f"动量约 {speed}/天" if speed is not None else "动量观察中",
-            f"主要语言 {repo_snapshot.get('language') or meta.get('language') or '未知'}",
-            f"主题 {topics}",
-        ]
-        detail = f"仓库介绍：{take}\n项目指标：{'；'.join(metric_parts)}。"
-    if _is_x(row) and _looks_like_fallback(detail):
-        detail = _x_display_summary(row, meta)
+        if not source_detail:
+            source_detail = _github_source_detail(repo_name, meta, repo_snapshot)
+        detail = source_detail
     item_tags = _tags(row, meta, reasons)
     if _is_github(row) and repo_snapshot.get("display_topics"):
         item_tags = list(dict.fromkeys((repo_snapshot.get("display_topics") or []) + ["GitHub 项目"]))[:6]
@@ -310,6 +436,8 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         "score": round(float(row.get("score") or 0), 3),
         "take": take or "暂无摘要。",
         "detail": detail,
+        "source_detail": source_detail,
+        "source_detail_missing": not bool(source_detail),
         "triage": row.get("triage") or "digest",
         "priority": priority,
         "reasons": [to_chinese(str(r), context="简报判断原因", max_chars=100) for r in reasons[:4]],
@@ -479,6 +607,8 @@ def _today_focus_text(items: list[dict]) -> str:
 
 
 def build_today() -> dict:
+    global _SOURCE_FETCH_BUDGET
+    _SOURCE_FETCH_BUDGET = 5
     since = int((time.time() - 24 * 3600) * 1000)
     with db.conn() as c:
         rows = c.execute(

@@ -584,7 +584,7 @@ private struct BriefingCompactRow: View {
     let item: MobileBriefingItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(item.priority ?? "简报")
                     .font(.caption.weight(.semibold))
@@ -598,20 +598,48 @@ private struct BriefingCompactRow: View {
             }
             Text(item.title)
                 .font(.headline)
-            if let take = item.take, !take.isEmpty {
-                Text(take)
+            let paragraphs = readableParagraphs
+            if !paragraphs.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(6)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else {
+                Text("该来源没有提供可读取的正文摘录，请打开来源查看完整内容。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
             }
-            if let next = item.nextStep, !next.isEmpty {
-                Label(next, systemImage: "arrow.right.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+            HStack(spacing: 8) {
+                if let source = item.source, !source.isEmpty {
+                    Label(source, systemImage: "newspaper")
+                }
+                if let next = item.nextStep, !next.isEmpty {
+                    Label(next, systemImage: "arrow.right.circle")
+                        .lineLimit(1)
+                }
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+
+    private var readableParagraphs: [String] {
+        var seen = Set<String>()
+        return [item.sourceDetail, item.detail]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { text in
+                guard !text.isEmpty, !seen.contains(text) else { return false }
+                seen.insert(text)
+                return true
+            }
+            .prefix(2)
+            .map { $0 }
     }
 }
 

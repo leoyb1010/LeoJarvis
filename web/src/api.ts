@@ -49,6 +49,8 @@ export type BriefingItem = {
   relation?: string;
   next_step?: string;
   detail?: string;
+  source_detail?: string;
+  source_detail_missing?: boolean;
   tags?: string[];
   ts?: number;
   repo_stars?: number | null;
@@ -440,6 +442,7 @@ export type CockpitGithubCard = {
   url?: string;
   score: number;
   summary: string;
+  source_detail?: string;
   why: string;
   relation: string;
   next_step: string;

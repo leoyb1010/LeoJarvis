@@ -37,6 +37,7 @@ import {
 } from "../api";
 import { PageSkeleton } from "./Skeleton";
 import { Modal } from "./Modal";
+import { BriefingSignalDetail, GithubRepoDetail } from "./IntelligenceDetail";
 
 type MetricSample = {
   ts: number;
@@ -792,55 +793,17 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeSignal} onClose={() => setActiveSignal(null)} kicker={activeSignal?.priority || "情报"} title={activeSignal?.title}
+      <Modal open={!!activeSignal} onClose={() => setActiveSignal(null)} kicker={activeSignal?.priority || "情报"} title={activeSignal?.title} width={1040}
         footer={activeSignal?.url ? <a className="btn primary sm" href={activeSignal.url} target="_blank" rel="noreferrer">打开来源</a> : null}>
         {activeSignal ? (
-          <div className="modal-rich intel-detail-sheet">
-            <div className="detail-primary">
-              <span>核心摘要</span>
-              <p>{activeSignal.take}</p>
-            </div>
-            {activeSignal.detail ? <div className="detail-facts"><span>来源事实</span><p>{activeSignal.detail}</p></div> : null}
-            <div className="detail-compact-grid">
-              <div>
-                <span>判断依据</span>
-                <ul>{evidenceList(activeSignal).map((row, i) => <li key={i}>{row}</li>)}</ul>
-              </div>
-              <div><span>处理建议</span><p>{activeSignal.next_step || "阅读原文，判断是否写入个人记事或持续关注。"}</p></div>
-            </div>
-            {activeSignal.relation ? <p className="modal-note relation-note">{activeSignal.relation}</p> : null}
-            <div className="modal-meta">
-              <span>{activeSignal.source}</span>
-              <span>{activeSignal.domain_label || "情报"}</span>
-              <span>评分 {activeSignal.score?.toFixed(2)}</span>
-              <span>{fmtTime(activeSignal.ts)}</span>
-            </div>
-            {activeSignal.tags?.length ? <div className="modal-tags">{activeSignal.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
-          </div>
+          <BriefingSignalDetail item={activeSignal} evidence={evidenceList(activeSignal)} />
         ) : null}
       </Modal>
 
-      <Modal open={!!activeRepo} onClose={() => setActiveRepo(null)} kicker="GitHub 项目" title={activeRepo?.name}
+      <Modal open={!!activeRepo} onClose={() => setActiveRepo(null)} kicker="GitHub 项目" title={activeRepo?.name} width={1040}
         footer={activeRepo?.url ? <a className="btn primary sm" href={activeRepo.url} target="_blank" rel="noreferrer">打开项目</a> : null}>
         {activeRepo ? (
-          <div className="modal-rich intel-detail-sheet">
-            <div className="detail-primary">
-              <span>仓库介绍</span>
-              <p>{activeRepo.summary}</p>
-            </div>
-            <div className="modal-meta">
-              <span>{activeRepo.stars ? `${activeRepo.stars.toLocaleString()} 星标` : "星标观察中"}</span>
-              <span>{formatRepoSpeed(activeRepo.speed)}</span>
-              {activeRepo.language ? <span>{activeRepo.language}</span> : null}
-              <span>评分 {activeRepo.score?.toFixed(2)}</span>
-            </div>
-            <div className="detail-compact-grid">
-              <div><span>推荐依据</span><p>{activeRepo.why}</p></div>
-              <div><span>验证清单</span><p>{activeRepo.next_step}</p></div>
-            </div>
-            {activeRepo.relation ? <p className="modal-note relation-note">{activeRepo.relation}</p> : null}
-            {activeRepo.tags?.length ? <div className="modal-tags">{activeRepo.tags.slice(0, 8).map((t) => <span key={t}>{t}</span>)}</div> : null}
-          </div>
+          <GithubRepoDetail repo={activeRepo} />
         ) : null}
       </Modal>
 

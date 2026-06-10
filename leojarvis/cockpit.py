@@ -6,7 +6,7 @@ from collections import Counter
 
 from . import db, personal_notes
 from .agent import services, sysinfo
-from .briefing.builder import build_today
+from .briefing.builder import _github_source_detail, build_today
 from .intelligence.scanner import github_radar, recent_intelligence_events
 from .localize import chinese_tags as _chinese_tags, has_noisy_english, to_chinese as _to_chinese
 
@@ -138,6 +138,7 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
             "url": item.get("url"),
             "score": score,
             "summary": summary,
+            "source_detail": item.get("source_detail") or _github_source_detail(name, {}, repo),
             "why": repo.get("why_zh") or item.get("why_important") or "增长和活跃度达到驾驶舱展示阈值。",
             "relation": repo.get("relation_zh") or item.get("relation") or "与你的 AI、开发工具或本地助理关注项相关。",
             "next_step": repo.get("next_step_zh") or item.get("next_step") or "打开 README、示例和最近提交，判断是否值得持续监控。",
@@ -172,6 +173,7 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
             "url": repo.get("url"),
             "score": min(0.98, 0.72 + min(speed / 500, 0.2)),
             "summary": description,
+            "source_detail": _github_source_detail(name, {}, repo),
             "why": f"项目有 {stars:,} 个星标，当前动量约 {speed}/天，满足驾驶舱高价值阈值。",
             "relation": "与你关注的 AI 工具、本地助理、自动化或开发工作流可能相关。",
             "next_step": "打开项目页看 README 和最近提交，决定是否加入情报关注项或写入个人记事。",

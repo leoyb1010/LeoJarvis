@@ -98,6 +98,51 @@ def test_briefing_separates_email_from_news():
                     c.execute("DELETE FROM events WHERE id=?", (event_id,))
 
 
+def test_briefing_detail_keeps_readable_source_body():
+    db.init_db()
+    event_id = None
+    body = (
+        "Article URL: https://example.com/post Comments URL: https://news.ycombinator.com/item?id=1 "
+        "Points: 54 # Comments: 11 "
+        + "这条资讯详细说明了产品发布背景、关键功能、用户影响、技术实现差异和后续观察点。"
+        * 45
+    )
+    try:
+        event_id = db.insert_event(
+            source="rss:pytest",
+            domain="business",
+            kind="news",
+            title="测试长资讯详情",
+            content=body,
+            dedup_key="pytest-long-briefing-detail",
+        )
+        assert event_id
+        db.insert_judgment(
+            event_id=event_id,
+            score=0.9,
+            take="这是一条用于验证详情阅读面积和正文长度的高优先资讯。",
+            triage="digest",
+            reasons=["长正文", "产品相关"],
+            analysis={"summary": "长资讯摘要"},
+        )
+        with TestClient(app) as client:
+            res = client.get("/briefing/today")
+        assert res.status_code == 200
+        item = next(row for row in res.json()["items"] if row["event_id"] == event_id)
+        assert len(item["detail"]) > 900
+        assert item["detail"] == item["source_detail"]
+        assert item["source_detail_missing"] is False
+        assert "Article URL" not in item["detail"]
+        assert "Comments URL" not in item["detail"]
+        assert "Points:" not in item["detail"]
+        assert "这条资讯详细说明了产品发布背景" in item["detail"]
+    finally:
+        if event_id:
+            with db.conn() as c:
+                c.execute("DELETE FROM judgments WHERE event_id=?", (event_id,))
+                c.execute("DELETE FROM events WHERE id=?", (event_id,))
+
+
 def test_github_radar_has_chinese_display_fields():
     db.init_db()
     repo = "pytest/local-agent-demo"

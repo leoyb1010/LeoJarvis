@@ -17,6 +17,7 @@ web/dist/
 web/.vite/
 *.tsbuildinfo
 dist/
+build/
 desktop/updates/appcast.json
 desktop/macos/.build/
 .coverage
