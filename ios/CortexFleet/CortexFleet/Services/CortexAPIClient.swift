@@ -865,6 +865,28 @@ struct MobileBridgeClient {
         )
     }
 
+    func previewDeviceOps(
+        settings: BridgeSettings,
+        token: String,
+        targetID: String,
+        action: String,
+        path: String = ""
+    ) async throws -> DeviceOpsPreview {
+        let body: [String: Any] = [
+            "target_id": targetID,
+            "action": action,
+            "path": path,
+        ]
+        return try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/device-ops/preview",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 60
+        )
+    }
+
     func createNote(
         settings: BridgeSettings,
         token: String,

@@ -4482,9 +4482,10 @@ textarea,
 }
 .sys-hero-score { display: flex; align-items: center; gap: 18px; }
 .sys-hero-ring { position: relative; width: 84px; height: 84px; flex: none; }
+.sys-hero-ring .sys-ring { width: 84px; height: 84px; }
 .sys-hero-ring b {
   position: absolute; inset: 0; display: grid; place-items: center;
-  font: 740 26px var(--font-display); letter-spacing: -.02em; color: var(--fg);
+  font: 740 26px/1 var(--font-display); letter-spacing: -.02em; color: var(--fg);
 }
 .sys-hero-label { font: 700 12px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--meta); }
 .sys-hero-score p { margin: 6px 0 0; font: 500 13.5px/1.5 var(--font-body); color: var(--muted); }
@@ -4510,6 +4511,7 @@ textarea,
 }
 .sys-metric-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 2px; }
 .sys-metric-ring { position: relative; width: 46px; height: 46px; }
+.sys-metric-ring .sys-ring { width: 46px; height: 46px; }
 .sys-metric-name { font: 600 12.5px var(--font-body); color: var(--muted); margin-top: 4px; }
 .sys-metric-value {
   font: 700 21px/1.1 var(--font-display); letter-spacing: -.02em; color: var(--fg);

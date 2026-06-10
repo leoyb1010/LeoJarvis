@@ -84,6 +84,28 @@ def _bytes_from_text(text: str) -> int | None:
     return int(float(value) * scale)
 
 
+def _fmt_bytes(value: Any) -> str:
+    try:
+        size = float(value)
+    except Exception:
+        return "-"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    index = 0
+    while size >= 1024 and index < len(units) - 1:
+        size /= 1024
+        index += 1
+    if index == 0:
+        return f"{int(size)} {units[index]}"
+    return f"{size:.1f} {units[index]}"
+
+
+def _fmt_pct(value: Any) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except Exception:
+        return "-"
+
+
 def _summarize_output(text: str) -> dict[str, Any]:
     compact = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
     lines = compact.splitlines()
@@ -102,6 +124,75 @@ def _summarize_output(text: str) -> dict[str, Any]:
         "highlights": interesting or lines[:18],
         "raw": compact[:12000],
     }
+
+
+def _summarize_status(data: dict[str, Any]) -> dict[str, Any]:
+    hardware = data.get("hardware") if isinstance(data.get("hardware"), dict) else {}
+    cpu = data.get("cpu") if isinstance(data.get("cpu"), dict) else {}
+    memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
+    disks = data.get("disks") if isinstance(data.get("disks"), list) else []
+    root_disk = next((d for d in disks if isinstance(d, dict) and d.get("mount") == "/"), disks[0] if disks and isinstance(disks[0], dict) else {})
+    batteries = data.get("batteries") if isinstance(data.get("batteries"), list) else []
+    battery = batteries[0] if batteries and isinstance(batteries[0], dict) else {}
+    networks = data.get("network") if isinstance(data.get("network"), list) else []
+    proxy = data.get("proxy") if isinstance(data.get("proxy"), dict) else {}
+
+    try:
+        free_disk: Any = float(root_disk.get("total") or 0) - float(root_disk.get("used") or 0)
+    except Exception:
+        free_disk = None
+
+    active_networks = []
+    for row in networks:
+        if not isinstance(row, dict):
+            continue
+        try:
+            moving = float(row.get("rx_rate_mbs") or 0) > 0 or float(row.get("tx_rate_mbs") or 0) > 0
+        except Exception:
+            moving = False
+        if row.get("ip") or moving:
+            active_networks.append(row)
+
+    highlights: list[str] = []
+    highlights.append(f"{data.get('host') or '本机'} · {hardware.get('model') or hardware.get('cpu_model') or '-'} · {data.get('platform') or hardware.get('os_version') or '-'}")
+    highlights.append(f"健康度 {data.get('health_score', '-')} · {data.get('health_score_msg') or '状态已采集'} · 运行 {data.get('uptime') or '-'}")
+    highlights.append(
+        f"CPU {_fmt_pct(cpu.get('usage'))} · load {float(cpu.get('load1') or 0):.1f}/{float(cpu.get('load5') or 0):.1f}/{float(cpu.get('load15') or 0):.1f} · {cpu.get('logical_cpu') or cpu.get('core_count') or '-'} 核"
+    )
+    highlights.append(
+        f"内存 {_fmt_pct(memory.get('used_percent'))} · 已用 {_fmt_bytes(memory.get('used'))} / {_fmt_bytes(memory.get('total'))} · 可用 {_fmt_bytes(memory.get('available'))}"
+    )
+    highlights.append(
+        f"磁盘 / {_fmt_pct(root_disk.get('used_percent'))} · 剩余 {_fmt_bytes(free_disk)} / {_fmt_bytes(root_disk.get('total'))}"
+    )
+    if battery:
+        detail = []
+        if battery.get("cycle_count") is not None:
+            detail.append(f"循环 {battery.get('cycle_count')}")
+        if battery.get("capacity") is not None:
+            detail.append(f"容量 {battery.get('capacity')}%")
+        suffix = f" · {' · '.join(detail)}" if detail else ""
+        highlights.append(f"电池 {battery.get('percent', '-')}% · {battery.get('status') or '-'} · {battery.get('health') or '-'}{suffix}")
+    for row in active_networks[:2]:
+        highlights.append(
+            f"网络 {row.get('name') or '-'} · {row.get('ip') or '无 IP'} · 下行 {float(row.get('rx_rate_mbs') or 0):.2f} MB/s · 上行 {float(row.get('tx_rate_mbs') or 0):.2f} MB/s"
+        )
+    if proxy.get("enabled"):
+        highlights.append(f"代理 {proxy.get('type') or '-'} · {proxy.get('host') or '-'}")
+
+    return {
+        "line_count": len(highlights),
+        "estimated_bytes": None,
+        "estimated_gb": None,
+        "highlights": highlights,
+        "raw": "\n".join(highlights),
+    }
+
+
+def _summarize_result(action: str, data: Any, text: str) -> dict[str, Any]:
+    if action == "status" and isinstance(data, dict):
+        return _summarize_status(data)
+    return _summarize_output(text)
 
 
 def local_status() -> dict[str, Any]:
@@ -258,6 +349,7 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
         res = _run(_ssh_prefix(row) + [shell], timeout=210 if action in {"clean", "purge", "installers", "analyze", "apps"} else 60)
 
     parsed = _parse_json(res["stdout"])
+    output = res["stdout"] or res["stderr"]
     return {
         "ok": bool(res["ok"]),
         "target_id": target_id or "local",
@@ -268,7 +360,7 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
         "duration_ms": res["duration_ms"],
         "exit_code": res["exit_code"],
         "data": parsed,
-        "summary": _summarize_output(res["stdout"] or res["stderr"]),
+        "summary": _summarize_result(action, parsed, output),
         "error": "" if res["ok"] else (res["stderr"] or res["stdout"])[:800],
     }
 

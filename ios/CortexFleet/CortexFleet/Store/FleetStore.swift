@@ -326,6 +326,33 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    func previewDeviceOps(targetID: String, action: String) async -> DeviceOpsPreview? {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return nil
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let result = try await mobileBridge.previewDeviceOps(
+                settings: bridgeSettings,
+                token: token,
+                targetID: targetID,
+                action: action
+            )
+            if result.ok {
+                noticeMessage = "设备管家预览完成。"
+                errorMessage = nil
+            } else {
+                errorMessage = result.error ?? result.installHint ?? "设备管家预览失败。"
+            }
+            return result
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     private func refreshViaBridge() async {
         guard bridgeSettings.isUsable else {
             errorMessage = FleetError.invalidBridgeURL.localizedDescription

@@ -393,6 +393,47 @@ struct DeviceOpsStatus: Decodable, Equatable {
     )
 }
 
+struct DeviceOpsPreview: Decodable, Identifiable, Equatable {
+    struct Summary: Decodable, Equatable {
+        let estimatedGB: Double?
+        let highlights: [String]?
+        let raw: String?
+
+        enum CodingKeys: String, CodingKey {
+            case estimatedGB = "estimatedGb"
+            case highlights
+            case raw
+        }
+    }
+
+    var id: String { "\(targetID)-\(action)-\(durationMS ?? 0)" }
+    let ok: Bool
+    let targetID: String
+    let action: String
+    let safeMode: Bool
+    let destructive: Bool?
+    let command: String?
+    let durationMS: Int?
+    let exitCode: Int?
+    let summary: Summary?
+    let error: String?
+    let installHint: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case targetID = "targetId"
+        case action
+        case safeMode
+        case destructive
+        case command
+        case durationMS = "durationMs"
+        case exitCode
+        case summary
+        case error
+        case installHint
+    }
+}
+
 struct DeviceOpsTarget: Decodable, Identifiable, Equatable {
     var id: String { targetID }
     let targetID: String
@@ -428,19 +469,76 @@ struct ReachStatus: Decodable, Equatable {
     struct Summary: Decodable, Equatable {
         let ready: Int
         let total: Int
+        let partial: Int
         let coreReady: Int
         let coreTotal: Int
+
+        init(ready: Int, total: Int, partial: Int, coreReady: Int, coreTotal: Int) {
+            self.ready = ready
+            self.total = total
+            self.partial = partial
+            self.coreReady = coreReady
+            self.coreTotal = coreTotal
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case ready
+            case total
+            case partial
+            case coreReady
+            case coreTotal
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ready = try c.decodeIfPresent(Int.self, forKey: .ready) ?? 0
+            total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
+            partial = try c.decodeIfPresent(Int.self, forKey: .partial) ?? 0
+            coreReady = try c.decodeIfPresent(Int.self, forKey: .coreReady) ?? 0
+            coreTotal = try c.decodeIfPresent(Int.self, forKey: .coreTotal) ?? 0
+        }
     }
 
     let generatedAt: Int
     let summary: Summary
     let channels: [ReachChannel]
+    let sourceMatrix: [ReachSourceGroup]
 
     static let empty = ReachStatus(
         generatedAt: 0,
-        summary: Summary(ready: 0, total: 0, coreReady: 0, coreTotal: 0),
-        channels: []
+        summary: Summary(ready: 0, total: 0, partial: 0, coreReady: 0, coreTotal: 0),
+        channels: [],
+        sourceMatrix: []
     )
+
+    enum CodingKeys: String, CodingKey {
+        case generatedAt
+        case summary
+        case channels
+        case sourceMatrix
+    }
+
+    init(generatedAt: Int, summary: Summary, channels: [ReachChannel], sourceMatrix: [ReachSourceGroup]) {
+        self.generatedAt = generatedAt
+        self.summary = summary
+        self.channels = channels
+        self.sourceMatrix = sourceMatrix
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decodeIfPresent(Int.self, forKey: .generatedAt) ?? 0
+        summary = try c.decodeIfPresent(Summary.self, forKey: .summary) ?? Summary(ready: 0, total: 0, partial: 0, coreReady: 0, coreTotal: 0)
+        channels = try c.decodeIfPresent([ReachChannel].self, forKey: .channels) ?? []
+        sourceMatrix = try c.decodeIfPresent([ReachSourceGroup].self, forKey: .sourceMatrix) ?? []
+    }
+}
+
+struct ReachSourceGroup: Decodable, Identifiable, Equatable {
+    var id: String { group }
+    let group: String
+    let channels: [String]
+    let use: String
 }
 
 struct ReachChannel: Decodable, Identifiable, Equatable {
@@ -448,22 +546,47 @@ struct ReachChannel: Decodable, Identifiable, Equatable {
     let name: String
     let tier: Int
     let isOptional: Bool
+    let setupLevel: String?
     let status: String
     let message: String
     let path: String
     let backends: [String]
     let description: String
+    let installHint: String?
+    let readExamples: [String]
+    let searchExamples: [String]
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case tier
         case isOptional = "optional"
+        case setupLevel
         case status
         case message
         case path
         case backends
         case description
+        case installHint
+        case readExamples
+        case searchExamples
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
+        tier = try c.decodeIfPresent(Int.self, forKey: .tier) ?? 0
+        isOptional = try c.decodeIfPresent(Bool.self, forKey: .isOptional) ?? false
+        setupLevel = try c.decodeIfPresent(String.self, forKey: .setupLevel)
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? "off"
+        message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
+        backends = try c.decodeIfPresent([String].self, forKey: .backends) ?? []
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        installHint = try c.decodeIfPresent(String.self, forKey: .installHint)
+        readExamples = try c.decodeIfPresent([String].self, forKey: .readExamples) ?? []
+        searchExamples = try c.decodeIfPresent([String].self, forKey: .searchExamples) ?? []
     }
 }
 

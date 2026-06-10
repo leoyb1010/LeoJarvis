@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from .. import user_settings
 from ..config import DATA_DIR, settings, sources
@@ -259,14 +260,61 @@ def _thermal_info() -> dict:
         if m:
             pressure = int(m.group(1))
     level = _level(pressure is None or pressure <= 40, pressure is not None and pressure > 20)
+    mo_thermal: dict[str, Any] = {}
+    mo_path = shutil.which("mo") or ("/opt/homebrew/bin/mo" if Path("/opt/homebrew/bin/mo").exists() else "")
+    if mo_path:
+        try:
+            mo_raw = _run([mo_path, "status", "--json"], timeout=6)
+            payload = json.loads(mo_raw) if mo_raw.strip().startswith("{") else {}
+            if isinstance(payload.get("thermal"), dict):
+                mo_thermal = payload["thermal"]
+        except Exception:
+            mo_thermal = {}
+
+    temperatures = []
+    for key, label in (("cpu_temp", "CPU"), ("gpu_temp", "GPU"), ("battery_temp", "电池")):
+        try:
+            temp = float(mo_thermal.get(key) or 0)
+        except Exception:
+            temp = 0
+        if temp > 0:
+            temperatures.append((label, temp))
+
     value = "正常" if pressure is None else f"{pressure}%"
+    if temperatures:
+        value = f"{temperatures[0][0]} {temperatures[0][1]:.1f}°C"
+
+    summary_bits = []
+    if level == "健康":
+        summary_bits.append("温控压力正常")
+    else:
+        summary_bits.append(f"当前温控压力约 {value}，可能正在降频")
+    summary_bits.extend(f"{label} {temp:.1f}°C" for label, temp in temperatures[:3])
+    try:
+        power = float(mo_thermal.get("system_power") or 0)
+        if power > 0:
+            summary_bits.append(f"功耗 {power:.1f}W")
+    except Exception:
+        pass
+    try:
+        fan_speed = float(mo_thermal.get("fan_speed") or 0)
+        fan_count = int(mo_thermal.get("fan_count") or 0)
+        if fan_speed > 0 or fan_count > 0:
+            summary_bits.append(f"风扇 {fan_count} 个 · {int(fan_speed)} rpm")
+    except Exception:
+        pass
+
     return {
         "level": level,
         "value": value,
         "thermal_pressure": pressure,
-        "summary": "温控压力正常。" if level == "健康" else f"当前温控压力约 {value}，可能正在降频。",
+        "summary": " · ".join(summary_bits) + "。",
         "advice": "继续观察即可。" if level == "健康" else "检查高占用进程、外接显示器负载和散热环境。",
         "raw": thermal,
+        "temperatures": {label: round(temp, 1) for label, temp in temperatures},
+        "system_power_w": round(float(mo_thermal.get("system_power") or 0), 1) if mo_thermal.get("system_power") else None,
+        "fan_speed": mo_thermal.get("fan_speed"),
+        "fan_count": mo_thermal.get("fan_count"),
     }
 
 
@@ -1173,6 +1221,7 @@ def structured_status() -> dict:
     except OSError:
         l1 = l5 = l15 = 0.0
     cores = os.cpu_count() or 1
+    cpu_pct = round(l1 / max(1, cores) * 100, 1)
     cpu_level = _level(l1 < cores * 1.2, l1 >= cores * 0.8)
     processes = _process_rows()
     memory = _memory_detail()
@@ -1191,12 +1240,12 @@ def structured_status() -> dict:
         },
         {
             "id": "cpu",
-            "name": "CPU 负载",
+            "name": "CPU 使用",
             "level": cpu_level,
-            "value": f"{l1:.2f}/{cores}",
-            "summary": f"一分钟负载 {l1:.2f}，5/15 分钟为 {l5:.2f}/{l15:.2f}，CPU 核数 {cores}。",
+            "value": f"{cpu_pct:.0f}%",
+            "summary": f"1 分钟负载约等于 {cpu_pct:.0f}%（{l1:.2f}/{cores} 核）；5/15 分钟趋势 {l5:.2f}/{l15:.2f}。",
             "advice": "负载正常。" if cpu_level == "健康" else "查看高占用进程，确认是否有构建或后台任务持续运行。",
-            "metrics": {"load_1": round(l1, 2), "load_5": round(l5, 2), "load_15": round(l15, 2), "cores": cores, "load_pct": round(l1 / max(1, cores) * 100, 1)},
+            "metrics": {"load_1": round(l1, 2), "load_5": round(l5, 2), "load_15": round(l15, 2), "cores": cores, "load_pct": cpu_pct},
         },
         {
             "id": "memory",
@@ -1214,7 +1263,13 @@ def structured_status() -> dict:
             "value": thermal["value"],
             "summary": thermal["summary"],
             "advice": thermal["advice"],
-            "metrics": {"thermal_pressure": thermal.get("thermal_pressure")},
+            "metrics": {
+                "thermal_pressure": thermal.get("thermal_pressure"),
+                "temperatures": thermal.get("temperatures"),
+                "system_power_w": thermal.get("system_power_w"),
+                "fan_speed": thermal.get("fan_speed"),
+                "fan_count": thermal.get("fan_count"),
+            },
         },
         {
             "id": "battery",

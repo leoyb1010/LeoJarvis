@@ -42,6 +42,13 @@ struct RootView: View {
             }
 
             NavigationStack {
+                MobileCapabilitiesView()
+            }
+            .tabItem {
+                Label("能力", systemImage: "rectangle.stack.badge.plus")
+            }
+
+            NavigationStack {
                 SettingsView()
             }
             .tabItem {
