@@ -219,7 +219,7 @@ final class FleetStore: ObservableObject {
         var next = bridgeSettings
         next.enabled = true
         next.baseURL = baseURL
-        next.name = (env["LEOJARVIS_BRIDGE_NAME"] ?? "MacBook HTTPS Bridge").trimmingCharacters(in: .whitespacesAndNewlines)
+        next.name = (env["LEOJARVIS_BRIDGE_NAME"] ?? BridgeSettings.defaultName).trimmingCharacters(in: .whitespacesAndNewlines)
         bridgeSettings = next
         persistBridgeSettings()
 
@@ -439,7 +439,18 @@ final class FleetStore: ObservableObject {
               let settings = try? JSONDecoder().decode(BridgeSettings.self, from: data) else {
             return BridgeSettings()
         }
-        return settings
+        return migratedBridgeSettings(settings)
+    }
+
+    private static func migratedBridgeSettings(_ settings: BridgeSettings) -> BridgeSettings {
+        var next = settings
+        if next.normalizedBaseURL == BridgeSettings.legacyMacBookBaseURL {
+            next.name = BridgeSettings.defaultName
+            next.baseURL = BridgeSettings.defaultBaseURL
+        } else if next.name == "MacBook HTTPS Bridge" {
+            next.name = BridgeSettings.defaultName
+        }
+        return next
     }
 
     private static func mergeSeededHosts(into stored: [MonitoredHost], replacingSeeded: Bool) -> [MonitoredHost] {

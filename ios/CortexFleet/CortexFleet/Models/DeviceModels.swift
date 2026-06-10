@@ -150,9 +150,13 @@ struct HostDraft: Equatable {
 }
 
 struct BridgeSettings: Codable, Equatable {
+    static let defaultName = "Mac mini Bridge"
+    static let defaultBaseURL = "https://mac-mini-cortex.tail23de22.ts.net"
+    static let legacyMacBookBaseURL = "https://leoyuanmacbook-pro.tail23de22.ts.net"
+
     var enabled: Bool = true
-    var name: String = "MacBook HTTPS Bridge"
-    var baseURL: String = "https://leoyuanmacbook-pro.tail23de22.ts.net"
+    var name: String = BridgeSettings.defaultName
+    var baseURL: String = BridgeSettings.defaultBaseURL
 
     var normalizedBaseURL: String {
         baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
