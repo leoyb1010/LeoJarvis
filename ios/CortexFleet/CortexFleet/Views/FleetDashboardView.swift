@@ -14,6 +14,11 @@ struct FleetDashboardView: View {
 
                 LocalDeviceCard(snapshot: store.localSnapshot)
 
+                CapabilityOverviewCard(
+                    deviceOps: store.deviceOpsStatus,
+                    reach: store.reachStatus
+                )
+
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("SSH 主机")
@@ -102,6 +107,94 @@ struct FleetDashboardView: View {
                 await store.refreshAll()
             }
         }
+    }
+}
+
+private struct CapabilityOverviewCard: View {
+    let deviceOps: DeviceOpsStatus
+    let reach: ReachStatus
+
+    private var readyTargetsText: String {
+        "\(deviceOps.summary.ready)/\(deviceOps.summary.targets)"
+    }
+
+    private var reachText: String {
+        "\(reach.summary.ready)/\(reach.summary.total)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Jarvis 能力")
+                        .font(.headline)
+                    Text("设备管家和 Reach 触达渠道")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "sparkles.rectangle.stack")
+                    .foregroundStyle(.tint)
+            }
+
+            HStack(spacing: 10) {
+                CapabilityTile(
+                    title: "设备管家",
+                    value: readyTargetsText,
+                    detail: "Mole/Burrow 就绪",
+                    symbol: "wrench.and.screwdriver"
+                )
+                CapabilityTile(
+                    title: "Reach",
+                    value: reachText,
+                    detail: "渠道可用",
+                    symbol: "antenna.radiowaves.left.and.right"
+                )
+            }
+
+            let missingOps = deviceOps.targets.filter { !$0.moleInstalled }
+            if !missingOps.isEmpty {
+                Label("\(missingOps.count) 台 Mac 需要安装 mole 后启用清理/优化预览", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.blue.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct CapabilityTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .foregroundStyle(.tint)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.title3.weight(.bold))
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, minHeight: 74)
+        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

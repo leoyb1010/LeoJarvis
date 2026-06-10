@@ -231,7 +231,9 @@ def probe(row: dict[str, Any], timeout: int = 12) -> dict[str, Any]:
         cmd += ["-o", opt]
     cmd += ["-p", str(int(row.get("port") or 22)), target, "python3", "-"]
     try:
-        out = subprocess.run(cmd, input=_REMOTE_SCRIPT, capture_output=True, text=True, timeout=timeout)
+        from .mobile_bridge import _REMOTE_SCRIPT as rich_remote_script
+
+        out = subprocess.run(cmd, input=rich_remote_script, capture_output=True, text=True, timeout=timeout)
         if out.returncode != 0:
             raise RuntimeError((out.stderr or out.stdout or "ssh failed").strip()[:240])
         data = json.loads(out.stdout.strip().splitlines()[-1])

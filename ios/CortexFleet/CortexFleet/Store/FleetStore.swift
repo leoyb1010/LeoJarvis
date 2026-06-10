@@ -7,6 +7,8 @@ final class FleetStore: ObservableObject {
     @Published private(set) var snapshots: [String: HostSnapshot] = [:]
     @Published private(set) var bridgeSettings = BridgeSettings()
     @Published private(set) var jarvisOverview = JarvisOverview.empty
+    @Published private(set) var deviceOpsStatus = DeviceOpsStatus.empty
+    @Published private(set) var reachStatus = ReachStatus.empty
     @Published private(set) var mobileNotes: [MobileNote] = []
     @Published private(set) var mobileNoteStats = MobileNoteStats.empty
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
@@ -253,10 +255,14 @@ final class FleetStore: ObservableObject {
             let token = try keychain.bridgeToken()
             async let overview = mobileBridge.loadOverview(settings: bridgeSettings, token: token)
             async let notes = mobileBridge.loadNotes(settings: bridgeSettings, token: token)
-            let (overviewValue, notesValue) = try await (overview, notes)
+            async let deviceOps = mobileBridge.loadDeviceOpsStatus(settings: bridgeSettings, token: token)
+            async let reach = mobileBridge.loadReachStatus(settings: bridgeSettings, token: token)
+            let (overviewValue, notesValue, deviceOpsValue, reachValue) = try await (overview, notes, deviceOps, reach)
             jarvisOverview = overviewValue
             mobileNotes = notesValue.notes
             mobileNoteStats = notesValue.stats
+            deviceOpsStatus = deviceOpsValue
+            reachStatus = reachValue
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

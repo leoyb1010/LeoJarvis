@@ -2,14 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   addSshDevice,
+  getDeviceOpsStatus,
   getDevices,
   getDevTools,
   getServices,
   getSystemOverview,
+  previewDeviceOps,
   probeSshDevices,
   sendSelfHeartbeat,
   upgradeAiTool,
   type AiToolStatus,
+  type DeviceOpsPreview,
+  type DeviceOpsStatus,
+  type DeviceOpsTarget,
   type DeviceSummary,
   type DevToolchain,
   type ServiceRow,
@@ -168,16 +173,58 @@ function DeviceCard({ device }: { device: DeviceSummary }) {
   );
 }
 
+const OPS_ACTIONS = [
+  ["clean", "缓存清理预览"],
+  ["optimize", "系统优化预览"],
+  ["purge", "项目垃圾预览"],
+  ["installers", "安装包扫描"],
+  ["apps", "应用列表"],
+] as const;
+
+function DeviceOpsCard({
+  target,
+  onPreview,
+  busy,
+}: {
+  target: DeviceOpsTarget;
+  onPreview: (target: DeviceOpsTarget, action: string) => void;
+  busy: string;
+}) {
+  const ready = target.mole_installed;
+  return (
+    <article className={`ops-card ${ready ? "ready" : "missing"}`}>
+      <div className="ops-card-head">
+        <div>
+          <span>{target.kind === "local" ? "本机" : "SSH 主机"} · {target.host || "localhost"}</span>
+          <h3>{target.target_name}</h3>
+          <p>{ready ? target.version || target.mo_path : target.error || target.install_hint}</p>
+        </div>
+        <b>{ready ? "Mole 就绪" : "需安装"}</b>
+      </div>
+      <div className="ops-actions">
+        {OPS_ACTIONS.map(([id, label]) => (
+          <button key={id} disabled={!ready || !!busy} onClick={() => onPreview(target, id)}>
+            {busy === `${target.target_id}:${id}` ? "扫描中" : label}
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 export function SystemView() {
   const [data, setData] = useState<SystemOverview | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [deviceOps, setDeviceOps] = useState<DeviceOpsStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTool, setActiveTool] = useState<AiToolStatus | null>(null);
   const [upgradingTool, setUpgradingTool] = useState("");
   const [upgradeResult, setUpgradeResult] = useState("");
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
+  const [opsResult, setOpsResult] = useState<DeviceOpsPreview | null>(null);
+  const [opsBusy, setOpsBusy] = useState("");
   const [ssh, setSsh] = useState({ name: "", host: "", user: "" });
   const [sshBusy, setSshBusy] = useState(false);
   const [devTools, setDevTools] = useState<DevToolchain | null>(null);
@@ -192,6 +239,7 @@ export function SystemView() {
       setServices(serviceRows);
       setDevices(deviceRows);
       getDevTools().then(setDevTools).catch(() => {});
+      getDeviceOpsStatus().then(setDeviceOps).catch(() => {});
     } catch (err) {
       setError(String(err));
     } finally {
@@ -262,6 +310,18 @@ export function SystemView() {
     }
   }
 
+  async function runOpsPreview(target: DeviceOpsTarget, action: string) {
+    setOpsBusy(`${target.target_id}:${action}`);
+    setOpsResult(null);
+    try {
+      setOpsResult(await previewDeviceOps(action, target.target_id));
+    } catch (err) {
+      setOpsResult({ ok: false, target_id: target.target_id, action, safe_mode: true, error: String(err) });
+    } finally {
+      setOpsBusy("");
+    }
+  }
+
   if (error && !data) return <div className="error">{error}</div>;
 
   return (
@@ -311,6 +371,32 @@ export function SystemView() {
             {devices.map((device) => <DeviceCard device={device} key={device.device_id} />)}
             {devices.length === 0 ? <div className="empty">暂无设备心跳。</div> : null}
           </div>
+
+          <div className="panel-title" style={{ marginTop: 24 }}>设备管家 / Burrow 能力</div>
+          <section className="ops-panel card">
+            <div className="ops-panel-head">
+              <div>
+                <b>清理、卸载、优化、磁盘分析都先走安全预览</b>
+                <span>吸收 Burrow/Mole 的能力：只读状态、dry-run 清理、项目垃圾扫描、安装包扫描和应用列表。真实删除不会在这里自动执行。</span>
+              </div>
+              <em>{deviceOps ? `${deviceOps.summary.ready}/${deviceOps.summary.targets} 就绪` : "检测中"}</em>
+            </div>
+            <div className="ops-grid">
+              {(deviceOps?.targets || []).map((target) => (
+                <DeviceOpsCard target={target} onPreview={runOpsPreview} busy={opsBusy} key={target.target_id} />
+              ))}
+            </div>
+            {opsResult ? (
+              <div className={`ops-result ${opsResult.ok ? "ok" : "bad"}`}>
+                <div>
+                  <b>{opsResult.action} · {opsResult.ok ? "预览完成" : "预览失败"}</b>
+                  <span>{opsResult.command || opsResult.install_hint || opsResult.error}</span>
+                </div>
+                {opsResult.summary?.estimated_gb ? <strong>约 {opsResult.summary.estimated_gb} GB</strong> : null}
+                <pre>{opsResult.summary?.highlights?.join("\n") || opsResult.summary?.raw || opsResult.error || "暂无输出"}</pre>
+              </div>
+            ) : null}
+          </section>
 
           <div className="panel-title" style={{ marginTop: 24 }}>本地服务状态</div>
           <div className="sys-service-grid">

@@ -4116,6 +4116,223 @@ textarea,
   margin-top: 0;
 }
 
+/* ============ Device Ops / Reach ============ */
+.ops-panel,
+.reach-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 10px;
+}
+.ops-panel-head,
+.reach-head,
+.repo-inspector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+.ops-panel-head b,
+.reach-head b,
+.repo-inspector b {
+  display: block;
+  color: var(--fg);
+  font: 720 15px/1.3 var(--font-display);
+}
+.ops-panel-head span,
+.reach-head p,
+.repo-inspector span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.ops-panel-head em,
+.reach-head strong {
+  font: 760 22px/1 var(--font-mono);
+  color: var(--accent);
+  font-style: normal;
+  white-space: nowrap;
+}
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.ops-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: var(--bg);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.ops-card.missing {
+  opacity: .78;
+}
+.ops-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+.ops-card-head span {
+  display: block;
+  color: var(--meta);
+  font: 680 10.5px/1.2 var(--font-mono);
+  text-transform: uppercase;
+}
+.ops-card-head h3 {
+  margin: 4px 0 3px;
+  font: 720 18px/1.2 var(--font-display);
+  letter-spacing: 0;
+}
+.ops-card-head p {
+  margin: 0;
+  color: var(--muted);
+  font: 500 12.5px/1.45 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.ops-card-head b {
+  flex: none;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 720 11px/1 var(--font-mono);
+}
+.ops-card.missing .ops-card-head b {
+  background: color-mix(in oklab, var(--warn), transparent 86%);
+  color: var(--warn);
+}
+.ops-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ops-actions button {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg-2);
+  padding: 6px 9px;
+  font: 650 12px/1 var(--font-body);
+  cursor: pointer;
+}
+.ops-actions button:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+.ops-result,
+.repo-inspect-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: var(--surface-warm);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+.ops-result.ok,
+.repo-inspect-result.ok {
+  border-color: color-mix(in oklab, var(--good), var(--border-soft) 72%);
+}
+.ops-result.bad,
+.repo-inspect-result.bad {
+  border-color: color-mix(in oklab, var(--bad), var(--border-soft) 72%);
+}
+.ops-result > div {
+  display: grid;
+  gap: 3px;
+}
+.ops-result b,
+.repo-inspect-result b {
+  color: var(--fg);
+}
+.ops-result span,
+.repo-inspect-result span,
+.repo-inspect-result small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ops-result strong {
+  color: var(--good);
+  font: 760 22px/1 var(--font-mono);
+}
+.ops-result pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--fg-2);
+  font: 500 12px/1.55 var(--font-mono);
+}
+.reach-panel {
+  margin: 18px 0 24px;
+}
+.reach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.reach-channel {
+  border: 1px solid var(--border-soft);
+  border-radius: 15px;
+  background: var(--bg);
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  min-height: 122px;
+}
+.reach-channel b {
+  font: 720 14px/1.25 var(--font-display);
+}
+.reach-channel span {
+  color: var(--meta);
+  font: 650 11px/1.25 var(--font-mono);
+}
+.reach-channel em {
+  width: max-content;
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font: 720 11px/1 var(--font-mono);
+  font-style: normal;
+}
+.reach-channel.warn em {
+  color: var(--warn);
+  background: color-mix(in oklab, var(--warn), transparent 86%);
+}
+.reach-channel.off em,
+.reach-channel.error em {
+  color: var(--bad);
+  background: color-mix(in oklab, var(--bad), transparent 88%);
+}
+.reach-channel p {
+  margin: 0;
+  color: var(--muted);
+  font: 500 12.5px/1.5 var(--font-body);
+}
+.repo-inspector {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px) auto;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+}
+.repo-inspector input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 8px 11px;
+}
+.repo-inspect-result p {
+  margin: 0;
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+
 @media (max-width: 1180px) {
   .notes-workbar {
     grid-template-columns: 1fr;
@@ -4127,7 +4344,10 @@ textarea,
 @media (max-width: 980px) {
   .notes-shell,
   .notes-editor .note-meta-grid,
-  .detail-compact-grid {
+  .detail-compact-grid,
+  .ops-panel-head,
+  .reach-head,
+  .repo-inspector {
     grid-template-columns: 1fr;
   }
   .notes-editor .editor-top {

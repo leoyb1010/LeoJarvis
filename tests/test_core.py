@@ -301,3 +301,41 @@ def test_intelligence_overview_and_configuration_endpoints():
     with db.conn() as c:
         c.execute("DELETE FROM intelligence_targets WHERE query=?", (target_query,))
         c.execute("DELETE FROM intelligence_sources WHERE url=?", (source_url,))
+
+
+def test_device_ops_and_reach_status_endpoints(monkeypatch):
+    from leojarvis import device_ops, reach
+
+    monkeypatch.setattr(device_ops, "fleet_status", lambda: {
+        "ok": True,
+        "generated_at": 1,
+        "safe_default": True,
+        "summary": {"targets": 1, "ready": 1, "missing": 0},
+        "targets": [{
+            "target_id": "local",
+            "name": "Local Mac",
+            "kind": "local",
+            "ready": True,
+            "mo_installed": True,
+            "safe_mode": True,
+            "commands": ["clean", "optimize"],
+        }],
+    })
+    monkeypatch.setattr(reach, "channel_status", lambda: {
+        "ok": True,
+        "generated_at": 1,
+        "summary": {"ready": 2, "total": 2, "core_ready": 2, "core_total": 2},
+        "channels": [
+            {"id": "web", "name": "任意网页", "tier": 0, "optional": False, "status": "ok", "message": "ok"},
+            {"id": "github", "name": "GitHub", "tier": 0, "optional": False, "status": "ok", "message": "ok"},
+        ],
+    })
+
+    with TestClient(app) as client:
+        ops = client.get("/api/device-ops/status")
+        channels = client.get("/api/reach/status")
+
+    assert ops.status_code == 200
+    assert ops.json()["summary"]["ready"] == 1
+    assert channels.status_code == 200
+    assert channels.json()["summary"]["core_ready"] == 2

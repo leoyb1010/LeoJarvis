@@ -845,6 +845,26 @@ struct MobileBridgeClient {
         return payload.briefing
     }
 
+    func loadDeviceOpsStatus(settings: BridgeSettings, token: String) async throws -> DeviceOpsStatus {
+        try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/device-ops/status",
+            method: "GET",
+            timeout: 22
+        )
+    }
+
+    func loadReachStatus(settings: BridgeSettings, token: String) async throws -> ReachStatus {
+        try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/reach/status",
+            method: "GET",
+            timeout: 18
+        )
+    }
+
     func createNote(
         settings: BridgeSettings,
         token: String,

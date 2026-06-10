@@ -302,6 +302,114 @@ export async function getWeather(lat?: number, lon?: number): Promise<Weather> {
   return readJson(await fetch(url), "读取天气");
 }
 
+export type DeviceOpsTarget = {
+  target_id: string;
+  target_name: string;
+  host: string;
+  kind: "local" | "ssh" | string;
+  online?: boolean;
+  mole_installed: boolean;
+  mo_path: string;
+  version: string;
+  brew_installed: boolean;
+  install_hint: string;
+  capabilities: Record<string, boolean>;
+  error?: string;
+};
+
+export type DeviceOpsStatus = {
+  ok: boolean;
+  generated_at: number;
+  summary: { targets: number; ready: number; missing: number; safe_default: boolean };
+  targets: DeviceOpsTarget[];
+};
+
+export type DeviceOpsPreview = {
+  ok: boolean;
+  target_id: string;
+  action: string;
+  safe_mode: boolean;
+  destructive?: boolean;
+  command?: string;
+  duration_ms?: number;
+  exit_code?: number;
+  data?: any;
+  summary?: { line_count: number; estimated_gb?: number | null; highlights: string[]; raw: string };
+  error?: string;
+  install_hint?: string;
+};
+
+export async function getDeviceOpsStatus(): Promise<DeviceOpsStatus> {
+  return readJson(await fetch(`${BASE}/device-ops/status`), "读取设备管家状态");
+}
+
+export async function previewDeviceOps(action: string, target_id = "local", path = ""): Promise<DeviceOpsPreview> {
+  return readJson(await fetch(`${BASE}/device-ops/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, target_id, path }),
+  }), "执行设备管家安全预览");
+}
+
+export type ReachChannel = {
+  id: string;
+  name: string;
+  tier: number;
+  optional: boolean;
+  status: "ok" | "warn" | "off" | "error" | string;
+  message: string;
+  path: string;
+  backends: string[];
+  description: string;
+};
+
+export type ReachStatus = {
+  ok: boolean;
+  generated_at: number;
+  summary: { ready: number; total: number; core_ready: number; core_total: number };
+  channels: ReachChannel[];
+};
+
+export type ReachGithubRepo = {
+  ok: boolean;
+  repo: string;
+  error?: string;
+  summary?: {
+    name: string;
+    description: string;
+    stars: number;
+    forks: number;
+    language: string;
+    topics: string[];
+    license: string;
+    latest_release: string;
+    latest_release_name: string;
+    pushed_at: string;
+    updated_at: string;
+    url: string;
+  };
+};
+
+export async function getReachStatus(): Promise<ReachStatus> {
+  return readJson(await fetch(`${BASE}/reach/status`), "读取 Reach 渠道状态");
+}
+
+export async function readReachUrl(url: string, limit = 12000) {
+  return readJson<any>(await fetch(`${BASE}/reach/read-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, limit }),
+  }), "读取网页全文");
+}
+
+export async function inspectReachGithubRepo(repo: string): Promise<ReachGithubRepo> {
+  return readJson(await fetch(`${BASE}/reach/github/repo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo }),
+  }), "读取 GitHub 仓库详情");
+}
+
 export type RuntimeStatus = {
   services_online: number;
   services_total: number;

@@ -374,6 +374,99 @@ struct HostCLIStatus: Codable, Identifiable, Equatable {
     let detail: String
 }
 
+struct DeviceOpsStatus: Decodable, Equatable {
+    struct Summary: Decodable, Equatable {
+        let targets: Int
+        let ready: Int
+        let missing: Int
+        let safeDefault: Bool
+    }
+
+    let generatedAt: Int
+    let summary: Summary
+    let targets: [DeviceOpsTarget]
+
+    static let empty = DeviceOpsStatus(
+        generatedAt: 0,
+        summary: Summary(targets: 0, ready: 0, missing: 0, safeDefault: true),
+        targets: []
+    )
+}
+
+struct DeviceOpsTarget: Decodable, Identifiable, Equatable {
+    var id: String { targetID }
+    let targetID: String
+    let targetName: String
+    let host: String
+    let kind: String
+    let online: Bool?
+    let moleInstalled: Bool
+    let moPath: String
+    let version: String
+    let brewInstalled: Bool
+    let installHint: String
+    let capabilities: [String: Bool]
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case targetID = "targetId"
+        case targetName
+        case host
+        case kind
+        case online
+        case moleInstalled
+        case moPath
+        case version
+        case brewInstalled
+        case installHint
+        case capabilities
+        case error
+    }
+}
+
+struct ReachStatus: Decodable, Equatable {
+    struct Summary: Decodable, Equatable {
+        let ready: Int
+        let total: Int
+        let coreReady: Int
+        let coreTotal: Int
+    }
+
+    let generatedAt: Int
+    let summary: Summary
+    let channels: [ReachChannel]
+
+    static let empty = ReachStatus(
+        generatedAt: 0,
+        summary: Summary(ready: 0, total: 0, coreReady: 0, coreTotal: 0),
+        channels: []
+    )
+}
+
+struct ReachChannel: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let tier: Int
+    let isOptional: Bool
+    let status: String
+    let message: String
+    let path: String
+    let backends: [String]
+    let description: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case tier
+        case isOptional = "optional"
+        case status
+        case message
+        case path
+        case backends
+        case description
+    }
+}
+
 struct HostProcess: Codable, Identifiable, Equatable {
     var id: String { "\(pid)-\(command)" }
     let pid: String

@@ -74,6 +74,26 @@ class TerminalWriteIn(BaseModel):
     text: str = ""
 
 
+class DeviceOpsPreviewIn(BaseModel):
+    action: str
+    target_id: str = "local"
+    path: str = ""
+
+
+class ReachReadURLIn(BaseModel):
+    url: str
+    limit: int = 12000
+
+
+class ReachRepoIn(BaseModel):
+    repo: str
+
+
+class ReachSearchIn(BaseModel):
+    query: str
+    limit: int = 10
+
+
 @router.get("/settings")
 def get_settings() -> dict:
     return user_settings.load()
@@ -558,6 +578,54 @@ def system_notifications() -> dict:
 def system_weather(lat: float | None = None, lon: float | None = None, city: str | None = None) -> dict:
     from ..agent import sysinfo
     return sysinfo.weather(latitude=lat, longitude=lon, city=city)
+
+
+@router.get("/device-ops/status")
+def device_ops_status() -> dict:
+    from .. import device_ops
+    return device_ops.fleet_status()
+
+
+@router.post("/device-ops/preview")
+def device_ops_preview(req: DeviceOpsPreviewIn) -> dict:
+    from .. import device_ops
+    try:
+        return device_ops.preview(req.action, target_id=req.target_id, path=req.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/reach/status")
+def reach_status() -> dict:
+    from .. import reach
+    return reach.channel_status()
+
+
+@router.post("/reach/read-url")
+def reach_read_url(req: ReachReadURLIn) -> dict:
+    from .. import reach
+    try:
+        return reach.read_url(req.url, limit=req.limit)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reach/github/repo")
+def reach_github_repo(req: ReachRepoIn) -> dict:
+    from .. import reach
+    try:
+        return reach.github_repo(req.repo)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reach/github/search")
+def reach_github_search(req: ReachSearchIn) -> dict:
+    from .. import reach
+    try:
+        return reach.github_search(req.query, limit=req.limit)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/services")

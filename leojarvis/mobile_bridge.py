@@ -586,6 +586,12 @@ class MobileNoteIn(BaseModel):
     pinned: bool = False
 
 
+class DeviceOpsPreviewIn(BaseModel):
+    action: str
+    target_id: str = "local"
+    path: str = ""
+
+
 @app.get("/mobile/bridge/health")
 def health() -> dict[str, Any]:
     cfg = _bridge_settings()
@@ -676,6 +682,30 @@ def jarvis_briefing_today(authorization: str | None = Header(default=None)) -> d
     from .briefing.builder import build_today
 
     return {"ok": True, "briefing": build_today()}
+
+
+@app.get("/mobile/device-ops/status")
+def mobile_device_ops_status(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import device_ops
+
+    return device_ops.fleet_status()
+
+
+@app.post("/mobile/device-ops/preview")
+def mobile_device_ops_preview(req: DeviceOpsPreviewIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import device_ops
+
+    return device_ops.preview(req.action, target_id=req.target_id, path=req.path)
+
+
+@app.get("/mobile/reach/status")
+def mobile_reach_status(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import reach
+
+    return reach.channel_status()
 
 
 @app.post("/mobile/bridge/probe")

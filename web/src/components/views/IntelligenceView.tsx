@@ -6,6 +6,8 @@ import {
   getBriefing,
   getCockpitOverview,
   getIntelligenceOverview,
+  getReachStatus,
+  inspectReachGithubRepo,
   runIngest,
   runIntelligenceScan,
   sendFeedback,
@@ -17,6 +19,8 @@ import {
   type GithubRadarRepo,
   type IntelligenceOverview,
   type IntelligenceSource,
+  type ReachGithubRepo,
+  type ReachStatus,
 } from "../../api";
 import { PageSkeleton } from "../Skeleton";
 import { Sparkline } from "../Sparkline";
@@ -159,9 +163,13 @@ export function IntelligenceView() {
   const [intel, setIntel] = useState<IntelligenceOverview | null>(null);
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
   const [repos, setRepos] = useState<CockpitGithubCard[]>([]);
+  const [reach, setReach] = useState<ReachStatus | null>(null);
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [collecting, setCollecting] = useState(false);
+  const [repoQuery, setRepoQuery] = useState("");
+  const [repoInspect, setRepoInspect] = useState<ReachGithubRepo | null>(null);
+  const [repoBusy, setRepoBusy] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
@@ -176,14 +184,16 @@ export function IntelligenceView() {
   const refresh = async () => {
     setError("");
     try {
-      const [intelData, briefingData, cockpit] = await Promise.all([
+      const [intelData, briefingData, cockpit, reachData] = await Promise.all([
         getIntelligenceOverview(),
         getBriefing(),
         getCockpitOverview(),
+        getReachStatus(),
       ]);
       setIntel(intelData);
       setBriefing(briefingData);
       setRepos(cockpit.intelligence.top_repos || []);
+      setReach(reachData);
     } catch (err) {
       setError(String(err));
     }
@@ -278,6 +288,20 @@ export function IntelligenceView() {
     }
   };
 
+  const inspectRepo = async () => {
+    const repo = repoQuery.trim();
+    if (!repo) return;
+    setRepoBusy(true);
+    setRepoInspect(null);
+    try {
+      setRepoInspect(await inspectReachGithubRepo(repo));
+    } catch (err) {
+      setRepoInspect({ ok: false, repo, error: String(err) });
+    } finally {
+      setRepoBusy(false);
+    }
+  };
+
   const tiles: [string, number | string][] = [
     ["新闻简报", newsItems.length],
     ["GitHub 雷达", githubCards.length || intel?.stats.github_repos || 0],
@@ -311,6 +335,50 @@ export function IntelligenceView() {
           </div>
         ))}
       </div>
+
+      <section className="reach-panel card">
+        <div className="reach-head">
+          <div>
+            <div className="panel-title">Reach 触达渠道</div>
+            <p>吸收 Agent-Reach 的渠道模型：网页、GitHub、RSS、视频、Exa/MCP 和社媒工具按可用性分层显示。</p>
+          </div>
+          <strong>{reach ? `${reach.summary.ready}/${reach.summary.total}` : "检测中"}</strong>
+        </div>
+        <div className="reach-grid">
+          {(reach?.channels || []).slice(0, 10).map((channel) => (
+            <article className={`reach-channel ${channel.status}`} key={channel.id}>
+              <b>{channel.name}</b>
+              <span>{channel.backends.join(" / ")}</span>
+              <em>{channel.status === "ok" ? "可用" : channel.status === "warn" ? "需配置" : "未就绪"}</em>
+              <p>{channel.message}</p>
+            </article>
+          ))}
+        </div>
+        <div className="repo-inspector">
+          <div>
+            <b>GitHub 仓库深读</b>
+            <span>直接读取 description、topic、license、release、stars、forks，作为情报卡片的证据层。</span>
+          </div>
+          <input placeholder="owner/repo 或 GitHub URL" value={repoQuery} onChange={(e) => setRepoQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") inspectRepo(); }} />
+          <button className="btn sm primary" onClick={inspectRepo} disabled={repoBusy || !repoQuery.trim()}>{repoBusy ? "读取中" : "读取"}</button>
+        </div>
+        {repoInspect ? (
+          <div className={`repo-inspect-result ${repoInspect.ok ? "ok" : "bad"}`}>
+            {repoInspect.ok && repoInspect.summary ? (
+              <>
+                <div>
+                  <b>{repoInspect.summary.name}</b>
+                  <span>{repoInspect.summary.language || "未知语言"} · {repoInspect.summary.stars.toLocaleString()} 星 · Fork {repoInspect.summary.forks.toLocaleString()}</span>
+                </div>
+                <p>{repoInspect.summary.description || "仓库未提供 description，需要打开 README 继续判断。"}</p>
+                <small>{repoInspect.summary.topics.slice(0, 8).map((t) => `#${t}`).join(" ")} · {repoInspect.summary.license || "未标注 license"} · release {repoInspect.summary.latest_release || "无"}</small>
+              </>
+            ) : (
+              <p>{repoInspect.error || "读取失败"}</p>
+            )}
+          </div>
+        ) : null}
+      </section>
 
       {briefing?.summary?.today_focus ? (
         <section className="brief-focus">
