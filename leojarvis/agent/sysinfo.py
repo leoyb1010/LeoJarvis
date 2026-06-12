@@ -249,7 +249,24 @@ def _memory_detail() -> dict:
     }
 
 
+# 温控探测要跑 pmset + sysctl + `mo status --json`（mole CLI，最慢约 1s）。温度/功耗/风扇
+# 变化很慢，没必要每次系统/设备页轮询都重跑。缓存 45s，把这块 ~990ms 的开销摊掉。
+_THERMAL_CACHE: dict[str, object] = {"ts": 0.0, "data": None}
+_THERMAL_TTL = 45.0
+
+
 def _thermal_info() -> dict:
+    now = time.time()
+    cached = _THERMAL_CACHE.get("data")
+    if cached is not None and now - float(_THERMAL_CACHE.get("ts", 0)) < _THERMAL_TTL:
+        return cached  # type: ignore[return-value]
+    data = _thermal_info_probe()
+    _THERMAL_CACHE["data"] = data
+    _THERMAL_CACHE["ts"] = now
+    return data
+
+
+def _thermal_info_probe() -> dict:
     thermal = _run(["pmset", "-g", "therm"], timeout=4)
     pressure_raw = _run(["sysctl", "-n", "machdep.xcpm.cpu_thermal_level"], timeout=3)
     pressure = None
@@ -1211,7 +1228,43 @@ def local_notifications() -> dict:
     }
 
 
-def structured_status() -> dict:
+# 整套系统探测（磁盘/CPU/内存/温控/电源/网络/进程）此前每次 /system/overview(10s 轮询)、
+# /device/summary、/devices(15s 轮询) 都会重跑，单次约 1.2s。改成 stale-while-revalidate：
+# 请求永远拿缓存立刻返回，过期则后台线程刷新，绝不阻塞前端轮询。
+_STRUCT_CACHE: dict[str, object] = {"ts": 0.0, "data": None}
+_STRUCT_TTL = 5.0
+_STRUCT_LOCK = threading.Lock()
+_STRUCT_REFRESHING = threading.Event()
+
+
+def structured_status(*, max_age: float = _STRUCT_TTL, block: bool = False) -> dict:
+    now = time.time()
+    cached = _STRUCT_CACHE.get("data")
+    fresh = cached is not None and now - float(_STRUCT_CACHE.get("ts", 0)) < max_age
+    if cached is None or (block and not fresh):
+        return _refresh_structured_status()
+    if not fresh and not _STRUCT_REFRESHING.is_set():
+        _STRUCT_REFRESHING.set()
+        threading.Thread(target=_refresh_structured_status_bg, daemon=True).start()
+    return cached  # type: ignore[return-value]
+
+
+def _refresh_structured_status_bg() -> None:
+    try:
+        _refresh_structured_status()
+    finally:
+        _STRUCT_REFRESHING.clear()
+
+
+def _refresh_structured_status() -> dict:
+    with _STRUCT_LOCK:
+        data = _structured_status_probe()
+        _STRUCT_CACHE["data"] = data
+        _STRUCT_CACHE["ts"] = time.time()
+        return data
+
+
+def _structured_status_probe() -> dict:
     total, used, free = shutil.disk_usage("/")
     gb = 1024 ** 3
     disk_pct = round(used / total * 100, 1)

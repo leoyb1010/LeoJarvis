@@ -168,6 +168,16 @@ def run_ssh_probe() -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def run_maintenance() -> dict:
+    """定时维护：裁日志 + 清旧快照。在线程里跑，避免文件/DB 操作阻塞事件循环。"""
+    from .maintenance import run_maintenance as _do
+    try:
+        return _do()
+    except Exception as exc:  # 维护失败绝不影响调度器
+        print(f"[maintenance] error: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
 def run_remote_cortex_maintain() -> dict:
     """远程 LeoJarvis 隧道保活：周期做真实 HTTP 健康校验，断了就后台重连。
     之前断线只有打开设备页才触发重连；现在睡眠唤醒/网络切换后约一分钟内自愈。"""
@@ -187,7 +197,9 @@ def run_remote_cortex_maintain() -> dict:
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = user_settings.effective("schedule")
     intel_cfg = user_settings.effective("intelligence")
-    job_defaults = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 60}
+    # misfire_grace_time 放宽到 5 分钟：笔记本短暂睡眠/卡顿造成的 miss 直接补跑、不刷
+    # 警告；coalesce 保证只补跑一次。更长的睡眠才会留下「missed」日志（确实值得知道）。
+    job_defaults = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 300}
     sched = AsyncIOScheduler(job_defaults=job_defaults)
     sched.add_job(run_ingest_cycle, "interval", minutes=int(cfg.get("ingest_minutes", 30)), id="ingest", replace_existing=True)
     sched.add_job(
@@ -216,4 +228,10 @@ def setup_scheduler() -> AsyncIOScheduler:
                   hour=int(cfg.get("briefing_hour", 8)),
                   minute=int(cfg.get("briefing_minute", 0)),
                   id="briefing", replace_existing=True)
+    # 维护：裁日志 + 清旧 GitHub 快照。每天凌晨跑，外加启动后 ~60s 先跑一次，
+    # 避免日志/快照表在两次定时之间无限增长。
+    sched.add_job(run_maintenance, "cron", hour=4, minute=30, id="maintenance",
+                  replace_existing=True, misfire_grace_time=3600, coalesce=True)
+    sched.add_job(run_maintenance, "date", id="maintenance_boot",
+                  run_date=datetime.now() + timedelta(seconds=60), replace_existing=True)
     return sched

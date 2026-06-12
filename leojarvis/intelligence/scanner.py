@@ -30,6 +30,38 @@ from ..notify.hub import hub
 USER_AGENT = "LeoJarvis-Intelligence/0.1 (+https://github.com/leoyb1010/LeoJarvis)"
 _SCAN_LOCK = threading.Lock()
 
+# GitHub 搜索 API 未认证只有 10 次/分钟；雷达每轮最多 10 条查询，容易顶到限额。
+# 本机有 token 就带上（env 或 `gh auth token`），认证后升到 30 次/分钟。缓存避免每次扫描都 fork gh。
+_GITHUB_TOKEN_CACHE: dict[str, Any] = {"ts": 0.0, "token": None}
+_GITHUB_TOKEN_TTL = 600.0
+
+
+def _github_token() -> str:
+    import os
+    import subprocess
+
+    now = time.time()
+    if now - float(_GITHUB_TOKEN_CACHE.get("ts", 0)) < _GITHUB_TOKEN_TTL:
+        return str(_GITHUB_TOKEN_CACHE.get("token") or "")
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not token:
+        try:
+            out = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=4)
+            token = out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:
+            token = ""
+    _GITHUB_TOKEN_CACHE["ts"] = now
+    _GITHUB_TOKEN_CACHE["token"] = token
+    return token
+
+
+def _github_headers() -> dict[str, str]:
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT}
+    token = _github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -950,7 +982,7 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
         local["queries"].append(search_q)
         try:
             async with sem:
-                res = await client.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=5)
+                res = await client.get(url, headers=_github_headers(), timeout=5)
                 res.raise_for_status()
             data = res.json()
             for repo in data.get("items", []):

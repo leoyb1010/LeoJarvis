@@ -42,6 +42,8 @@ def _warm_caches() -> None:
             from .agent import sysinfo
             sysinfo.ai_tool_status(block=True)
             sysinfo.weather()
+            # 预热系统/设备探测缓存（含最慢的温控 mo 探测），首开系统页/设备页直接命中。
+            sysinfo.structured_status(block=True)
             # 预热驾驶舱总览缓存，首屏直接命中，避免第一次点击卡 1~2s。
             from .cockpit import overview
             overview(force=True)
@@ -81,12 +83,22 @@ if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
     def _serve_index() -> FileResponse:
         return _index_response()
 
+    # 后端路由前缀：命中但未被上面的 API 路由匹配 = 真正的 404，不能回退到 index.html，
+    # 否则前端把 HTML 当成 JSON 解析，报“接口返回的不是 JSON”这种误导性错误。
+    _BACKEND_PREFIXES = ("api/", "health", "ws/", "assets/")
+
+    _DIST_ROOT = _WEB_DIST.resolve()
+
     @app.get("/{full_path:path}")
-    def _spa_fallback(full_path: str) -> FileResponse:
+    def _spa_fallback(full_path: str):
         # 真实存在的静态文件直接返回，其余路径回退到 index.html（前端路由）。
-        candidate = _WEB_DIST / full_path
-        if candidate.is_file():
+        # 解析后必须仍在 dist/ 内，挡掉 `../` 目录穿越读到任意本地文件。
+        candidate = (_WEB_DIST / full_path).resolve()
+        if candidate.is_file() and _DIST_ROOT in candidate.parents:
             return FileResponse(str(candidate))
+        if full_path.startswith(_BACKEND_PREFIXES):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"no such endpoint: /{full_path}")
         return _index_response()
 
 

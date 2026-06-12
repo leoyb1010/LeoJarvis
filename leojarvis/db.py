@@ -385,3 +385,33 @@ def delete_device_heartbeat(device_id: str) -> None:
     init_db()
     with conn() as c:
         c.execute("DELETE FROM device_heartbeats WHERE device_id=?", (device_id,))
+
+
+def prune_old_data(*, snapshot_days: int = 90) -> dict[str, int]:
+    """给会无限增长的表做保留窗口。
+
+    github_repo_snapshots 每小时雷达扫描都在写，几周就上万行；雷达每次 GROUP BY
+    全表，越跑越慢。这里删掉 snapshot_days 之前的旧快照，但每个仓库永远保留最新一条
+    （算 24h/7d 星标增量要用历史基线）。events / judgments 体量小且喂给简报和记忆，
+    暂不清理。
+    """
+    init_db()
+    cutoff = now_ms() - int(snapshot_days) * 86_400_000
+    removed = {"snapshots": 0}
+    with conn() as c:
+        cur = c.execute(
+            """
+            DELETE FROM github_repo_snapshots
+            WHERE observed_ts < ?
+              AND id NOT IN (
+                SELECT s.id FROM github_repo_snapshots s
+                JOIN (
+                  SELECT repo_full_name, MAX(observed_ts) AS m
+                  FROM github_repo_snapshots GROUP BY repo_full_name
+                ) t ON s.repo_full_name = t.repo_full_name AND s.observed_ts = t.m
+              )
+            """,
+            (cutoff,),
+        )
+        removed["snapshots"] = cur.rowcount
+    return removed

@@ -53,25 +53,49 @@ TOOL_BASE_RISK = {
 }
 
 
+# 把命令拆成「会各自执行的段」：;  |  &&  ||。不拆单个 & (后台) 和 2>&1。
+# shell=True 会跑完整命令串，只看第一个词会让 `ls; rm -rf ~`、`curl x | sh` 漏过去。
+_SHELL_SPLIT = re.compile(r"\|\||&&|;|\|")
+# 命令替换 / 反引号：里面跑什么无法静态判断，一律要人确认。
+_SUBST = re.compile(r"\$\(|`")
+# find 的执行/删除动作：-exec -execdir -ok -okdir -delete
+_FIND_WRITE = re.compile(r"\s-(?:exec|execdir|ok|okdir|delete)\b")
+
+
+def _segment_risk(seg: str) -> str:
+    parts = seg.split()
+    if not parts:
+        return "auto"
+    first = parts[0]
+    if first == "sudo" or first not in SHELL_AUTO_PREFIXES:
+        return "confirm"
+    if first == "git" and len(parts) > 1 and parts[1] in _GIT_WRITE:
+        return "confirm"
+    if first == "brew" and len(parts) > 1 and parts[1] in _BREW_WRITE:
+        return "confirm"
+    # find -exec/-delete 能跑任意命令或删文件，等同写操作。
+    if first == "find" and _FIND_WRITE.search(f" {seg} "):
+        return "confirm"
+    # 原地修改（sed -i 等）。
+    if " -i " in f" {seg} ":
+        return "confirm"
+    return "auto"
+
+
 def _shell_risk(command: str) -> str:
     cmd = command.strip()
     for pat in SHELL_DENY:
         if pat.search(cmd):
             return "deny"
-    # 含 sudo / 重定向写 / 管道到危险命令 → confirm
-    first = cmd.split()[0] if cmd.split() else ""
-    if first == "sudo":
+    if _SUBST.search(cmd):
         return "confirm"
-    if first not in SHELL_AUTO_PREFIXES:
+    # 输出重定向写文件（> 或 >>，但放过 2>&1 这类 fd 重定向）。
+    if re.search(r"(^|\s)>>?\s*\S", cmd):
         return "confirm"
-    parts = cmd.split()
-    if first == "git" and len(parts) > 1 and parts[1] in _GIT_WRITE:
-        return "confirm"
-    if first == "brew" and len(parts) > 1 and parts[1] in _BREW_WRITE:
-        return "confirm"
-    # 含输出重定向到文件 / 原地修改 → confirm
-    if re.search(r"(^|\s)>>?\s*\S", cmd) or " -i " in f" {cmd} ":
-        return "confirm"
+    # 逐段校验：任意一段不是只读白名单命令，整条都要确认。
+    for seg in _SHELL_SPLIT.split(cmd):
+        if _segment_risk(seg.strip()) != "auto":
+            return "confirm"
     return "auto"
 
 
