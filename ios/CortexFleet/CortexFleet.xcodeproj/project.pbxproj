@@ -65,6 +65,7 @@
 		0F0001352C00000000000001 /* NotebookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002352C00000000000001 /* NotebookView.swift */; };
 		0F0001362C00000000000001 /* NotebookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002362C00000000000001 /* NotebookDetailView.swift */; };
 		0F00F1062C00000000000001 /* NotebookModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002312C00000000000001 /* NotebookModels.swift */; };
+		0F0001372C00000000000001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002372C00000000000001 /* OnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -157,6 +158,7 @@
 		0F0002342C00000000000001 /* NotebookStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookStore.swift; sourceTree = "<group>"; };
 		0F0002352C00000000000001 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
 		0F0002362C00000000000001 /* NotebookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDetailView.swift; sourceTree = "<group>"; };
+		0F0002372C00000000000001 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -256,6 +258,7 @@
 				0F00022E2C00000000000001 /* ArticleDetailView.swift */,
 				0F0002352C00000000000001 /* NotebookView.swift */,
 				0F0002362C00000000000001 /* NotebookDetailView.swift */,
+				0F0002372C00000000000001 /* OnboardingView.swift */,
 				0F0002212C00000000000001 /* BriefingView.swift */,
 				0F0002182C00000000000001 /* NotesView.swift */,
 				0F0002192C00000000000001 /* NoteEditorView.swift */,
@@ -520,6 +523,7 @@
 				0F0001342C00000000000001 /* NotebookStore.swift in Sources */,
 				0F0001352C00000000000001 /* NotebookView.swift in Sources */,
 				0F0001362C00000000000001 /* NotebookDetailView.swift in Sources */,
+				0F0001372C00000000000001 /* OnboardingView.swift in Sources */,
 				0F00012F2C00000000000001 /* ShareCardTemplates.swift in Sources */,
 				0F0001302C00000000000001 /* ShareRenderer.swift in Sources */,
 				0F0001212C00000000000001 /* BriefingView.swift in Sources */,

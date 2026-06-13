@@ -33,8 +33,17 @@ struct CortexFleetApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var store: FleetStore
+    @State private var onboarded = UserDefaults.standard.bool(forKey: "onboarding.done")
 
     var body: some View {
+        if !onboarded {
+            OnboardingView(done: $onboarded)
+        } else {
+            mainTabs
+        }
+    }
+
+    private var mainTabs: some View {
         TabView {
             NavigationStack {
                 OverviewView()
