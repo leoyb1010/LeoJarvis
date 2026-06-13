@@ -40,7 +40,7 @@ struct RootView: View {
             }
 
             NavigationStack {
-                MobileNotesView()
+                NotesView()
             }
             .tabItem {
                 Label("记事", systemImage: "note.text")

@@ -267,8 +267,39 @@ struct LocalDeviceProbe {
             interfaceIdiom: interfaceIdiom,
             localeIdentifier: Locale.current.identifier,
             timeZoneIdentifier: TimeZone.current.identifier,
+            networkType: NetworkProbe.shared.currentType,
+            networkExpensive: NetworkProbe.shared.isExpensive,
+            screenBrightness: screenBrightness,
+            darkMode: isDarkMode,
+            availableMemoryGB: availableMemoryGB,
             collectedAt: Date()
         )
+    }
+
+    private static var screenBrightness: Double {
+        #if os(iOS)
+        return Double(UIScreen.main.brightness)
+        #else
+        return 0
+        #endif
+    }
+
+    private static var isDarkMode: Bool {
+        #if os(iOS)
+        return UITraitCollection.current.userInterfaceStyle == .dark
+        #else
+        return false
+        #endif
+    }
+
+    private static var availableMemoryGB: Double? {
+        #if os(iOS)
+        let available = os_proc_available_memory()
+        guard available > 0 else { return nil }
+        return Double(available) / 1_073_741_824
+        #else
+        return nil
+        #endif
     }
 
     private static var deviceName: String {

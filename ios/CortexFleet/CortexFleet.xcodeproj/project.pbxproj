@@ -25,6 +25,12 @@
 		0F0001132C00000000000001 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002132C00000000000001 /* AppEnvironment.swift */; };
 		0F0001142C00000000000001 /* NoteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002142C00000000000001 /* NoteModels.swift */; };
 		0F0001152C00000000000001 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002152C00000000000001 /* FeedModels.swift */; };
+		0F0001162C00000000000001 /* NoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002162C00000000000001 /* NoteStore.swift */; };
+		0F0001172C00000000000001 /* BridgeImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002172C00000000000001 /* BridgeImporter.swift */; };
+		0F0001182C00000000000001 /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002182C00000000000001 /* NotesView.swift */; };
+		0F0001192C00000000000001 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002192C00000000000001 /* NoteEditorView.swift */; };
+		0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021A2C00000000000001 /* NetworkProbe.swift */; };
+		0F00011B2C00000000000001 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021B2C00000000000001 /* SharedComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +53,12 @@
 		0F0002132C00000000000001 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		0F0002142C00000000000001 /* NoteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteModels.swift; sourceTree = "<group>"; };
 		0F0002152C00000000000001 /* FeedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedModels.swift; sourceTree = "<group>"; };
+		0F0002162C00000000000001 /* NoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStore.swift; sourceTree = "<group>"; };
+		0F0002172C00000000000001 /* BridgeImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeImporter.swift; sourceTree = "<group>"; };
+		0F0002182C00000000000001 /* NotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesView.swift; sourceTree = "<group>"; };
+		0F0002192C00000000000001 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
+		0F00021A2C00000000000001 /* NetworkProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProbe.swift; sourceTree = "<group>"; };
+		0F00021B2C00000000000001 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +88,7 @@
 				0F0004092C00000000000001 /* Core */,
 				0F00040A2C00000000000001 /* Sources */,
 				0F00040B2C00000000000001 /* Notes */,
+				0F00040C2C00000000000001 /* System */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -128,6 +141,9 @@
 				0F0002092C00000000000001 /* AddSSHDeviceView.swift */,
 				0F00020D2C00000000000001 /* JarvisViews.swift */,
 				0F0002102C00000000000001 /* DesignKit.swift */,
+				0F00021B2C00000000000001 /* SharedComponents.swift */,
+				0F0002182C00000000000001 /* NotesView.swift */,
+				0F0002192C00000000000001 /* NoteEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -162,8 +178,18 @@
 			isa = PBXGroup;
 			children = (
 				0F0002142C00000000000001 /* NoteModels.swift */,
+				0F0002162C00000000000001 /* NoteStore.swift */,
+				0F0002172C00000000000001 /* BridgeImporter.swift */,
 			);
 			path = Notes;
+			sourceTree = "<group>";
+		};
+		0F00040C2C00000000000001 /* System */ = {
+			isa = PBXGroup;
+			children = (
+				0F00021A2C00000000000001 /* NetworkProbe.swift */,
+			);
+			path = System;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -258,6 +284,12 @@
 				0F0001132C00000000000001 /* AppEnvironment.swift in Sources */,
 				0F0001142C00000000000001 /* NoteModels.swift in Sources */,
 				0F0001152C00000000000001 /* FeedModels.swift in Sources */,
+				0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */,
+				0F00011B2C00000000000001 /* SharedComponents.swift in Sources */,
+				0F0001162C00000000000001 /* NoteStore.swift in Sources */,
+				0F0001172C00000000000001 /* BridgeImporter.swift in Sources */,
+				0F0001182C00000000000001 /* NotesView.swift in Sources */,
+				0F0001192C00000000000001 /* NoteEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
