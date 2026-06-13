@@ -102,6 +102,10 @@ final class KeychainVault {
     private let service = "com.leo.cortexfleet.ssh-password"
     private let bridgeService = "com.leo.cortexfleet.mobile-bridge"
     private let bridgeAccount = "mac-mini-bridge-token"
+    private let llmService = "com.leo.cortexfleet.llm-api-key"
+    private let llmAccount = "llm-openai-compatible-key"
+    private let githubService = "com.leo.cortexfleet.github-token"
+    private let githubAccount = "github-radar-token"
 
     func savePassword(_ password: String, for hostID: String) throws {
         let data = Data(password.utf8)
@@ -159,6 +163,63 @@ final class KeychainVault {
 
     func hasBridgeToken() -> Bool {
         (try? bridgeToken().isEmpty == false) ?? false
+    }
+
+    // MARK: - LLM API key (AI 录入接口)
+
+    func saveLLMKey(_ apiKey: String) throws {
+        try saveSecret(apiKey, service: llmService, account: llmAccount)
+    }
+
+    func llmKey() throws -> String {
+        try readSecret(service: llmService, account: llmAccount)
+    }
+
+    func hasLLMKey() -> Bool {
+        (try? llmKey().isEmpty == false) ?? false
+    }
+
+    // MARK: - GitHub token (optional, raises radar rate limit)
+
+    func saveGitHubToken(_ token: String) throws {
+        try saveSecret(token, service: githubService, account: githubAccount)
+    }
+
+    func gitHubToken() -> String? {
+        try? readSecret(service: githubService, account: githubAccount)
+    }
+
+    // MARK: - Generic secret helpers
+
+    private func saveSecret(_ value: String, service: String, account: String) throws {
+        let data = Data(value.utf8)
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else { throw FleetError.keychain(status.description) }
+    }
+
+    private func readSecret(service: String, account: String) throws -> String {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data,
+              let value = String(data: data, encoding: .utf8), !value.isEmpty else {
+            throw FleetError.keychain("missing")
+        }
+        return value
     }
 
     private func baseQuery(for hostID: String) -> [String: Any] {

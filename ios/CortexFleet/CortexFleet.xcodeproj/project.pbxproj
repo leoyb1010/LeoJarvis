@@ -19,6 +19,12 @@
 		0F00010A2C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0F00020A2C00000000000001 /* Assets.xcassets */; };
 		0F00010B2C00000000000001 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 0F000A012C00000000000001 /* Citadel */; };
 		0F00010C2C00000000000001 /* JarvisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00020D2C00000000000001 /* JarvisViews.swift */; };
+		0F0001102C00000000000001 /* DesignKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002102C00000000000001 /* DesignKit.swift */; };
+		0F0001112C00000000000001 /* LLMSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002112C00000000000001 /* LLMSettings.swift */; };
+		0F0001122C00000000000001 /* LLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002122C00000000000001 /* LLMClient.swift */; };
+		0F0001132C00000000000001 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002132C00000000000001 /* AppEnvironment.swift */; };
+		0F0001142C00000000000001 /* NoteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002142C00000000000001 /* NoteModels.swift */; };
+		0F0001152C00000000000001 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002152C00000000000001 /* FeedModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +41,12 @@
 		0F00020B2C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0F00020C2C00000000000001 /* CortexFleet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CortexFleet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F00020D2C00000000000001 /* JarvisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisViews.swift; sourceTree = "<group>"; };
+		0F0002102C00000000000001 /* DesignKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignKit.swift; sourceTree = "<group>"; };
+		0F0002112C00000000000001 /* LLMSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMSettings.swift; sourceTree = "<group>"; };
+		0F0002122C00000000000001 /* LLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
+		0F0002132C00000000000001 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		0F0002142C00000000000001 /* NoteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteModels.swift; sourceTree = "<group>"; };
+		0F0002152C00000000000001 /* FeedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +73,9 @@
 			isa = PBXGroup;
 			children = (
 				0F0002012C00000000000001 /* CortexFleetApp.swift */,
+				0F0004092C00000000000001 /* Core */,
+				0F00040A2C00000000000001 /* Sources */,
+				0F00040B2C00000000000001 /* Notes */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -112,6 +127,7 @@
 				0F0002082C00000000000001 /* SettingsView.swift */,
 				0F0002092C00000000000001 /* AddSSHDeviceView.swift */,
 				0F00020D2C00000000000001 /* JarvisViews.swift */,
+				0F0002102C00000000000001 /* DesignKit.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -122,6 +138,32 @@
 				0F00020A2C00000000000001 /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		0F0004092C00000000000001 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002132C00000000000001 /* AppEnvironment.swift */,
+				0F0002112C00000000000001 /* LLMSettings.swift */,
+				0F0002122C00000000000001 /* LLMClient.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		0F00040A2C00000000000001 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002152C00000000000001 /* FeedModels.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		0F00040B2C00000000000001 /* Notes */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002142C00000000000001 /* NoteModels.swift */,
+			);
+			path = Notes;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -210,6 +252,12 @@
 				0F0001082C00000000000001 /* SettingsView.swift in Sources */,
 				0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */,
 				0F00010C2C00000000000001 /* JarvisViews.swift in Sources */,
+				0F0001102C00000000000001 /* DesignKit.swift in Sources */,
+				0F0001112C00000000000001 /* LLMSettings.swift in Sources */,
+				0F0001122C00000000000001 /* LLMClient.swift in Sources */,
+				0F0001132C00000000000001 /* AppEnvironment.swift in Sources */,
+				0F0001142C00000000000001 /* NoteModels.swift in Sources */,
+				0F0001152C00000000000001 /* FeedModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

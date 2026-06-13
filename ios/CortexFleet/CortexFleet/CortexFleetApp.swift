@@ -1,13 +1,18 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct CortexFleetApp: App {
+    @StateObject private var env = AppEnvironment()
     @StateObject private var store = FleetStore()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .environmentObject(env)
+                .environmentObject(env.llmConfig)
+                .modelContainer(env.container)
                 .onOpenURL { url in
                     store.applyBridgeConfigurationURL(url)
                 }
