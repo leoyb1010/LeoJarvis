@@ -26,14 +26,14 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                JarvisHomeView()
+                OverviewView()
             }
             .tabItem {
                 Label("总览", systemImage: "sparkles")
             }
 
             NavigationStack {
-                MobileBriefingView()
+                BriefingView()
             }
             .tabItem {
                 Label("简报", systemImage: "newspaper")

@@ -31,6 +31,12 @@
 		0F0001192C00000000000001 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002192C00000000000001 /* NoteEditorView.swift */; };
 		0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021A2C00000000000001 /* NetworkProbe.swift */; };
 		0F00011B2C00000000000001 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021B2C00000000000001 /* SharedComponents.swift */; };
+		0F00011C2C00000000000001 /* RSSIngestor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021C2C00000000000001 /* RSSIngestor.swift */; };
+		0F00011D2C00000000000001 /* GitHubRadar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021D2C00000000000001 /* GitHubRadar.swift */; };
+		0F00011E2C00000000000001 /* Judge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021E2C00000000000001 /* Judge.swift */; };
+		0F00011F2C00000000000001 /* IntelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021F2C00000000000001 /* IntelEngine.swift */; };
+		0F0001202C00000000000001 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002202C00000000000001 /* OverviewView.swift */; };
+		0F0001212C00000000000001 /* BriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002212C00000000000001 /* BriefingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +65,12 @@
 		0F0002192C00000000000001 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
 		0F00021A2C00000000000001 /* NetworkProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProbe.swift; sourceTree = "<group>"; };
 		0F00021B2C00000000000001 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		0F00021C2C00000000000001 /* RSSIngestor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSIngestor.swift; sourceTree = "<group>"; };
+		0F00021D2C00000000000001 /* GitHubRadar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubRadar.swift; sourceTree = "<group>"; };
+		0F00021E2C00000000000001 /* Judge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Judge.swift; sourceTree = "<group>"; };
+		0F00021F2C00000000000001 /* IntelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelEngine.swift; sourceTree = "<group>"; };
+		0F0002202C00000000000001 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		0F0002212C00000000000001 /* BriefingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BriefingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,6 +154,8 @@
 				0F00020D2C00000000000001 /* JarvisViews.swift */,
 				0F0002102C00000000000001 /* DesignKit.swift */,
 				0F00021B2C00000000000001 /* SharedComponents.swift */,
+				0F0002202C00000000000001 /* OverviewView.swift */,
+				0F0002212C00000000000001 /* BriefingView.swift */,
 				0F0002182C00000000000001 /* NotesView.swift */,
 				0F0002192C00000000000001 /* NoteEditorView.swift */,
 			);
@@ -170,6 +184,10 @@
 			isa = PBXGroup;
 			children = (
 				0F0002152C00000000000001 /* FeedModels.swift */,
+				0F00021C2C00000000000001 /* RSSIngestor.swift */,
+				0F00021D2C00000000000001 /* GitHubRadar.swift */,
+				0F00021E2C00000000000001 /* Judge.swift */,
+				0F00021F2C00000000000001 /* IntelEngine.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -277,15 +295,20 @@
 				0F0001072C00000000000001 /* DeviceDetailView.swift in Sources */,
 				0F0001082C00000000000001 /* SettingsView.swift in Sources */,
 				0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */,
-				0F00010C2C00000000000001 /* JarvisViews.swift in Sources */,
 				0F0001102C00000000000001 /* DesignKit.swift in Sources */,
 				0F0001112C00000000000001 /* LLMSettings.swift in Sources */,
 				0F0001122C00000000000001 /* LLMClient.swift in Sources */,
 				0F0001132C00000000000001 /* AppEnvironment.swift in Sources */,
 				0F0001142C00000000000001 /* NoteModels.swift in Sources */,
 				0F0001152C00000000000001 /* FeedModels.swift in Sources */,
+				0F00011C2C00000000000001 /* RSSIngestor.swift in Sources */,
+				0F00011D2C00000000000001 /* GitHubRadar.swift in Sources */,
+				0F00011E2C00000000000001 /* Judge.swift in Sources */,
+				0F00011F2C00000000000001 /* IntelEngine.swift in Sources */,
 				0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */,
 				0F00011B2C00000000000001 /* SharedComponents.swift in Sources */,
+				0F0001202C00000000000001 /* OverviewView.swift in Sources */,
+				0F0001212C00000000000001 /* BriefingView.swift in Sources */,
 				0F0001162C00000000000001 /* NoteStore.swift in Sources */,
 				0F0001172C00000000000001 /* BridgeImporter.swift in Sources */,
 				0F0001182C00000000000001 /* NotesView.swift in Sources */,

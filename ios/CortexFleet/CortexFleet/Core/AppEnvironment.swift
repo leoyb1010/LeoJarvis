@@ -10,6 +10,7 @@ final class AppEnvironment: ObservableObject {
 
     let container: ModelContainer
     let llmConfig: LLMConfigStore
+    let intel: IntelEngine
 
     init() {
         let schema = Schema([
@@ -36,7 +37,9 @@ final class AppEnvironment: ObservableObject {
             container = try! ModelContainer(for: schema, configurations: [mem])
         }
         self.container = container
-        self.llmConfig = LLMConfigStore()
+        let config = LLMConfigStore()
+        self.llmConfig = config
+        self.intel = IntelEngine(context: container.mainContext, llmConfig: config)
 
         Self.seedIfNeeded(context: container.mainContext)
     }
