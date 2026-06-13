@@ -55,6 +55,9 @@
 		0F00012B2C00000000000001 /* RSSHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022B2C00000000000001 /* RSSHubClient.swift */; };
 		0F00012C2C00000000000001 /* Localizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022C2C00000000000001 /* Localizer.swift */; };
 		0F00012D2C00000000000001 /* FeedDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022D2C00000000000001 /* FeedDiscovery.swift */; };
+		0F00012E2C00000000000001 /* ArticleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022E2C00000000000001 /* ArticleDetailView.swift */; };
+		0F00012F2C00000000000001 /* ShareCardTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022F2C00000000000001 /* ShareCardTemplates.swift */; };
+		0F0001302C00000000000001 /* ShareRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002302C00000000000001 /* ShareRenderer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -138,6 +141,9 @@
 		0F00022B2C00000000000001 /* RSSHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSHubClient.swift; sourceTree = "<group>"; };
 		0F00022C2C00000000000001 /* Localizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localizer.swift; sourceTree = "<group>"; };
 		0F00022D2C00000000000001 /* FeedDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedDiscovery.swift; sourceTree = "<group>"; };
+		0F00022E2C00000000000001 /* ArticleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleDetailView.swift; sourceTree = "<group>"; };
+		0F00022F2C00000000000001 /* ShareCardTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardTemplates.swift; sourceTree = "<group>"; };
+		0F0002302C00000000000001 /* ShareRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +183,7 @@
 				0F00040B2C00000000000001 /* Notes */,
 				0F00040C2C00000000000001 /* System */,
 				0F00040D2C00000000000001 /* Jarvis */,
+				0F00040E2C00000000000001 /* Share */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -232,6 +239,7 @@
 				0F0002102C00000000000001 /* DesignKit.swift */,
 				0F00021B2C00000000000001 /* SharedComponents.swift */,
 				0F0002202C00000000000001 /* OverviewView.swift */,
+				0F00022E2C00000000000001 /* ArticleDetailView.swift */,
 				0F0002212C00000000000001 /* BriefingView.swift */,
 				0F0002182C00000000000001 /* NotesView.swift */,
 				0F0002192C00000000000001 /* NoteEditorView.swift */,
@@ -315,6 +323,15 @@
 				0F00F0042C00000000000001 /* CortexFleetWidgets.entitlements */,
 			);
 			path = CortexFleetWidgets;
+			sourceTree = "<group>";
+		};
+		0F00040E2C00000000000001 /* Share */ = {
+			isa = PBXGroup;
+			children = (
+				0F00022F2C00000000000001 /* ShareCardTemplates.swift */,
+				0F0002302C00000000000001 /* ShareRenderer.swift */,
+			);
+			path = Share;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -468,6 +485,9 @@
 				0F0001282C00000000000001 /* JarvisIntents.swift in Sources */,
 				0F0001292C00000000000001 /* ScanActivityAttributes.swift in Sources */,
 				0F0001202C00000000000001 /* OverviewView.swift in Sources */,
+				0F00012E2C00000000000001 /* ArticleDetailView.swift in Sources */,
+				0F00012F2C00000000000001 /* ShareCardTemplates.swift in Sources */,
+				0F0001302C00000000000001 /* ShareRenderer.swift in Sources */,
 				0F0001212C00000000000001 /* BriefingView.swift in Sources */,
 				0F0001162C00000000000001 /* NoteStore.swift in Sources */,
 				0F0001172C00000000000001 /* BridgeImporter.swift in Sources */,

@@ -22,6 +22,37 @@ final class IntelEngine: ObservableObject {
         self.lastScan = UserDefaults.standard.object(forKey: "intel.lastScan") as? Date
     }
 
+    // MARK: - Detail helpers (on-demand localization + analyze-into-note)
+
+    /// On-demand high-quality Chinese localization for the article detail view,
+    /// cached onto `item.summaryZH`.
+    func localizeDetail(_ item: IntelItem) async {
+        guard item.summaryZH == nil, let client = llmConfig.makeClient() else { return }
+        if let zh = await Localizer.translateDetail(title: item.title, body: item.summary ?? "", client: client) {
+            item.summaryZH = zh
+            try? context.save()
+        }
+    }
+
+    /// "AI 分析入笔记": summarize an article into a Note (with relation/next-step).
+    @discardableResult
+    func analyzeIntoNote(_ item: IntelItem) async throws -> Note {
+        let store = NoteStore(context: context, llmConfig: llmConfig)
+        var body = "来源：\(item.sourceName)\n原文：\(item.url ?? "-")\n\n\(item.summary ?? item.title)"
+        if let client = llmConfig.makeClient() {
+            let analysis = try? await client.complete(
+                system: "你是中文情报分析助理。基于资讯给出：一段中文摘要、3 条要点(• 开头)、和我的关系、下一步建议。markdown 输出。",
+                user: "标题：\(item.displayTitle)\n摘要：\(item.summary ?? "")",
+                temperature: 0.3)
+            if let analysis { body = "\(analysis)\n\n---\n来源：\(item.sourceName) · \(item.url ?? "")" }
+        }
+        let note = store.create(title: item.displayTitle, content: body,
+                                tags: item.tags + ["资讯分析"], projectName: "资讯收藏", source: item.url ?? "intel")
+        item.isFavorite = true
+        try? context.save()
+        return note
+    }
+
     // MARK: - Public scan
 
     func scan(includeRSS: Bool = true, includeGitHub: Bool = true) async {
