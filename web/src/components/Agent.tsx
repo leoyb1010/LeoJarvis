@@ -163,7 +163,7 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
       {compact ? (
         <div className="floating-agent-head">
           <div>
-            <b>LeoJarvis Command</b>
+            <b>Jarvis</b>
             <span>本机行动中枢 · 高风险动作会等待确认</span>
           </div>
           <button className="icon-btn" onClick={onClose}>关闭</button>
@@ -272,10 +272,10 @@ export function FloatingAgent() {
       <button
         className="agent-fab"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "关闭中枢助手" : "打开中枢助手"}
+        aria-label={open ? "关闭 Jarvis 助手" : "打开 Jarvis 助手"}
       >
         <img src="/brand-mark.png" alt="" />
-        <span>{open ? "Close" : "Command"}</span>
+        <span>{open ? "Close" : "Jarvis"}</span>
       </button>
     </div>
   );

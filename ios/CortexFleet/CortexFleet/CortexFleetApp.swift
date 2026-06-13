@@ -1,16 +1,32 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct CortexFleetApp: App {
+    @StateObject private var env = AppEnvironment()
     @StateObject private var store = FleetStore()
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Register the background refresh task before the app finishes launching.
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .environmentObject(env)
+                .environmentObject(env.llmConfig)
+                .modelContainer(env.container)
                 .onOpenURL { url in
                     store.applyBridgeConfigurationURL(url)
                 }
+                .task {
+                    BackgroundRefresh.shared.register(env: env)
+                }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { BackgroundRefresh.shared.schedule() }
         }
     }
 }
@@ -21,21 +37,21 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                JarvisHomeView()
+                OverviewView()
             }
             .tabItem {
                 Label("总览", systemImage: "sparkles")
             }
 
             NavigationStack {
-                MobileBriefingView()
+                BriefingView()
             }
             .tabItem {
                 Label("简报", systemImage: "newspaper")
             }
 
             NavigationStack {
-                MobileNotesView()
+                NotesView()
             }
             .tabItem {
                 Label("记事", systemImage: "note.text")
@@ -55,6 +71,7 @@ struct RootView: View {
                 Label("设置", systemImage: "gearshape")
             }
         }
+        .jarvisFloatingButton()
         .task {
             await store.refreshAll()
         }

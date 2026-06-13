@@ -1486,16 +1486,6 @@ private struct MobileMetricTile: View {
     }
 }
 
-private struct SectionHeader: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.headline)
-            .padding(.top, 4)
-    }
-}
-
 private struct FlowTags: View {
     let tags: [String]
 

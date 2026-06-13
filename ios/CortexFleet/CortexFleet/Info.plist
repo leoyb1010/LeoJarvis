@@ -38,6 +38,17 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.leo.cortexfleet.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_http._tcp</string>
@@ -45,9 +56,19 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>LeoJarvis 连接 Mac mini Bridge，读取你授权的设备健康状态。</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>LeoJarvis 用麦克风录制语音记事，并作为附件保存到你的 Jarvis 个人记事。</string>
+	<string>LeoJarvis 用麦克风录制语音记事，并支持对 Jarvis 助手语音输入。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>LeoJarvis 允许你选择图片或视频，作为个人记事附件同步到 Jarvis。</string>
+	<string>LeoJarvis 允许你选择图片或视频，作为个人记事附件保存。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>LeoJarvis 用语音识别把你对 Jarvis 助手说的话转成文字指令。</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Jarvis 助手按你的自然语言为你在系统日历创建日程。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Jarvis 助手按你的自然语言读取并创建系统日历中的日程。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Jarvis 助手按你的自然语言在系统提醒事项中创建提醒。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Jarvis 助手按你的自然语言为你在地图中搜索地点或导航。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

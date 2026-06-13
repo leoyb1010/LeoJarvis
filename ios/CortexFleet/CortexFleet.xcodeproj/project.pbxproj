@@ -19,7 +19,71 @@
 		0F00010A2C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0F00020A2C00000000000001 /* Assets.xcassets */; };
 		0F00010B2C00000000000001 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 0F000A012C00000000000001 /* Citadel */; };
 		0F00010C2C00000000000001 /* JarvisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00020D2C00000000000001 /* JarvisViews.swift */; };
+		0F0001102C00000000000001 /* DesignKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002102C00000000000001 /* DesignKit.swift */; };
+		0F0001112C00000000000001 /* LLMSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002112C00000000000001 /* LLMSettings.swift */; };
+		0F0001122C00000000000001 /* LLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002122C00000000000001 /* LLMClient.swift */; };
+		0F0001132C00000000000001 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002132C00000000000001 /* AppEnvironment.swift */; };
+		0F0001142C00000000000001 /* NoteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002142C00000000000001 /* NoteModels.swift */; };
+		0F0001152C00000000000001 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002152C00000000000001 /* FeedModels.swift */; };
+		0F0001162C00000000000001 /* NoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002162C00000000000001 /* NoteStore.swift */; };
+		0F0001172C00000000000001 /* BridgeImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002172C00000000000001 /* BridgeImporter.swift */; };
+		0F0001182C00000000000001 /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002182C00000000000001 /* NotesView.swift */; };
+		0F0001192C00000000000001 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002192C00000000000001 /* NoteEditorView.swift */; };
+		0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021A2C00000000000001 /* NetworkProbe.swift */; };
+		0F00011B2C00000000000001 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021B2C00000000000001 /* SharedComponents.swift */; };
+		0F00011C2C00000000000001 /* RSSIngestor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021C2C00000000000001 /* RSSIngestor.swift */; };
+		0F00011D2C00000000000001 /* GitHubRadar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021D2C00000000000001 /* GitHubRadar.swift */; };
+		0F00011E2C00000000000001 /* Judge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021E2C00000000000001 /* Judge.swift */; };
+		0F00011F2C00000000000001 /* IntelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021F2C00000000000001 /* IntelEngine.swift */; };
+		0F0001202C00000000000001 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002202C00000000000001 /* OverviewView.swift */; };
+		0F0001212C00000000000001 /* BriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002212C00000000000001 /* BriefingView.swift */; };
+		0F0001222C00000000000001 /* JarvisTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002222C00000000000001 /* JarvisTools.swift */; };
+		0F0001232C00000000000001 /* JarvisVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002232C00000000000001 /* JarvisVoice.swift */; };
+		0F0001242C00000000000001 /* JarvisAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002242C00000000000001 /* JarvisAssistant.swift */; };
+		0F0001252C00000000000001 /* JarvisFloatingButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002252C00000000000001 /* JarvisFloatingButton.swift */; };
+		0F0001262C00000000000001 /* JarvisNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002262C00000000000001 /* JarvisNotifications.swift */; };
+		0F0001272C00000000000001 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002272C00000000000001 /* BackgroundRefresh.swift */; };
+		0F0001282C00000000000001 /* JarvisIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002282C00000000000001 /* JarvisIntents.swift */; };
+		0F0001292C00000000000001 /* ScanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002292C00000000000001 /* ScanActivityAttributes.swift */; };
+		0F00F1042C00000000000001 /* CortexFleetWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00F0012C00000000000001 /* CortexFleetWidgets.swift */; };
+		0F00F1052C00000000000001 /* ScanLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00F0022C00000000000001 /* ScanLiveActivity.swift */; };
+		0F00F1012C00000000000001 /* NoteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002142C00000000000001 /* NoteModels.swift */; };
+		0F00F1022C00000000000001 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002152C00000000000001 /* FeedModels.swift */; };
+		0F00F1032C00000000000001 /* ScanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002292C00000000000001 /* ScanActivityAttributes.swift */; };
+		0F00E00D2C00000000000001 /* CortexFleetWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0F00E0022C00000000000001 /* CortexFleetWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0F00E00C2C00000000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0F00E00D2C00000000000001 /* CortexFleetWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0F00E00A2C00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0F00E0012C00000000000001 /* CortexFleetWidgets */;
+			targetProxy = 0F00E00B2C00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		0F00E00B2C00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0F0006012C00000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0F00E0012C00000000000001;
+			remoteInfo = CortexFleetWidgets;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0F0002012C00000000000001 /* CortexFleetApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexFleetApp.swift; sourceTree = "<group>"; };
@@ -35,9 +99,47 @@
 		0F00020B2C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0F00020C2C00000000000001 /* CortexFleet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CortexFleet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F00020D2C00000000000001 /* JarvisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisViews.swift; sourceTree = "<group>"; };
+		0F0002102C00000000000001 /* DesignKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignKit.swift; sourceTree = "<group>"; };
+		0F0002112C00000000000001 /* LLMSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMSettings.swift; sourceTree = "<group>"; };
+		0F0002122C00000000000001 /* LLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
+		0F0002132C00000000000001 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		0F0002142C00000000000001 /* NoteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteModels.swift; sourceTree = "<group>"; };
+		0F0002152C00000000000001 /* FeedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedModels.swift; sourceTree = "<group>"; };
+		0F0002162C00000000000001 /* NoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStore.swift; sourceTree = "<group>"; };
+		0F0002172C00000000000001 /* BridgeImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeImporter.swift; sourceTree = "<group>"; };
+		0F0002182C00000000000001 /* NotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesView.swift; sourceTree = "<group>"; };
+		0F0002192C00000000000001 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
+		0F00021A2C00000000000001 /* NetworkProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProbe.swift; sourceTree = "<group>"; };
+		0F00021B2C00000000000001 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		0F00021C2C00000000000001 /* RSSIngestor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSIngestor.swift; sourceTree = "<group>"; };
+		0F00021D2C00000000000001 /* GitHubRadar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubRadar.swift; sourceTree = "<group>"; };
+		0F00021E2C00000000000001 /* Judge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Judge.swift; sourceTree = "<group>"; };
+		0F00021F2C00000000000001 /* IntelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelEngine.swift; sourceTree = "<group>"; };
+		0F0002202C00000000000001 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		0F0002212C00000000000001 /* BriefingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BriefingView.swift; sourceTree = "<group>"; };
+		0F0002222C00000000000001 /* JarvisTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisTools.swift; sourceTree = "<group>"; };
+		0F0002232C00000000000001 /* JarvisVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisVoice.swift; sourceTree = "<group>"; };
+		0F0002242C00000000000001 /* JarvisAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAssistant.swift; sourceTree = "<group>"; };
+		0F0002252C00000000000001 /* JarvisFloatingButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisFloatingButton.swift; sourceTree = "<group>"; };
+		0F0002262C00000000000001 /* JarvisNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisNotifications.swift; sourceTree = "<group>"; };
+		0F0002272C00000000000001 /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
+		0F0002282C00000000000001 /* JarvisIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisIntents.swift; sourceTree = "<group>"; };
+		0F0002292C00000000000001 /* ScanActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanActivityAttributes.swift; sourceTree = "<group>"; };
+		0F00F0012C00000000000001 /* CortexFleetWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexFleetWidgets.swift; sourceTree = "<group>"; };
+		0F00F0022C00000000000001 /* ScanLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanLiveActivity.swift; sourceTree = "<group>"; };
+		0F00E0022C00000000000001 /* CortexFleetWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CortexFleetWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0F00F0032C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0F00F0042C00000000000001 /* CortexFleetWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CortexFleetWidgets.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		0F00E0042C00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0F0003012C00000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -54,6 +156,7 @@
 			children = (
 				0F0004022C00000000000001 /* CortexFleet */,
 				0F0004032C00000000000001 /* Products */,
+				0F00E0062C00000000000001 /* CortexFleetWidgets */,
 			);
 			sourceTree = "<group>";
 		};
@@ -61,6 +164,11 @@
 			isa = PBXGroup;
 			children = (
 				0F0002012C00000000000001 /* CortexFleetApp.swift */,
+				0F0004092C00000000000001 /* Core */,
+				0F00040A2C00000000000001 /* Sources */,
+				0F00040B2C00000000000001 /* Notes */,
+				0F00040C2C00000000000001 /* System */,
+				0F00040D2C00000000000001 /* Jarvis */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -75,6 +183,7 @@
 			isa = PBXGroup;
 			children = (
 				0F00020C2C00000000000001 /* CortexFleet.app */,
+				0F00E0022C00000000000001 /* CortexFleetWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -112,6 +221,12 @@
 				0F0002082C00000000000001 /* SettingsView.swift */,
 				0F0002092C00000000000001 /* AddSSHDeviceView.swift */,
 				0F00020D2C00000000000001 /* JarvisViews.swift */,
+				0F0002102C00000000000001 /* DesignKit.swift */,
+				0F00021B2C00000000000001 /* SharedComponents.swift */,
+				0F0002202C00000000000001 /* OverviewView.swift */,
+				0F0002212C00000000000001 /* BriefingView.swift */,
+				0F0002182C00000000000001 /* NotesView.swift */,
+				0F0002192C00000000000001 /* NoteEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -124,6 +239,72 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		0F0004092C00000000000001 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002132C00000000000001 /* AppEnvironment.swift */,
+				0F0002112C00000000000001 /* LLMSettings.swift */,
+				0F0002122C00000000000001 /* LLMClient.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		0F00040A2C00000000000001 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002152C00000000000001 /* FeedModels.swift */,
+				0F00021C2C00000000000001 /* RSSIngestor.swift */,
+				0F00021D2C00000000000001 /* GitHubRadar.swift */,
+				0F00021E2C00000000000001 /* Judge.swift */,
+				0F00021F2C00000000000001 /* IntelEngine.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		0F00040B2C00000000000001 /* Notes */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002142C00000000000001 /* NoteModels.swift */,
+				0F0002162C00000000000001 /* NoteStore.swift */,
+				0F0002172C00000000000001 /* BridgeImporter.swift */,
+			);
+			path = Notes;
+			sourceTree = "<group>";
+		};
+		0F00040C2C00000000000001 /* System */ = {
+			isa = PBXGroup;
+			children = (
+				0F00021A2C00000000000001 /* NetworkProbe.swift */,
+				0F0002262C00000000000001 /* JarvisNotifications.swift */,
+				0F0002272C00000000000001 /* BackgroundRefresh.swift */,
+				0F0002282C00000000000001 /* JarvisIntents.swift */,
+				0F0002292C00000000000001 /* ScanActivityAttributes.swift */,
+			);
+			path = System;
+			sourceTree = "<group>";
+		};
+		0F00040D2C00000000000001 /* Jarvis */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002242C00000000000001 /* JarvisAssistant.swift */,
+				0F0002222C00000000000001 /* JarvisTools.swift */,
+				0F0002232C00000000000001 /* JarvisVoice.swift */,
+				0F0002252C00000000000001 /* JarvisFloatingButton.swift */,
+			);
+			path = Jarvis;
+			sourceTree = "<group>";
+		};
+		0F00E0062C00000000000001 /* CortexFleetWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				0F00F0012C00000000000001 /* CortexFleetWidgets.swift */,
+				0F00F0022C00000000000001 /* ScanLiveActivity.swift */,
+				0F00F0032C00000000000001 /* Info.plist */,
+				0F00F0042C00000000000001 /* CortexFleetWidgets.entitlements */,
+			);
+			path = CortexFleetWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -134,10 +315,14 @@
 				0F0007012C00000000000001 /* Sources */,
 				0F0003012C00000000000001 /* Frameworks */,
 				0F0007022C00000000000001 /* Resources */,
+				0F00E00C2C00000000000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+			);
+			dependencies = (
+				0F00E00A2C00000000000001 /* PBXTargetDependency */,
 			);
 			name = CortexFleet;
 			packageProductDependencies = (
@@ -146,6 +331,23 @@
 			productName = CortexFleet;
 			productReference = 0F00020C2C00000000000001 /* CortexFleet.app */;
 			productType = "com.apple.product-type.application";
+		};
+		0F00E0012C00000000000001 /* CortexFleetWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0F00E0072C00000000000001 /* Build configuration list for PBXNativeTarget "CortexFleetWidgets" */;
+			buildPhases = (
+				0F00E0032C00000000000001 /* Sources */,
+				0F00E0042C00000000000001 /* Frameworks */,
+				0F00E0052C00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CortexFleetWidgets;
+			productName = CortexFleetWidgets;
+			productReference = 0F00E0022C00000000000001 /* CortexFleetWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -180,11 +382,19 @@
 			projectRoot = "";
 			targets = (
 				0F0005012C00000000000001 /* CortexFleet */,
+				0F00E0012C00000000000001 /* CortexFleetWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		0F00E0052C00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0F0007022C00000000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -196,6 +406,18 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0F00E0032C00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F00F1042C00000000000001 /* CortexFleetWidgets.swift in Sources */,
+				0F00F1052C00000000000001 /* ScanLiveActivity.swift in Sources */,
+				0F00F1012C00000000000001 /* NoteModels.swift in Sources */,
+				0F00F1022C00000000000001 /* FeedModels.swift in Sources */,
+				0F00F1032C00000000000001 /* ScanActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0F0007012C00000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -209,7 +431,32 @@
 				0F0001072C00000000000001 /* DeviceDetailView.swift in Sources */,
 				0F0001082C00000000000001 /* SettingsView.swift in Sources */,
 				0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */,
-				0F00010C2C00000000000001 /* JarvisViews.swift in Sources */,
+				0F0001102C00000000000001 /* DesignKit.swift in Sources */,
+				0F0001112C00000000000001 /* LLMSettings.swift in Sources */,
+				0F0001122C00000000000001 /* LLMClient.swift in Sources */,
+				0F0001132C00000000000001 /* AppEnvironment.swift in Sources */,
+				0F0001142C00000000000001 /* NoteModels.swift in Sources */,
+				0F0001152C00000000000001 /* FeedModels.swift in Sources */,
+				0F00011C2C00000000000001 /* RSSIngestor.swift in Sources */,
+				0F00011D2C00000000000001 /* GitHubRadar.swift in Sources */,
+				0F00011E2C00000000000001 /* Judge.swift in Sources */,
+				0F00011F2C00000000000001 /* IntelEngine.swift in Sources */,
+				0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */,
+				0F00011B2C00000000000001 /* SharedComponents.swift in Sources */,
+				0F0001222C00000000000001 /* JarvisTools.swift in Sources */,
+				0F0001232C00000000000001 /* JarvisVoice.swift in Sources */,
+				0F0001242C00000000000001 /* JarvisAssistant.swift in Sources */,
+				0F0001252C00000000000001 /* JarvisFloatingButton.swift in Sources */,
+				0F0001262C00000000000001 /* JarvisNotifications.swift in Sources */,
+				0F0001272C00000000000001 /* BackgroundRefresh.swift in Sources */,
+				0F0001282C00000000000001 /* JarvisIntents.swift in Sources */,
+				0F0001292C00000000000001 /* ScanActivityAttributes.swift in Sources */,
+				0F0001202C00000000000001 /* OverviewView.swift in Sources */,
+				0F0001212C00000000000001 /* BriefingView.swift in Sources */,
+				0F0001162C00000000000001 /* NoteStore.swift in Sources */,
+				0F0001172C00000000000001 /* BridgeImporter.swift in Sources */,
+				0F0001182C00000000000001 /* NotesView.swift in Sources */,
+				0F0001192C00000000000001 /* NoteEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +584,7 @@
 		0F0008032C00000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = CortexFleet/CortexFleet.entitlements;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -361,6 +609,7 @@
 		0F0008042C00000000000001 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = CortexFleet/CortexFleet.entitlements;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -382,6 +631,66 @@
 			};
 			name = Release;
 		};
+		0F00E0082C00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CortexFleetWidgets/CortexFleetWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = 48H5Y3LNUK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CortexFleetWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jarvis Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leo.cortexfleet.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+			};
+			name = Debug;
+		};
+		0F00E0092C00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CortexFleetWidgets/CortexFleetWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = 48H5Y3LNUK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CortexFleetWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jarvis Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leo.cortexfleet.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				COPY_PHASE_STRIP = NO;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -399,6 +708,15 @@
 			buildConfigurations = (
 				0F0008012C00000000000001 /* Debug */,
 				0F0008022C00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0F00E0072C00000000000001 /* Build configuration list for PBXNativeTarget "CortexFleetWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F00E0082C00000000000001 /* Debug */,
+				0F00E0092C00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

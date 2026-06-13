@@ -27,6 +27,11 @@ struct LocalDeviceSnapshot: Identifiable, Equatable {
     let interfaceIdiom: String
     let localeIdentifier: String
     let timeZoneIdentifier: String
+    let networkType: String
+    let networkExpensive: Bool
+    let screenBrightness: Double
+    let darkMode: Bool
+    let availableMemoryGB: Double?
     let collectedAt: Date
 
     var storageUsedPercent: Double {
