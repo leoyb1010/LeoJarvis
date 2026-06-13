@@ -28,6 +28,7 @@ final class IntelEngine: ObservableObject {
         guard !isScanning else { return }
         isScanning = true
         lastError = nil
+        if #available(iOS 16.1, *) { ScanActivityController.shared.start() }
         defer { isScanning = false; progressText = nil }
 
         let interests = (try? context.fetch(FetchDescriptor<ProfileInterest>())) ?? []
@@ -36,12 +37,15 @@ final class IntelEngine: ObservableObject {
 
         if includeRSS {
             progressText = "扫描 RSS 信源…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 RSS 信源…", found: 0) }
             newItems += await scanRSS(judge: judge)
         }
         if includeGitHub {
             progressText = "扫描 GitHub 雷达…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 GitHub 雷达…", found: newItems.count) }
             newItems += await scanGitHub(judge: judge)
         }
+        if #available(iOS 16.1, *) { await ScanActivityController.shared.finish(found: newItems.count) }
 
         // Optional LLM localization/enrichment for the top items (bounded for cost).
         if llmConfig.settings.allowTranslation || llmConfig.settings.allowBriefingLLM,

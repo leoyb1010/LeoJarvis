@@ -5,6 +5,11 @@ import SwiftData
 struct CortexFleetApp: App {
     @StateObject private var env = AppEnvironment()
     @StateObject private var store = FleetStore()
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Register the background refresh task before the app finishes launching.
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -16,6 +21,12 @@ struct CortexFleetApp: App {
                 .onOpenURL { url in
                     store.applyBridgeConfigurationURL(url)
                 }
+                .task {
+                    BackgroundRefresh.shared.register(env: env)
+                }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { BackgroundRefresh.shared.schedule() }
         }
     }
 }

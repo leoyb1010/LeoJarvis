@@ -117,15 +117,6 @@ final class IntelItem {
         self.dedupeKey = dedupeKey
     }
 
-    var intelKind: IntelKind {
-        switch kind {
-        case "github_repo": return .github
-        case "x_post": return .x
-        case "email": return .mail
-        default: return domain == "life" ? .life : .news
-        }
-    }
-
     var displayTitle: String { (titleZH?.isEmpty == false ? titleZH! : title) }
 }
 

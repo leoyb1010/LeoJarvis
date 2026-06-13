@@ -190,6 +190,18 @@ enum IntelKind: String {
     }
 }
 
+extension IntelItem {
+    /// Visual category for the item, derived from its `kind`/`domain`.
+    var intelKind: IntelKind {
+        switch kind {
+        case "github_repo": return .github
+        case "x_post": return .x
+        case "email": return .mail
+        default: return domain == "life" ? .life : .news
+        }
+    }
+}
+
 enum IntelPriority {
     case high, medium, watch
 
