@@ -209,6 +209,17 @@ private struct SourcesManagerView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink { RSSHubRoutesView() } label: {
+                    Label("RSSHub 一键订阅（微博/知乎/B站…）", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                NavigationLink { FeedDiscoverView() } label: {
+                    Label("从网址发现订阅源", systemImage: "link.badge.plus")
+                }
+            } header: { Text("扩充信源") } footer: {
+                Text("RSSHub 把微博/知乎/B站/公众号等转成 RSS；默认公共实例，可在下方改成自建。")
+            }
+
             Section("关注项") {
                 ForEach(interests) { interest in
                     HStack { Text(interest.term); Spacer(); Text(interest.kind).font(.caption2).foregroundStyle(.tertiary) }
@@ -250,6 +261,102 @@ private struct SourcesManagerView: View {
             }
         }
         .navigationTitle("信源状态")
+    }
+}
+
+// MARK: - RSSHub one-tap routes
+
+private struct RSSHubRoutesView: View {
+    @Environment(\.modelContext) private var context
+    @Query private var feeds: [FeedSource]
+    @State private var instance = RSSHubClient.instanceBase
+    @State private var added: Set<String> = []
+
+    private var existingURLs: Set<String> { Set(feeds.map(\.url)) }
+
+    var body: some View {
+        List {
+            Section {
+                TextField("RSSHub 实例地址", text: $instance).urlEntryField()
+                Button("保存实例") { RSSHubClient.setInstance(instance) }
+            } header: { Text("实例") } footer: {
+                Text("默认公共实例 \(RSSHubClient.defaultInstance)。公共实例不稳定时建议自建。")
+            }
+            Section("热门订阅") {
+                ForEach(RSSHubClient.popularRoutes, id: \.id) { route in
+                    routeRow(route)
+                }
+            }
+        }
+        .navigationTitle("RSSHub 订阅")
+        .onAppear { instance = RSSHubClient.instanceBase }
+    }
+
+    @ViewBuilder
+    private func routeRow(_ route: RSSHubClient.Route) -> some View {
+        let url = RSSHubClient.feedURL(for: route)
+        let exists = existingURLs.contains(url) || added.contains(url)
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(route.name).font(.subheadline)
+                Text(route.note.isEmpty ? route.id : route.note)
+                    .font(.caption2).foregroundStyle(route.note.isEmpty ? Color.secondary : Color.orange).lineLimit(2)
+            }
+            Spacer()
+            Button {
+                context.insert(RSSHubClient.makeSource(from: route))
+                try? context.save(); added.insert(url)
+            } label: { Image(systemName: exists ? "checkmark.circle.fill" : "plus.circle") }
+                .disabled(exists)
+        }
+    }
+}
+
+// MARK: - Discover feed from URL
+
+private struct FeedDiscoverView: View {
+    @Environment(\.modelContext) private var context
+    @State private var pageURL = ""
+    @State private var results: [FeedDiscovery.Found] = []
+    @State private var loading = false
+    @State private var added: Set<String> = []
+
+    var body: some View {
+        List {
+            Section {
+                TextField("网站地址，如 example.com", text: $pageURL).urlEntryField()
+                Button { Task { await discover() } } label: {
+                    Label(loading ? "查找中…" : "查找订阅源", systemImage: "magnifyingglass")
+                }.disabled(loading || pageURL.trimmingCharacters(in: .whitespaces).isEmpty)
+            } footer: {
+                Text("会读取页面的 RSS/Atom 链接（RSSHub-Radar 思路），找不到则尝试常见路径。")
+            }
+            if !results.isEmpty {
+                Section("发现 \(results.count) 个") {
+                    ForEach(results, id: \.url) { f in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(f.title).font(.subheadline).lineLimit(1)
+                                Text(f.url).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Button {
+                                context.insert(FeedSource(name: f.title, url: f.url, category: "自定义",
+                                                          channel: "tech", origin: "discover"))
+                                try? context.save(); added.insert(f.url)
+                            } label: { Image(systemName: added.contains(f.url) ? "checkmark.circle.fill" : "plus.circle") }
+                                .disabled(added.contains(f.url))
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("发现订阅源")
+    }
+
+    private func discover() async {
+        loading = true; defer { loading = false }
+        results = await FeedDiscovery.discover(from: pageURL)
     }
 }
 

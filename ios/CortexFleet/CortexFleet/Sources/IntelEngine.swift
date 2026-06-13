@@ -83,17 +83,22 @@ final class IntelEngine: ObservableObject {
                     guard !existingKeys.contains(key), !created.contains(where: { $0.dedupeKey == key }) else { continue }
                     let verdict = judge.evaluate(title: raw.title, summary: raw.summary)
                     guard verdict.triage != "ignore" else { continue }
+                    // Cheap inline Chinese localization for readability (no network).
+                    let zh = Localizer.isMostlyChinese(raw.title) ? nil : Localizer.localizeInline(raw.title)
                     let item = IntelItem(
                         kind: "rss",
                         domain: source.domain,
                         sourceName: source.name,
                         title: raw.title,
+                        titleZH: (zh != raw.title) ? zh : nil,
                         summary: raw.summary.isEmpty ? nil : raw.summary,
                         url: raw.link.isEmpty ? nil : raw.link,
                         tags: [source.category],
                         score: verdict.score,
                         triage: verdict.triage,
                         priority: verdict.priority,
+                        coverURL: CoverExtractor.cover(for: raw),
+                        channel: source.channel,
                         publishedAt: raw.published,
                         dedupeKey: key
                     )
@@ -166,6 +171,7 @@ final class IntelEngine: ObservableObject {
                     score: max(verdict.score, 0.5),
                     triage: verdict.triage == "ignore" ? "digest" : verdict.triage,
                     priority: Judge.priority(score: max(verdict.score, 0.5), triage: verdict.triage),
+                    channel: "github",
                     publishedAt: repo.pushedAt,
                     dedupeKey: key
                 )

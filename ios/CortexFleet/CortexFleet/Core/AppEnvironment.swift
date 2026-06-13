@@ -62,10 +62,11 @@ final class AppEnvironment: ObservableObject {
     private static func seedFeeds(context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<FeedSource>()))?.count ?? 0
         guard existing == 0 else { return }
-        for seed in SeedData.feeds {
+        for seed in SeedCatalog.feeds {
             context.insert(FeedSource(
                 name: seed.name, url: seed.url, domain: seed.domain,
-                category: seed.category, enabled: true, limit: seed.limit
+                category: seed.category, channel: seed.channel.rawValue, origin: "seed",
+                enabled: true, limit: seed.limit
             ))
         }
     }
@@ -82,22 +83,6 @@ final class AppEnvironment: ObservableObject {
 /// Default feed sources + profile interests, ported from `config/sources.toml`
 /// and `config/profile.toml`.
 enum SeedData {
-    struct Feed { let name: String; let url: String; let domain: String; let category: String; let limit: Int }
-
-    static let feeds: [Feed] = [
-        Feed(name: "Simon Willison", url: "https://simonwillison.net/atom/everything/", domain: "business", category: "AI科技", limit: 10),
-        Feed(name: "Hacker News · Best", url: "https://hnrss.org/best", domain: "business", category: "AI科技", limit: 12),
-        Feed(name: "Hacker News · Frontpage", url: "https://hnrss.org/frontpage", domain: "business", category: "AI科技", limit: 10),
-        Feed(name: "TechCrunch", url: "https://techcrunch.com/feed/", domain: "business", category: "AI科技", limit: 10),
-        Feed(name: "The Verge", url: "https://www.theverge.com/rss/index.xml", domain: "business", category: "AI科技", limit: 8),
-        Feed(name: "Daring Fireball", url: "https://daringfireball.net/feeds/main", domain: "business", category: "AI科技", limit: 8),
-        Feed(name: "OpenAI · News", url: "https://openai.com/news/rss.xml", domain: "business", category: "AI科技", limit: 10),
-        Feed(name: "华尔街日报 · 市场", url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", domain: "business", category: "财经", limit: 12),
-        Feed(name: "36氪", url: "https://36kr.com/feed", domain: "business", category: "中文科技", limit: 12),
-        Feed(name: "少数派", url: "https://sspai.com/feed", domain: "life", category: "中文科技", limit: 10),
-        Feed(name: "阮一峰的网络日志", url: "https://www.ruanyifeng.com/blog/atom.xml", domain: "life", category: "中文科技", limit: 6),
-    ]
-
     static let interests: [(String, String)] = [
         ("AI Agent", "topic"), ("本地大模型", "topic"), ("个人生产力", "topic"),
         ("MCP", "topic"), ("个人助理", "topic"),

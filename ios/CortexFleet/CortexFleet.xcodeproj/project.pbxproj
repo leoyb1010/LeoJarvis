@@ -51,6 +51,10 @@
 		0F00F1022C00000000000001 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002152C00000000000001 /* FeedModels.swift */; };
 		0F00F1032C00000000000001 /* ScanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002292C00000000000001 /* ScanActivityAttributes.swift */; };
 		0F00E00D2C00000000000001 /* CortexFleetWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0F00E0022C00000000000001 /* CortexFleetWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0F00012A2C00000000000001 /* SeedCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022A2C00000000000001 /* SeedCatalog.swift */; };
+		0F00012B2C00000000000001 /* RSSHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022B2C00000000000001 /* RSSHubClient.swift */; };
+		0F00012C2C00000000000001 /* Localizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022C2C00000000000001 /* Localizer.swift */; };
+		0F00012D2C00000000000001 /* FeedDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022D2C00000000000001 /* FeedDiscovery.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -130,6 +134,10 @@
 		0F00E0022C00000000000001 /* CortexFleetWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CortexFleetWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F00F0032C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0F00F0042C00000000000001 /* CortexFleetWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CortexFleetWidgets.entitlements; sourceTree = "<group>"; };
+		0F00022A2C00000000000001 /* SeedCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedCatalog.swift; sourceTree = "<group>"; };
+		0F00022B2C00000000000001 /* RSSHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSHubClient.swift; sourceTree = "<group>"; };
+		0F00022C2C00000000000001 /* Localizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localizer.swift; sourceTree = "<group>"; };
+		0F00022D2C00000000000001 /* FeedDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedDiscovery.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -257,6 +265,10 @@
 				0F00021D2C00000000000001 /* GitHubRadar.swift */,
 				0F00021E2C00000000000001 /* Judge.swift */,
 				0F00021F2C00000000000001 /* IntelEngine.swift */,
+				0F00022A2C00000000000001 /* SeedCatalog.swift */,
+				0F00022B2C00000000000001 /* RSSHubClient.swift */,
+				0F00022C2C00000000000001 /* Localizer.swift */,
+				0F00022D2C00000000000001 /* FeedDiscovery.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -441,6 +453,10 @@
 				0F00011D2C00000000000001 /* GitHubRadar.swift in Sources */,
 				0F00011E2C00000000000001 /* Judge.swift in Sources */,
 				0F00011F2C00000000000001 /* IntelEngine.swift in Sources */,
+				0F00012A2C00000000000001 /* SeedCatalog.swift in Sources */,
+				0F00012B2C00000000000001 /* RSSHubClient.swift in Sources */,
+				0F00012C2C00000000000001 /* Localizer.swift in Sources */,
+				0F00012D2C00000000000001 /* FeedDiscovery.swift in Sources */,
 				0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */,
 				0F00011B2C00000000000001 /* SharedComponents.swift in Sources */,
 				0F0001222C00000000000001 /* JarvisTools.swift in Sources */,
