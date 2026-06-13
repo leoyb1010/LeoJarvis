@@ -828,21 +828,45 @@ struct MobileBridgeClient {
         try await send(
             settings: settings,
             token: token,
-            path: "/mobile/jarvis/notes",
+            path: "/mobile/jarvis/notes?compact=1",
             method: "GET",
             timeout: 14
         )
+    }
+
+    func loadNoteDetail(settings: BridgeSettings, token: String, noteID: String) async throws -> MobileNoteDetailPayload {
+        let escaped = noteID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? noteID
+        let payload: JarvisNoteDetailResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes/\(escaped)",
+            method: "GET",
+            timeout: 14
+        )
+        return MobileNoteDetailPayload(note: payload.note, attachments: payload.attachments)
     }
 
     func loadBriefing(settings: BridgeSettings, token: String) async throws -> MobileBriefingPayload {
         let payload: JarvisBriefingResponse = try await send(
             settings: settings,
             token: token,
-            path: "/mobile/jarvis/briefing/today",
+            path: "/mobile/jarvis/briefing/today?compact=1&limit=24",
             method: "GET",
             timeout: 18
         )
         return payload.briefing
+    }
+
+    func loadBriefingItem(settings: BridgeSettings, token: String, eventID: String) async throws -> MobileBriefingItem {
+        let escaped = eventID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? eventID
+        let payload: JarvisBriefingItemResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/briefing/items/\(escaped)",
+            method: "GET",
+            timeout: 18
+        )
+        return payload.item
     }
 
     func loadDeviceOpsStatus(settings: BridgeSettings, token: String) async throws -> DeviceOpsStatus {
@@ -912,6 +936,86 @@ struct MobileBridgeClient {
         return payload.note
     }
 
+    func updateNote(
+        settings: BridgeSettings,
+        token: String,
+        noteID: String,
+        title: String,
+        content: String,
+        tags: [String],
+        projectName: String,
+        favorite: Bool,
+        pinned: Bool,
+        archived: Bool
+    ) async throws -> MobileNote {
+        let body: [String: Any] = [
+            "title": title,
+            "content": content,
+            "tags": tags,
+            "project_name": projectName,
+            "favorite": favorite,
+            "pinned": pinned,
+            "archived": archived,
+        ]
+        let payload: JarvisNoteCreateResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes/\(noteID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? noteID)",
+            method: "PATCH",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 16
+        )
+        return payload.note
+    }
+
+    func draftNote(
+        settings: BridgeSettings,
+        token: String,
+        prompt: String,
+        projectName: String
+    ) async throws -> MobileNoteDraft {
+        let body: [String: Any] = [
+            "prompt": prompt,
+            "project_name": projectName,
+        ]
+        let payload: JarvisNoteDraftResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes/draft",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 30
+        )
+        return payload.draft
+    }
+
+    func uploadNoteAttachment(
+        settings: BridgeSettings,
+        token: String,
+        noteID: String,
+        fileName: String,
+        mimeType: String,
+        dataBase64: String,
+        textContent: String = ""
+    ) async throws -> MobileNoteAttachment {
+        let body: [String: Any] = [
+            "note_id": noteID,
+            "file_name": fileName,
+            "mime_type": mimeType,
+            "data_base64": dataBase64,
+            "text_content": textContent,
+        ]
+        let payload: JarvisAttachmentResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/notes/import-attachment",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 45
+        )
+        return payload.attachment
+    }
+
     private func send<T: Decodable>(
         settings: BridgeSettings,
         token: String,
@@ -973,8 +1077,25 @@ private struct JarvisBriefingResponse: Decodable {
     let briefing: MobileBriefingPayload
 }
 
+private struct JarvisBriefingItemResponse: Decodable {
+    let item: MobileBriefingItem
+}
+
 private struct JarvisNoteCreateResponse: Decodable {
     let note: MobileNote
+}
+
+private struct JarvisNoteDetailResponse: Decodable {
+    let note: MobileNote
+    let attachments: [MobileNoteAttachment]
+}
+
+private struct JarvisNoteDraftResponse: Decodable {
+    let draft: MobileNoteDraft
+}
+
+private struct JarvisAttachmentResponse: Decodable {
+    let attachment: MobileNoteAttachment
 }
 
 private struct MobileBridgeProbeResponse: Decodable {

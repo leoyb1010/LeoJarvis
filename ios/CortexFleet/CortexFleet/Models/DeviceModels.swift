@@ -718,25 +718,121 @@ struct MobileNote: Decodable, Identifiable, Equatable {
     let title: String
     let content: String
     let excerpt: String
+    let safeExcerpt: String?
     let tags: [String]
     let source: String?
     let projectName: String?
     let favorite: Bool
     let pinned: Bool
     let archived: Bool
+    let sensitive: Bool
     let createdTs: Int?
     let updatedTs: Int?
 
     var displayTitle: String { title.isEmpty ? "未命名记事" : title }
     var displayExcerpt: String {
+        if let safeExcerpt, !safeExcerpt.isEmpty { return safeExcerpt }
         if !excerpt.isEmpty { return excerpt }
         return content.split(separator: "\n").prefix(2).joined(separator: " ")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case content
+        case excerpt
+        case safeExcerpt
+        case tags
+        case source
+        case projectName
+        case favorite
+        case pinned
+        case archived
+        case sensitive
+        case createdTs
+        case updatedTs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        excerpt = try c.decodeIfPresent(String.self, forKey: .excerpt) ?? ""
+        safeExcerpt = try c.decodeIfPresent(String.self, forKey: .safeExcerpt)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        projectName = try c.decodeIfPresent(String.self, forKey: .projectName)
+        favorite = try c.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        sensitive = try c.decodeIfPresent(Bool.self, forKey: .sensitive) ?? false
+        createdTs = try c.decodeIfPresent(Int.self, forKey: .createdTs)
+        updatedTs = try c.decodeIfPresent(Int.self, forKey: .updatedTs)
     }
 }
 
 struct MobileNotesResponse: Decodable, Equatable {
     let notes: [MobileNote]
     let stats: MobileNoteStats
+}
+
+struct MobileNoteDetailPayload: Decodable, Equatable {
+    let note: MobileNote
+    let attachments: [MobileNoteAttachment]
+}
+
+struct MobileNoteDraft: Decodable, Equatable {
+    let title: String
+    let content: String
+    let tags: [String]
+    let projectName: String
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case content
+        case tags
+        case projectName
+    }
+
+    init(title: String = "", content: String = "", tags: [String] = [], projectName: String = "") {
+        self.title = title
+        self.content = content
+        self.tags = tags
+        self.projectName = projectName
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        projectName = try c.decodeIfPresent(String.self, forKey: .projectName) ?? ""
+    }
+}
+
+struct MobileNoteAttachment: Decodable, Identifiable, Equatable {
+    let id: String
+    let noteID: String
+    let fileName: String
+    let mimeType: String?
+    let size: Int
+    let url: String?
+    let isImage: Bool
+    let summary: String
+    let createdTs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case noteID = "noteId"
+        case fileName
+        case mimeType
+        case size
+        case url
+        case isImage
+        case summary
+        case createdTs
+    }
 }
 
 struct MobileBriefingItem: Decodable, Identifiable, Equatable {
@@ -758,43 +854,123 @@ struct MobileBriefingItem: Decodable, Identifiable, Equatable {
     let reasons: [String]?
     let tags: [String]?
     let originalTitle: String?
+    let kind: String?
+    let channel: String?
+    let domain: String?
+    let domainLabel: String?
     let ts: Int?
     let url: String?
+
+    var isGitHub: Bool {
+        kind == "github_repo" || (source ?? "").contains("GitHub")
+    }
+
+    var isXMonitor: Bool {
+        kind == "x_post" || channel == "x_monitor" || (source ?? "").contains("X 监控")
+    }
+
+    var isMail: Bool {
+        kind == "email" || channel == "mail" || (source ?? "").contains("Mail") || (source ?? "").contains("邮箱")
+    }
+
+    var isNews: Bool {
+        !isGitHub && !isXMonitor && !isMail
+    }
+
+    var translatedSourceDetail: String? {
+        guard sourceDetailTranslated == true else { return nil }
+        return sourceDetail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    var summaryText: String {
+        let candidates: [String?] = [
+            take,
+            detail,
+            whyImportant,
+            nextStep,
+            translatedSourceDetail,
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+        .first ?? "暂无摘要。"
+    }
 }
 
 struct MobileBriefingPayload: Decodable, Equatable {
+    let items: [MobileBriefingItem]
     let business: [MobileBriefingItem]
     let life: [MobileBriefingItem]
+    let github: [MobileBriefingItem]
+    let x: [MobileBriefingItem]
+    let mail: [MobileBriefingItem]
     let focus: [MobileBriefingItem]
 
     var topItems: [MobileBriefingItem] {
-        let rows = focus + business + life
+        let base = items.isEmpty ? focus + business + life + github + x + mail : items
+        return unique(base).prefix(18).map { $0 }
+    }
+
+    var newsItems: [MobileBriefingItem] {
+        unique((items + business + life).filter(\.isNews)).prefix(24).map { $0 }
+    }
+
+    var githubItems: [MobileBriefingItem] {
+        unique(github + items.filter(\.isGitHub)).prefix(18).map { $0 }
+    }
+
+    var xItems: [MobileBriefingItem] {
+        unique(x + items.filter(\.isXMonitor)).prefix(12).map { $0 }
+    }
+
+    var mailItems: [MobileBriefingItem] {
+        unique(mail + items.filter(\.isMail)).prefix(12).map { $0 }
+    }
+
+    private func unique(_ rows: [MobileBriefingItem]) -> [MobileBriefingItem] {
         var seen = Set<String>()
         return rows.filter { item in
             let key = item.id
             if seen.contains(key) { return false }
             seen.insert(key)
             return true
-        }.prefix(18).map { $0 }
+        }
     }
 
     enum CodingKeys: String, CodingKey {
+        case items
         case business
         case life
+        case github
+        case x
+        case mail
         case focus
     }
 
-    init(business: [MobileBriefingItem] = [], life: [MobileBriefingItem] = [], focus: [MobileBriefingItem] = []) {
+    init(items: [MobileBriefingItem] = [], business: [MobileBriefingItem] = [], life: [MobileBriefingItem] = [], github: [MobileBriefingItem] = [], x: [MobileBriefingItem] = [], mail: [MobileBriefingItem] = [], focus: [MobileBriefingItem] = []) {
+        self.items = items
         self.business = business
         self.life = life
+        self.github = github
+        self.x = x
+        self.mail = mail
         self.focus = focus
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .items) ?? []
         business = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .business) ?? []
         life = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .life) ?? []
+        github = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .github) ?? []
+        x = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .x) ?? []
+        mail = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .mail) ?? []
         focus = try c.decodeIfPresent([MobileBriefingItem].self, forKey: .focus) ?? []
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

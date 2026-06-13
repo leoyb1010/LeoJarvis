@@ -3,12 +3,16 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   deletePersonalNote,
   getPersonalNote,
+  getPersonalNoteNotebooks,
   getPersonalNotes,
   importPersonalNoteAttachment,
   importPersonalNoteUrl,
   savePersonalNote,
+  transformPersonalNote,
   type NoteAttachment,
   type NoteInput,
+  type NoteTransformTemplate,
+  type PersonalNotebook,
   type PersonalNote,
   type PersonalNoteStats,
 } from "../../api";
@@ -38,6 +42,10 @@ function sourceLabel(source?: string) {
   }[source || "manual"] || "手写";
 }
 
+function notePreview(note: PersonalNote) {
+  return note.safe_excerpt || note.excerpt || (note.content || "").replace(/\s+/g, " ").slice(0, 180);
+}
+
 function readFileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -60,10 +68,41 @@ function insertAtRange(value: string, insertion: string, range: Range) {
   };
 }
 
+function replaceAtRange(value: string, insertion: string, range: Range) {
+  const start = Math.max(0, Math.min(range.start, value.length));
+  const end = Math.max(start, Math.min(range.end, value.length));
+  return {
+    text: `${value.slice(0, start)}${insertion}${value.slice(end)}`,
+    cursor: start + insertion.length,
+  };
+}
+
 function attachmentMarkdown(file: NoteAttachment) {
   const label = (file.file_name || "附件").replace(/[[\]]/g, "");
   if (file.is_image) return `![${label}](${file.url || ""})`;
   return `[${label}](${file.url || ""})`;
+}
+
+function normalizeMarkdownInput(value: string) {
+  let text = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "");
+  const fenced = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i.exec(text.trim());
+  if (fenced) text = fenced[1];
+  if ((text.match(/\\n/g) || []).length >= 2 && (text.match(/\n/g) || []).length <= 1) {
+    text = text.replace(/\\n/g, "\n");
+  }
+  text = text
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .replace(/^\s*([*+-])\s{2,}/gm, "$1 ")
+    .replace(/^(\s*\d+\.)\s{2,}/gm, "$1 ");
+  return text.trim();
+}
+
+function shouldNormalizePaste(value: string) {
+  return /^```(?:markdown|md)?\s*\n/i.test(value.trim()) ||
+    /\\n/.test(value) ||
+    /^\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+)/m.test(value) ||
+    /\n{4,}/.test(value);
 }
 
 function renderInline(text: string): ReactNode[] {
@@ -140,7 +179,14 @@ function MarkdownPreview({ content }: { content: string }) {
           : <h3 key={`h-${out.length}`}>{body}</h3>);
         return;
       }
-      const item = /^[-*]\s+(.+)$/.exec(line);
+      const quote = /^>\s+(.+)$/.exec(line);
+      if (quote) {
+        flushParagraph();
+        flushList();
+        out.push(<blockquote key={`q-${out.length}`}>{renderInline(quote[1])}</blockquote>);
+        return;
+      }
+      const item = /^(?:[-*]|\d+\.)\s+(.+)$/.exec(line);
       if (item) {
         flushParagraph();
         list.push(item[1]);
@@ -160,6 +206,8 @@ function MarkdownPreview({ content }: { content: string }) {
 export function PersonalNotesView() {
   const [notes, setNotes] = useState<PersonalNote[]>([]);
   const [stats, setStats] = useState<PersonalNoteStats>(EMPTY_STATS);
+  const [notebooks, setNotebooks] = useState<PersonalNotebook[]>([]);
+  const [templates, setTemplates] = useState<NoteTransformTemplate[]>([]);
   const [selected, setSelected] = useState<PersonalNote | null>(null);
   const [attachments, setAttachments] = useState<NoteAttachment[]>([]);
   const [q, setQ] = useState("");
@@ -176,9 +224,11 @@ export function PersonalNotesView() {
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [transforming, setTransforming] = useState("");
   const [copyState, setCopyState] = useState("");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [transformResult, setTransformResult] = useState<PersonalNote | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [viewMode, setViewMode] = useState<ViewMode>("write");
   const [focusMode, setFocusMode] = useState(false);
@@ -193,6 +243,38 @@ export function PersonalNotesView() {
   const dirtyReadyRef = useRef(false);
   const activeTags = splitTags(tagInput);
   const charCount = useMemo(() => Array.from(content.replace(/\s+/g, "")).length, [content]);
+  const fallbackNotebooks: PersonalNotebook[] = useMemo(() => (stats.projects || []).map((p) => ({
+    name: p.name,
+    note_count: p.count,
+    source_count: 0,
+    description: "",
+    favorite: 0,
+    pinned: 0,
+    updated_ts: 0,
+    tags: [],
+    recent: [],
+  })), [stats.projects]);
+  const notebookRows = notebooks.length ? notebooks : fallbackNotebooks;
+  const currentNotebookName = projectName.trim() || project || selected?.project_name || "未归档";
+  const activeNotebook = notebookRows.find((item) => item.name === currentNotebookName) || notebookRows[0] || {
+    name: currentNotebookName,
+    note_count: notes.length,
+    source_count: 0,
+    favorite: 0,
+    pinned: 0,
+    updated_ts: 0,
+    description: "",
+    tags: [],
+    recent: [],
+  };
+  const totalSources = notebookRows.reduce((sum, item) => sum + (item.source_count || 0), 0);
+  const aiOutputNotes = notes.filter((note) => note.source === "ai_transform" || note.tags.includes("AI整理"));
+  const transformTemplates = templates.length ? templates : [
+    { id: "summary", label: "摘要", tag: "摘要" },
+    { id: "key_points", label: "要点", tag: "要点" },
+    { id: "actions", label: "行动项", tag: "行动项" },
+    { id: "questions", label: "问题", tag: "问题" },
+  ];
 
   const apiStatus = (mode: FilterMode) => mode === "archived" ? "archived" : mode === "all" ? "all" : "active";
   const applyClientFilter = (items: PersonalNote[], mode: FilterMode) => {
@@ -226,25 +308,55 @@ export function PersonalNotesView() {
     });
   }
 
-  async function load(query = q, tagName = tag, noteFilter = filter, projectFilter = project, keepId = selected?.id) {
+  async function load(
+    query = q,
+    tagName = tag,
+    noteFilter = filter,
+    projectFilter = project,
+    keepId = selected?.id,
+    syncEditor = true,
+  ) {
     setError("");
     try {
       const res = await getPersonalNotes(query, tagName, apiStatus(noteFilter), projectFilter);
       const visible = applyClientFilter(res.notes, noteFilter);
       setNotes(visible);
       setStats(res.stats);
+      void loadNotebooks();
       const nextId = keepId || visible[0]?.id;
+      if (!syncEditor) return;
       if (!selected && visible[0] && !keepId) await pick(visible[0]);
       if (nextId && selected?.id === nextId) {
         const next = visible.find((n) => n.id === nextId);
-        if (next) setSelected(next);
+        if (next) setSelected((current) => current ? { ...next, content: current.content, import_meta: current.import_meta } : next);
       }
     } catch (err) {
       setError(String(err));
     }
   }
 
+  async function loadNotebooks() {
+    try {
+      const res = await getPersonalNoteNotebooks();
+      setNotebooks(res.notebooks || []);
+      setTemplates(res.templates || []);
+    } catch {
+      // Notebook overview is auxiliary; note loading should not fail because of it.
+    }
+  }
+
   useEffect(() => { void load("", "", "active", "", ""); }, []);
+
+  useEffect(() => {
+    const onNewNote = () => startNew(false);
+    const onFocusNotes = () => textareaRef.current?.focus();
+    window.addEventListener("leojarvis:new-note", onNewNote);
+    window.addEventListener("leojarvis:focus-notes", onFocusNotes);
+    return () => {
+      window.removeEventListener("leojarvis:new-note", onNewNote);
+      window.removeEventListener("leojarvis:focus-notes", onFocusNotes);
+    };
+  }, []);
 
   useEffect(() => {
     if (hydratingRef.current || !dirtyReadyRef.current) return;
@@ -304,9 +416,10 @@ export function PersonalNotesView() {
     setSaveState("saving");
     try {
       const res = await savePersonalNote(payload(overrides), selected?.id);
-      await pick(res.note);
-      await load(q, tag, filter, project, res.note.id);
+      setSelected(res.note);
+      await load(q, tag, filter, project, res.note.id, false);
       setSaveState("saved");
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
       return res.note;
     } catch (err) {
       setSaveState("error");
@@ -377,6 +490,24 @@ export function PersonalNotesView() {
     }
   }
 
+  async function runTransformation(template: string) {
+    const target = selected || await saveDraft(true);
+    if (!target?.id || transforming) return;
+    setTransforming(template);
+    setError("");
+    setTransformResult(null);
+    try {
+      const res = await transformPersonalNote(target.id, template);
+      setTransformResult(res.note);
+      await load(q, tag, filter, project, res.note.id);
+      await pick(res.note);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setTransforming("");
+    }
+  }
+
   function currentRange(): Range {
     const target = textareaRef.current;
     if (!target) return { start: content.length, end: content.length };
@@ -425,10 +556,23 @@ export function PersonalNotesView() {
 
   async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(e.clipboardData.files || []);
-    if (!files.length) return;
     const range = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+    if (files.length) {
+      e.preventDefault();
+      await importFiles(files, range);
+      return;
+    }
+    const text = e.clipboardData.getData("text/plain");
+    if (!text || !shouldNormalizePaste(text)) return;
+    const normalized = normalizeMarkdownInput(text);
+    if (!normalized || normalized === text) return;
     e.preventDefault();
-    await importFiles(files, range);
+    const next = replaceAtRange(content, normalized, range);
+    setContent(next.text);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+    });
   }
 
   async function handleDrop(e: DragEvent<HTMLTextAreaElement>) {
@@ -457,6 +601,7 @@ export function PersonalNotesView() {
     saved: "已保存",
     error: "保存失败",
   }[saveState];
+  const selectedSensitive = !!selected?.sensitive;
 
   const editorClasses = [
     "jarvis-notes-editor",
@@ -471,7 +616,7 @@ export function PersonalNotesView() {
         <div>
           <div className="kicker">Jarvis 个人知识库</div>
           <h1>个人记事</h1>
-          <p>打开即写，轻量整理。项目、标签、置顶、重要、归档、图片附件和预览都在一个工作台里完成。</p>
+          <p>Notebook 项目、资料源、AI 整理、Markdown 编辑与附件证据都在一个工作台里完成。</p>
         </div>
         <div className="notes-workbar-side">
           <div className="notes-stat-strip">
@@ -492,6 +637,36 @@ export function PersonalNotesView() {
       </div>
 
       {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
+
+      <section className="notes-notebook-board">
+        <div className="notebook-board-card primary">
+          <span>Notebook</span>
+          <b>{activeNotebook.name}</b>
+          <small>{activeNotebook.note_count} 记事 · {activeNotebook.pinned} 置顶 · {activeNotebook.favorite} 重要</small>
+        </div>
+        <div className="notebook-board-card">
+          <span>资料源</span>
+          <b>{activeNotebook.source_count || totalSources}</b>
+          <small>链接 / 附件 / 导入材料</small>
+        </div>
+        <div className="notebook-board-card">
+          <span>AI 输出</span>
+          <b>{aiOutputNotes.length}</b>
+          <small>{transformResult ? transformResult.title : (aiOutputNotes[0]?.title || "等待整理")}</small>
+        </div>
+        <div className="notebook-board-actions">
+          {transformTemplates.map((tpl) => (
+            <button
+              key={tpl.id}
+              className="btn sm"
+              onClick={() => runTransformation(tpl.id)}
+              disabled={!!transforming || (!selected && !title.trim() && !content.trim())}
+            >
+              {transforming === tpl.id ? "整理中" : tpl.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="jarvis-notes-shell">
         <section className="jarvis-notes-sidebar">
@@ -521,17 +696,18 @@ export function PersonalNotesView() {
             </button>
           </div>
 
-          {stats.projects?.length ? (
+          {(notebooks.length || stats.projects?.length) ? (
             <div className="notes-chip-panel">
-              <span>项目</span>
+              <span>Notebook 项目</span>
               <div>
-                {stats.projects.map((p) => (
+                {notebookRows.map((p) => (
                   <button className={project === p.name ? "on" : ""} key={p.name} onClick={() => {
                     const next = project === p.name ? "" : p.name;
                     setProject(next);
                     load(q, tag, filter, next);
                   }}>
-                    {p.name}<b>{p.count}</b>
+                    {p.name}<b>{p.note_count}</b>
+                    {p.source_count ? <small>{p.source_count} 源</small> : null}
                   </button>
                 ))}
               </div>
@@ -569,10 +745,10 @@ export function PersonalNotesView() {
                 >
                   <div className="note-card-top">
                     <span>{fmtTime(note.updated_ts)}</span>
-                    <em>{note.pinned ? "置顶" : note.favorite ? "重要" : sourceLabel(note.source)}</em>
+                    <em className={note.sensitive ? "warn" : ""}>{note.sensitive ? "敏感" : note.pinned ? "置顶" : note.favorite ? "重要" : sourceLabel(note.source)}</em>
                   </div>
                   <b>{note.title || "未命名记事"}</b>
-                  <p>{note.excerpt}</p>
+                  <p>{notePreview(note)}</p>
                   {note.project_name ? <div className="note-project-pill">{note.project_name}</div> : null}
                   {note.tags.length ? <div className="note-card-tags">{note.tags.slice(0, 4).map((t) => <span key={t}>{t}</span>)}</div> : null}
                 </motion.button>
@@ -607,12 +783,32 @@ export function PersonalNotesView() {
                 <input type="file" multiple accept="image/*,.pdf,.txt,.md,.csv,.json" onChange={(e) => importFiles(e.target.files)} />
                 {importing ? "导入中" : "图片/附件"}
               </label>
+              <div className="notes-transform-menu">
+                {transformTemplates.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    className="icon-btn"
+                    onClick={() => runTransformation(tpl.id)}
+                    disabled={!!transforming || (!selected && !title.trim() && !content.trim())}
+                    title={`AI 整理：${tpl.label}`}
+                  >
+                    {transforming === tpl.id ? "整理中" : tpl.label}
+                  </button>
+                ))}
+              </div>
               {selected ? <button className="icon-btn danger" onClick={remove}>删除</button> : null}
               <button className="btn primary sm" onClick={() => saveDraft(true)} disabled={busy || (!title.trim() && !content.trim())}>
                 {busy ? "保存中" : "保存"}
               </button>
             </div>
           </div>
+
+          {selectedSensitive ? (
+            <div className="note-sensitive-banner">
+              <b>敏感内容</b>
+              <span>列表与移动端只显示脱敏摘要，编辑区保留完整内容用于复制、修改和归档。</span>
+            </div>
+          ) : null}
 
           <div className="jarvis-editor-meta">
             <label>

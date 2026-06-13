@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+import shutil
+import subprocess
 import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -15,6 +17,7 @@ from ..notify.hub import hub
 from ..scheduler import run_ingest_cycle
 
 router = APIRouter()
+_LOCAL_TAILSCALE_CACHE: dict[str, object] = {"ts": 0.0, "ips": set()}
 
 
 @router.get("/health")
@@ -476,6 +479,7 @@ def devices(limit: int = 50) -> list[dict]:
     rows = _purge_ghost_devices(rows, local_id=str(local.get("device_id") or ""), connections=connections)
     rows = _apply_remote_device_states(rows, connections, now=now)
     rows = _merge_remote_control_channels(rows, connections)
+    rows = _dedupe_local_tailscale_self(rows, local_id=str(local.get("device_id") or ""))
     return sorted(rows, key=lambda r: (not r.get("online"), -(float(r.get("health") or 0)), -int(r.get("last_seen_ts") or 0)))
 
 
@@ -541,6 +545,46 @@ def _merge_remote_control_channels(rows: list[dict], connections: list[dict]) ->
             })
             target["risks"] = risks[:4]
     return out
+
+
+def _local_tailscale_ips() -> set[str]:
+    now = time.time()
+    if now - float(_LOCAL_TAILSCALE_CACHE.get("ts") or 0) < 60:
+        return set(_LOCAL_TAILSCALE_CACHE.get("ips") or set())
+    candidates = [
+        shutil.which("tailscale"),
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        "/opt/homebrew/bin/tailscale",
+        "/usr/local/bin/tailscale",
+    ]
+    ips: set[str] = set()
+    for binary in [c for c in candidates if c]:
+        try:
+            proc = subprocess.run([binary, "ip", "-4"], capture_output=True, text=True, timeout=1.5)
+        except Exception:
+            continue
+        if proc.returncode == 0:
+            ips = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+            break
+    _LOCAL_TAILSCALE_CACHE["ts"] = now
+    _LOCAL_TAILSCALE_CACHE["ips"] = ips
+    return ips
+
+
+def _dedupe_local_tailscale_self(rows: list[dict], *, local_id: str) -> list[dict]:
+    """If this Mac is also configured as an SSH target via Tailscale, show one card.
+
+    The MacBook can appear twice: one local heartbeat plus one SSH health card
+    pointed at the machine's own Tailscale IP. For the fleet view, the SSH card is
+    the managed target, so the local duplicate is hidden.
+    """
+    local_ips = _local_tailscale_ips()
+    if not local_ips:
+        return rows
+    has_self_ssh = any(str(row.get("role") or "") == "ssh" and str(row.get("host_name") or "") in local_ips for row in rows)
+    if not has_self_ssh:
+        return rows
+    return [row for row in rows if str(row.get("device_id") or "") != local_id]
 
 
 def _purge_ghost_devices(rows: list[dict], *, local_id: str, connections: list[dict]) -> list[dict]:
@@ -686,8 +730,11 @@ def system_weather(lat: float | None = None, lon: float | None = None, city: str
 
 
 @router.get("/device-ops/status")
-def device_ops_status() -> dict:
+def device_ops_status(refresh: bool = False) -> dict:
+    import inspect
     from .. import device_ops
+    if "refresh" in inspect.signature(device_ops.fleet_status).parameters:
+        return device_ops.fleet_status(refresh=refresh)
     return device_ops.fleet_status()
 
 
@@ -797,14 +844,24 @@ class AttachmentImportIn(BaseModel):
     note_id: str | None = None
 
 
+class NoteTransformIn(BaseModel):
+    template: str = "summary"
+
+
 @router.get("/personal-notes")
-def personal_note_list(q: str = "", tag: str = "", status: str = "active", project: str = "") -> dict:
+def personal_note_list(q: str = "", tag: str = "", status: str = "active", project: str = "", compact: bool = False) -> dict:
     from .. import personal_notes
     return {
         "ok": True,
-        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project),
+        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, compact=compact),
         "stats": personal_notes.note_stats(),
     }
+
+
+@router.get("/personal-notes/notebooks")
+def personal_note_notebooks() -> dict:
+    from .. import personal_notes
+    return {"ok": True, **personal_notes.notebook_overview()}
 
 
 @router.post("/personal-notes")
@@ -829,6 +886,12 @@ def personal_note_get(note_id: str) -> dict:
 def personal_note_update(note_id: str, note: PersonalNoteIn) -> dict:
     from .. import personal_notes
     return {"ok": True, "note": personal_notes.save_note(note.model_dump(), note_id=note_id, reason="manual")}
+
+
+@router.post("/personal-notes/{note_id}/transform")
+def personal_note_transform(note_id: str, req: NoteTransformIn) -> dict:
+    from .. import personal_notes
+    return {"ok": True, **personal_notes.transform_note(note_id, req.template)}
 
 
 @router.delete("/personal-notes/{note_id}")
@@ -873,7 +936,13 @@ def personal_note_attachment_file(attachment_id: str):
 
 @router.post("/ingest/run")
 async def ingest_run() -> dict:
-    return await run_ingest_cycle()
+    result = await run_ingest_cycle()
+    try:
+        from ..briefing.builder import invalidate_today_cache
+        invalidate_today_cache()
+    except Exception:
+        pass
+    return result
 
 
 # ---------- Personal Intelligence Hub ----------
@@ -913,11 +982,17 @@ def intelligence_overview() -> dict:
 @router.post("/intelligence/scan")
 async def intelligence_scan(req: IntelligenceScanRequest) -> dict:
     from ..intelligence.scanner import run_intelligence_scan
-    return await run_intelligence_scan(
+    result = await run_intelligence_scan(
         include_rss=req.include_rss,
         include_web=req.include_web,
         include_github=req.include_github,
     )
+    try:
+        from ..briefing.builder import invalidate_today_cache
+        invalidate_today_cache()
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/intelligence/targets")
@@ -970,8 +1045,8 @@ def intelligence_github(limit: int = 24) -> list[dict]:
 
 
 @router.get("/briefing/today")
-def briefing_today() -> dict:
-    return build_today()
+def briefing_today(compact: bool = False, limit: int = 0, refresh: bool = False) -> dict:
+    return build_today(compact=compact, limit=limit, force=refresh)
 
 
 @router.get("/briefing/items/{event_id}")

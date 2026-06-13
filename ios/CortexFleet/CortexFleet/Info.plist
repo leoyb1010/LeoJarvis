@@ -44,6 +44,10 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>LeoJarvis 连接 Mac mini Bridge，读取你授权的设备健康状态。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LeoJarvis 用麦克风录制语音记事，并作为附件保存到你的 Jarvis 个人记事。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>LeoJarvis 允许你选择图片或视频，作为个人记事附件同步到 Jarvis。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

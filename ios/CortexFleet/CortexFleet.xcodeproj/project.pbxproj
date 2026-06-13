@@ -16,9 +16,9 @@
 		0F0001072C00000000000001 /* DeviceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002072C00000000000001 /* DeviceDetailView.swift */; };
 		0F0001082C00000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002082C00000000000001 /* SettingsView.swift */; };
 		0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002092C00000000000001 /* AddSSHDeviceView.swift */; };
-		0F00010C2C00000000000001 /* JarvisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00020D2C00000000000001 /* JarvisViews.swift */; };
 		0F00010A2C00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0F00020A2C00000000000001 /* Assets.xcassets */; };
 		0F00010B2C00000000000001 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 0F000A012C00000000000001 /* Citadel */; };
+		0F00010C2C00000000000001 /* JarvisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00020D2C00000000000001 /* JarvisViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,10 +31,10 @@
 		0F0002072C00000000000001 /* DeviceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDetailView.swift; sourceTree = "<group>"; };
 		0F0002082C00000000000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		0F0002092C00000000000001 /* AddSSHDeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSSHDeviceView.swift; sourceTree = "<group>"; };
-		0F00020D2C00000000000001 /* JarvisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisViews.swift; sourceTree = "<group>"; };
 		0F00020A2C00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0F00020B2C00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0F00020C2C00000000000001 /* CortexFleet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CortexFleet.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0F00020D2C00000000000001 /* JarvisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,11 +140,11 @@
 			dependencies = (
 			);
 			name = CortexFleet;
-			productName = CortexFleet;
-			productReference = 0F00020C2C00000000000001 /* CortexFleet.app */;
 			packageProductDependencies = (
 				0F000A012C00000000000001 /* Citadel */,
 			);
+			productName = CortexFleet;
+			productReference = 0F00020C2C00000000000001 /* CortexFleet.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -164,10 +164,10 @@
 			};
 			buildConfigurationList = 0F0009022C00000000000001 /* Build configuration list for PBXProject "CortexFleet" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = zh-Hans;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				zh-Hans,
+				"zh-Hans",
 				en,
 				Base,
 			);

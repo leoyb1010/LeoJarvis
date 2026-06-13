@@ -532,6 +532,20 @@ class MobileNoteIn(BaseModel):
     project_name: str = ""
     favorite: bool = False
     pinned: bool = False
+    archived: bool = False
+
+
+class MobileNoteDraftIn(BaseModel):
+    prompt: str = ""
+    project_name: str = ""
+
+
+class MobileAttachmentImportIn(BaseModel):
+    note_id: str
+    file_name: str
+    mime_type: str = ""
+    data_base64: str = ""
+    text_content: str = ""
 
 
 class DeviceOpsPreviewIn(BaseModel):
@@ -578,6 +592,7 @@ def jarvis_notes(
     tag: str = "",
     status: str = "active",
     project: str = "",
+    compact: bool = True,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     _require_token(authorization)
@@ -585,7 +600,7 @@ def jarvis_notes(
 
     return {
         "ok": True,
-        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, limit=80),
+        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, limit=80, compact=compact),
         "stats": personal_notes.note_stats(),
     }
 
@@ -608,6 +623,51 @@ def jarvis_note_create(req: MobileNoteIn, authorization: str | None = Header(def
     return {"ok": True, "note": note}
 
 
+@app.patch("/mobile/jarvis/notes/{note_id}")
+def jarvis_note_update(note_id: str, req: MobileNoteIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    note = personal_notes.save_note({
+        "title": req.title,
+        "content": req.content,
+        "tags": req.tags,
+        "project_name": req.project_name,
+        "favorite": req.favorite,
+        "pinned": req.pinned,
+        "archived": req.archived,
+        "source": "ios",
+        "source_title": "LeoJarvis iOS",
+    }, note_id=note_id, reason="ios_edit")
+    return {"ok": True, "note": note}
+
+
+@app.post("/mobile/jarvis/notes/draft")
+def jarvis_note_draft(req: MobileNoteDraftIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    draft = personal_notes.draft_from_natural_language(req.prompt, project_name=req.project_name)
+    return {"ok": True, "draft": draft}
+
+
+@app.post("/mobile/jarvis/notes/import-attachment")
+def jarvis_note_import_attachment(req: MobileAttachmentImportIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from . import personal_notes
+
+    return {
+        "ok": True,
+        **personal_notes.attach_file(
+            file_name=req.file_name,
+            mime_type=req.mime_type,
+            data_base64=req.data_base64,
+            text_content=req.text_content,
+            note_id=req.note_id,
+        ),
+    }
+
+
 @app.get("/mobile/jarvis/notes/{note_id}")
 def jarvis_note_detail(note_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_token(authorization)
@@ -625,11 +685,16 @@ def jarvis_note_detail(note_id: str, authorization: str | None = Header(default=
 
 
 @app.get("/mobile/jarvis/briefing/today")
-def jarvis_briefing_today(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def jarvis_briefing_today(
+    compact: bool = True,
+    limit: int = 12,
+    refresh: bool = False,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
     _require_token(authorization)
     from .briefing.builder import build_today
 
-    return {"ok": True, "briefing": build_today()}
+    return {"ok": True, "briefing": build_today(compact=compact, limit=limit, force=refresh)}
 
 
 @app.get("/mobile/jarvis/briefing/items/{event_id}")
@@ -644,11 +709,11 @@ def jarvis_briefing_item_detail(event_id: str, authorization: str | None = Heade
 
 
 @app.get("/mobile/device-ops/status")
-def mobile_device_ops_status(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def mobile_device_ops_status(refresh: bool = False, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_token(authorization)
     from . import device_ops
 
-    return device_ops.fleet_status()
+    return device_ops.fleet_status(refresh=refresh)
 
 
 @app.post("/mobile/device-ops/preview")

@@ -191,20 +191,14 @@ export function IntelligenceView() {
 
   const refresh = async () => {
     setError("");
-    try {
-      const [intelData, briefingData, cockpit, reachData] = await Promise.all([
-        getIntelligenceOverview(),
-        getBriefing(),
-        getCockpitOverview(),
-        getReachStatus(),
-      ]);
-      setIntel(intelData);
-      setBriefing(briefingData);
-      setRepos(cockpit.intelligence.top_repos || []);
-      setReach(reachData);
-    } catch (err) {
-      setError(String(err));
-    }
+    const results = await Promise.allSettled([
+      getIntelligenceOverview().then(setIntel),
+      getBriefing({ limit: 80 }).then(setBriefing),
+      getCockpitOverview().then((cockpit) => setRepos(cockpit.intelligence.top_repos || [])),
+      getReachStatus().then(setReach),
+    ]);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") setError(String(failed.reason));
   };
 
   useEffect(() => { refresh(); }, []);

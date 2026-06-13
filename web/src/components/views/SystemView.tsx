@@ -228,6 +228,7 @@ export function SystemView() {
   const [sshBusy, setSshBusy] = useState(false);
   const [sshError, setSshError] = useState("");
   const [devTools, setDevTools] = useState<DevToolchain | null>(null);
+  const [deviceOpsRefreshing, setDeviceOpsRefreshing] = useState(false);
   const lastProbe = useRef(0);
 
   const load = async () => {
@@ -239,7 +240,7 @@ export function SystemView() {
       setServices(serviceRows);
       setDevices(deviceRows);
       getDevTools().then(setDevTools).catch(() => {});
-      getDeviceOpsStatus().then(setDeviceOps).catch(() => {});
+      refreshDeviceOps(false);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -251,7 +252,10 @@ export function SystemView() {
       lastProbe.current = Date.now();
       sendSelfHeartbeat().catch(() => {});
       probeSshDevices()
-        .then(() => getDevices().then(setDevices).catch(() => {}))
+        .then(() => {
+          getDevices().then(setDevices).catch(() => {});
+          refreshDeviceOps(false);
+        })
         .catch(() => {});
     }
   };
@@ -307,10 +311,22 @@ export function SystemView() {
       await sendSelfHeartbeat();
       await probeSshDevices();
       setDevices(await getDevices());
+      await refreshDeviceOps(true);
     } catch (err) {
       setError(String(err));
     } finally {
       setSshBusy(false);
+    }
+  }
+
+  async function refreshDeviceOps(force = false) {
+    setDeviceOpsRefreshing(true);
+    try {
+      setDeviceOps(await getDeviceOpsStatus(force));
+    } catch (err) {
+      if (force) setError(String(err));
+    } finally {
+      setDeviceOpsRefreshing(false);
     }
   }
 
@@ -329,6 +345,9 @@ export function SystemView() {
   if (error && !data) return <div className="error">{error}</div>;
 
   const scoreTone = data ? (data.score >= 85 ? "good" : data.score >= 65 ? "warn" : "bad") : "good";
+  const opsMeta = deviceOps
+    ? `${deviceOps.summary.ready}/${deviceOps.summary.targets} 就绪${deviceOps.cache?.refreshing ? " · 更新中" : deviceOps.cache?.stale ? " · 缓存" : ""}`
+    : deviceOpsRefreshing ? "检测中" : "待检测";
 
   return (
     <div className="system-view">
@@ -449,8 +468,12 @@ export function SystemView() {
               <SectionHead
                 title="设备管家"
                 desc="Burrow/Mole 能力：清理、优化、扫描全部先走安全预览，不直接执行删除。"
-                meta={deviceOps ? `${deviceOps.summary.ready}/${deviceOps.summary.targets} 就绪` : "检测中"}
-              />
+                meta={opsMeta}
+              >
+                <button className="btn sm ghost" onClick={() => refreshDeviceOps(true)} disabled={deviceOpsRefreshing}>
+                  {deviceOpsRefreshing ? "刷新中" : "刷新管家"}
+                </button>
+              </SectionHead>
               <div className="ops-grid">
                 {(deviceOps?.targets || []).map((target) => (
                   <DeviceOpsCard target={target} onPreview={runOpsPreview} busy={opsBusy} key={target.target_id} />

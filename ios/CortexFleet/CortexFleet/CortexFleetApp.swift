@@ -28,6 +28,13 @@ struct RootView: View {
             }
 
             NavigationStack {
+                MobileBriefingView()
+            }
+            .tabItem {
+                Label("简报", systemImage: "newspaper")
+            }
+
+            NavigationStack {
                 MobileNotesView()
             }
             .tabItem {
@@ -39,13 +46,6 @@ struct RootView: View {
             }
             .tabItem {
                 Label("设备", systemImage: "gauge.with.dots.needle.33percent")
-            }
-
-            NavigationStack {
-                MobileCapabilitiesView()
-            }
-            .tabItem {
-                Label("能力", systemImage: "rectangle.stack.badge.plus")
             }
 
             NavigationStack {

@@ -295,27 +295,48 @@ def test_localize_fallback_uses_display_safe_label():
     assert text
 
 
-def test_cockpit_and_personal_notes_endpoints():
+def test_cockpit_and_personal_notes_endpoints(monkeypatch):
+    import leojarvis.models_router as models_router
+
+    def fake_chat(task, messages, **kwargs):
+        return "## 核心结论\n\n- 已整理为结构化 Markdown。"
+
+    monkeypatch.setattr(models_router, "chat", fake_chat)
     db.init_db()
     note_id = None
+    transformed_id = None
     attachment_id = None
     attachment_path = None
     with TestClient(app) as client:
         try:
             note = client.post("/personal-notes", json={
                 "title": "测试个人记事",
-                "content": "这是一条带标签的个人记事，用于验证产品化记事接口。",
+                "content": "```markdown\n# 测试个人记事\n\n-  这是一条带标签的个人记事，用于验证产品化记事接口。\n```",
                 "tags": ["测试", "个人记事"],
+                "project_name": "pytest notebook",
             })
             assert note.status_code == 200
             body = note.json()
             assert body["ok"] is True
             note_id = body["note"]["id"]
             assert body["note"]["title"] == "测试个人记事"
+            assert body["note"]["content"].startswith("# 测试个人记事")
+            assert "- 这是一条带标签" in body["note"]["content"]
 
             listed = client.get("/personal-notes?q=产品化")
             assert listed.status_code == 200
             assert listed.json()["stats"]["total"] >= 1
+
+            notebooks = client.get("/personal-notes/notebooks")
+            assert notebooks.status_code == 200
+            assert any(row["name"] == "pytest notebook" for row in notebooks.json()["notebooks"])
+            assert any(tpl["id"] == "summary" for tpl in notebooks.json()["templates"])
+
+            transformed = client.post(f"/personal-notes/{note_id}/transform", json={"template": "summary"})
+            assert transformed.status_code == 200
+            transformed_id = transformed.json()["note"]["id"]
+            assert "AI整理" in transformed.json()["note"]["tags"]
+            assert "核心结论" in transformed.json()["note"]["content"]
 
             attachment = client.post("/personal-notes/import-attachment", json={
                 "note_id": note_id,
@@ -352,11 +373,16 @@ def test_cockpit_and_personal_notes_endpoints():
         finally:
             if note_id:
                 client.delete(f"/personal-notes/{note_id}")
+                if transformed_id:
+                    client.delete(f"/personal-notes/{transformed_id}")
                 with db.conn() as c:
                     if attachment_id:
                         c.execute("DELETE FROM personal_note_attachments WHERE id=?", (attachment_id,))
-                    c.execute("DELETE FROM personal_note_revisions WHERE note_id=?", (note_id,))
-                    c.execute("DELETE FROM personal_notes WHERE id=?", (note_id,))
+                    for cleanup_id in [note_id, transformed_id]:
+                        if cleanup_id:
+                            c.execute("DELETE FROM personal_note_revisions WHERE note_id=?", (cleanup_id,))
+                            c.execute("DELETE FROM personal_notes WHERE id=?", (cleanup_id,))
+                            c.execute("DELETE FROM events WHERE dedup_key=?", (f"note:{cleanup_id}",))
                     c.execute("DELETE FROM events WHERE dedup_key=?", (f"note:{note_id}",))
                 if attachment_path:
                     Path(attachment_path).unlink(missing_ok=True)

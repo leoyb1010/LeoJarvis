@@ -69,7 +69,7 @@ if [ "${LEOJARVIS_USE_LAUNCHD:-auto}" != "0" ] \
   launchctl kickstart -k "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}"
   echo "==> [3/3] 等待 LaunchAgent 接管 8787"
   for i in $(seq 1 30); do
-    if curl -s --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
+    if curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
       PID="$(lsof -ti "tcp:${PORT}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
       echo "==> 上线成功：打开 http://127.0.0.1:${PORT} （LaunchAgent pid=${PID:-unknown}，日志 data/stdout.log / data/stderr.log）"
       exit 0
@@ -115,7 +115,7 @@ echo "    pid=${PID}, 日志: data/cortex.log"
 
 # 等待健康检查（curl 加 --max-time，避免端口半占用时无限等待）
 for i in $(seq 1 30); do
-  if curl -s --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
+  if curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
     echo "==> 上线成功：打开 http://127.0.0.1:${PORT} （进程 pid=${PID}，日志 data/cortex.log）"
     exit 0
   fi

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
 import html
 import hashlib
 import os
+import threading
 import urllib.request
 from collections import Counter, defaultdict
 from typing import Any
@@ -17,12 +19,28 @@ from ..localize import chinese_tags as _chinese_tags, has_noisy_english, to_chin
 
 # 简报在每次请求时构建。标题、摘要等展示路径默认不实时调用 LLM；
 # 真实来源摘录例外：英文来源会用 DeepSeek 做严格翻译并落入本地缓存。
+_TODAY_CACHE: dict[str, Any] = {"ts": 0.0, "data": None, "version": None}
+_TODAY_CACHE_TTL = 30.0
+_TODAY_CACHE_LOCK = threading.Lock()
+
+
 def to_chinese(text, *, context="通用内容", max_chars=360, allow_llm=False):
     return _to_chinese(text, context=context, max_chars=max_chars, allow_llm=allow_llm)
 
 
 def chinese_tags(raw, *, allow_llm=False):
     return _chinese_tags(raw, allow_llm=allow_llm)
+
+
+def _display_chinese(text: str | None, *, context: str, max_chars: int = 280, allow_llm: bool = False) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    value = re.sub(r"^中文摘要[:：]\s*", "", value)
+    if has_noisy_english(value):
+        localized = to_chinese(value, context=context, max_chars=max_chars, allow_llm=allow_llm)
+        return re.sub(r"^中文摘要[:：]\s*", "", localized).strip()
+    return value[:max_chars]
 
 
 def _loads(value: str | None, fallback: Any) -> Any:
@@ -32,6 +50,22 @@ def _loads(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def _today_source_version() -> tuple[int, int, int, int, int, int]:
+    db.init_db()
+    with db.conn() as c:
+        events = c.execute("SELECT COALESCE(MAX(ts),0), COUNT(*) FROM events").fetchone()
+        judgments = c.execute("SELECT COALESCE(MAX(ts),0), COUNT(*) FROM judgments").fetchone()
+        feedback = c.execute("SELECT COALESCE(MAX(ts),0), COUNT(*) FROM feedback").fetchone()
+    return (
+        int(events[0] or 0),
+        int(events[1] or 0),
+        int(judgments[0] or 0),
+        int(judgments[1] or 0),
+        int(feedback[0] or 0),
+        int(feedback[1] or 0),
+    )
 
 
 def _clean_key(title: str) -> str:
@@ -495,6 +529,15 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     item_tags = _tags(row, meta, reasons)
     if _is_github(row) and repo_snapshot.get("display_topics"):
         item_tags = list(dict.fromkeys((repo_snapshot.get("display_topics") or []) + ["GitHub 项目"]))[:6]
+    title = _display_chinese(title, context="简报标题", max_chars=120, allow_llm=translate_source_detail) or title
+    take = _display_chinese(take, context="简报摘要", max_chars=260, allow_llm=translate_source_detail) or take
+    why = _display_chinese(why, context="为什么重要", max_chars=260, allow_llm=translate_source_detail) or why
+    relation = _display_chinese(relation, context="和 Leo 的关系", max_chars=260, allow_llm=translate_source_detail) or relation
+    next_step = _display_chinese(next_step, context="下一步建议", max_chars=260, allow_llm=translate_source_detail) or next_step
+    if detail and has_noisy_english(detail) and not source_detail_translated:
+        detail = ""
+    if source_detail and has_noisy_english(source_detail) and not source_detail_translated:
+        source_detail = ""
     velocity = meta.get("velocity") if isinstance(meta.get("velocity"), dict) else {}
     return {
         "event_id": row["event_id"],
@@ -681,7 +724,7 @@ def _today_focus_text(items: list[dict]) -> str:
     return "".join(parts)
 
 
-def build_today() -> dict:
+def _build_today_raw() -> dict:
     global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
     _SOURCE_FETCH_BUDGET = 5
     _SOURCE_TRANSLATE_BUDGET = 0
@@ -770,6 +813,134 @@ def build_today() -> dict:
             "next_action": "先看高优先焦点，再把有价值的信息写入个人记事或反馈为重要。",
         },
     }
+
+
+def _compact_item(item: dict) -> dict:
+    keep = (
+        "event_id", "title", "original_title", "url", "domain", "domain_label", "source", "source_raw",
+        "kind", "score", "take", "detail", "triage", "priority", "why_important", "relation", "next_step",
+        "tags", "ts", "repo_stars", "repo_speed", "channel", "category", "dup_count", "related_sources",
+        "source_detail_translated",
+    )
+    return {key: item.get(key) for key in keep if key in item}
+
+
+def _is_github_item(item: dict) -> bool:
+    return item.get("kind") == "github_repo" or item.get("source_raw") in {"github_radar", "intel:github"}
+
+
+def _is_x_item(item: dict) -> bool:
+    return item.get("kind") == "x_post" or item.get("channel") == "x_monitor"
+
+
+def _is_mail_item(item: dict) -> bool:
+    return item.get("kind") == "email" or item.get("channel") == "mail"
+
+
+def _balanced_compact_items(data: dict, limit: int) -> list[dict]:
+    all_items = list(data.get("items", []))
+    if limit <= 0 or len(all_items) <= limit:
+        return [_compact_item(item) for item in all_items]
+
+    chosen: list[dict] = []
+    seen: set[str] = set()
+
+    def add(rows: list[dict], cap: int | None = None) -> None:
+        nonlocal chosen
+        added = 0
+        for row in rows:
+            key = str(row.get("event_id") or row.get("title") or "")
+            if not key or key in seen:
+                continue
+            chosen.append(row)
+            seen.add(key)
+            added += 1
+            if len(chosen) >= limit or (cap is not None and added >= cap):
+                return
+
+    news = [it for it in all_items if not _is_github_item(it) and not _is_x_item(it) and not _is_mail_item(it)]
+    business_news = [it for it in news if it.get("domain") != "life"]
+    life_news = [it for it in news if it.get("domain") == "life"]
+    x_items = list(data.get("x", [])) or [it for it in all_items if _is_x_item(it)]
+    mail_items = list(data.get("mail", [])) or [it for it in all_items if _is_mail_item(it)]
+    github_items = list(data.get("github", [])) or [it for it in all_items if _is_github_item(it)]
+
+    add(business_news, max(4, limit // 2))
+    add(life_news, min(2, max(1, limit // 5)))
+    add(x_items, min(2, max(1, limit // 6)))
+    add(mail_items, min(2, max(1, limit // 6)))
+    add(github_items, min(4, max(2, limit // 3)))
+    add(all_items)
+    return [_compact_item(item) for item in chosen[:limit]]
+
+
+def _compact_today(data: dict, *, limit: int = 0) -> dict:
+    items = _balanced_compact_items(data, limit) if limit > 0 else [_compact_item(item) for item in data.get("items", [])]
+    item_ids = {item.get("event_id") for item in items}
+
+    def compact_rows(name: str, fallback: list[dict] | None = None, cap: int | None = None) -> list[dict]:
+        rows = data.get(name, fallback or [])
+        compacted = [_compact_item(item) for item in rows]
+        if item_ids:
+            compacted = [item for item in compacted if item.get("event_id") in item_ids]
+        if cap is not None:
+            compacted = compacted[:cap]
+        return compacted
+
+    groups = []
+    for group in data.get("groups", [])[:8]:
+        rows = [_compact_item(item) for item in group.get("items", [])]
+        if item_ids:
+            rows = [item for item in rows if item.get("event_id") in item_ids]
+        groups.append({**{k: v for k, v in group.items() if k != "items"}, "items": rows[:4]})
+
+    return {
+        "generated_at": data.get("generated_at"),
+        "compact": True,
+        "business": compact_rows("business"),
+        "life": compact_rows("life"),
+        "items": items,
+        "mail": compact_rows("mail", cap=8),
+        "x": compact_rows("x", cap=8),
+        "github": compact_rows("github", cap=12),
+        "focus": items[:5],
+        "groups": groups,
+        "counts": data.get("counts", {}),
+        "filters": data.get("filters", {}),
+        "summary": data.get("summary", {}),
+    }
+
+
+def _cached_today(*, force: bool = False) -> dict:
+    now = time.time()
+    version = _today_source_version()
+    cached = _TODAY_CACHE.get("data")
+    if not force and cached is not None and _TODAY_CACHE.get("version") == version and now - float(_TODAY_CACHE.get("ts") or 0) < _TODAY_CACHE_TTL:
+        return copy.deepcopy(cached)
+    with _TODAY_CACHE_LOCK:
+        now = time.time()
+        cached = _TODAY_CACHE.get("data")
+        version = _today_source_version()
+        if not force and cached is not None and _TODAY_CACHE.get("version") == version and now - float(_TODAY_CACHE.get("ts") or 0) < _TODAY_CACHE_TTL:
+            return copy.deepcopy(cached)
+        data = _build_today_raw()
+        _TODAY_CACHE["data"] = data
+        _TODAY_CACHE["ts"] = now
+        _TODAY_CACHE["version"] = version
+        return copy.deepcopy(data)
+
+
+def invalidate_today_cache() -> None:
+    _TODAY_CACHE["data"] = None
+    _TODAY_CACHE["ts"] = 0.0
+    _TODAY_CACHE["version"] = None
+
+
+def build_today(*, compact: bool = False, limit: int = 0, force: bool = False) -> dict:
+    data = _cached_today(force=force)
+    if compact:
+        return _compact_today(data, limit=limit)
+    return data
 
 
 def build_item_detail(event_id: str) -> dict | None:

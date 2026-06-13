@@ -20,7 +20,7 @@ LeoJarvis 是一个常驻在你 Mac 上、**你能对话且能在你机器上动
 | **ServiceOps** 本地服务 | 检查 ollama/leonote/leomoney/leoapi 在线状态；看日志；重启（需 `start` 配置，高风险确认） | `list_services` `service_logs` `restart_service` |
 | **全景驾驶舱** | 首页级总览：系统健康、服务状态、情报信号、资讯重点、待确认记忆、个人记事、GitHub 雷达、最近提醒 | — |
 | **子智能体管控** | 把命令作为后台子智能体派发、监控、读输出、停止 | `spawn_agent` `list_agents` `agent_log` `stop_agent` |
-| **个人记事** | 迁移旧记录，支持编辑、标签、搜索、时间线、卡片流、置顶、收藏、归档 | `write_personal_note` `search_personal_notes` |
+| **个人记事** | 吸收 open-notebook 的 Notebook/Source/Note 模型，支持编辑、Markdown 清洗预览、标签、搜索、附件、置顶、收藏、归档和 AI 整理输出 | `write_personal_note` `search_personal_notes` |
 | **资讯简报** | 中文行动简报：今日重点、为什么重要、和我有什么关系、下一步建议、去重降噪和筛选 | — |
 | **个人情报中心** | RSS / 网页变化 / GitHub 高动量项目雷达；按画像判断高优先 / 简报 / 忽略 | `intelligence_scan` `github_radar` |
 | **Reach 触达渠道** | 吸收 Agent-Reach 的渠道模型，统一检测网页、GitHub、RSS、视频、Exa/MCP 和社媒工具可用性；支持 URL 全文读取与 GitHub 仓库详情读取 | `GET /reach/status` `POST /reach/read-url` `POST /reach/github/repo` |
@@ -96,6 +96,12 @@ LeoJarvis 现在提供原生 macOS App 外壳，位于 `desktop/macos/`。它不
 ./scripts/build_macos_app.sh
 ```
 
+本机安装并清掉旧的 LeoJarvis/Cortex 相关 App：
+
+```bash
+bash scripts/install_macos_app.sh
+```
+
 输出：
 
 ```text
@@ -118,6 +124,8 @@ desktop/updates/appcast.json
 ## 个人记事与长期记忆
 
 - **个人记事**：旧 `journal` 事件会平滑迁移为个人记事，保留原内容，并标记为“旧记录迁移”。新接口是 `GET/POST/PATCH/DELETE /personal-notes`，旧 `/journal` 接口继续兼容。
+- **Notebook 工作台**：`GET /personal-notes/notebooks` 会输出 Notebook、资料源、标签、最近笔记和 AI 整理模板。`POST /personal-notes/{id}/transform` 可把已有笔记整理成摘要、要点、行动项或问题清单，并生成一条可继续编辑的新笔记。
+- **Markdown 与附件**：Web/iOS 端都支持重新编辑已保存笔记；粘贴 Markdown 会做格式清洗，图片、视频、录音和文件可作为附件进入同一条笔记。
 - **长期记忆确认**：`insert_memory()` 默认只创建 `pending` 候选。前端「长期记忆」视图提供“确认保存 / 拒绝保存 / 稍后处理”。只有 `active` 记忆会被 `recall_memory` 召回。反思模块只从对话、行动、个人记事和反复出现的使用/反馈模式中提炼候选，不会把单条新闻、普通笔记或 GitHub 项目原样当成长期记忆。
 - **中文默认展示**：RSS、网页、GitHub 项目描述和简报内容展示前会经过中文本地化；英文原文在需要时作为辅助信息保留。
 
@@ -183,6 +191,12 @@ bash scripts/deploy.sh
 
 完成后打开 `http://127.0.0.1:8787`（前端与 API 同源，无需再开 5173）。
 配合下方 launchd 常驻，进程退出会自动拉起。
+
+响应时效烟测：
+
+```bash
+./scripts/perf_smoke.py http://127.0.0.1:8787 6
+```
 
 ## 配置
 

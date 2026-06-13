@@ -12,6 +12,12 @@ from . import db
 from .config import DATA_DIR
 from .localize import to_chinese
 
+_SENSITIVE_PATTERNS = [
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\b(?:api[_-]?key|token|secret|password|passwd|pwd)\b", re.I),
+    re.compile(r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\b"),
+]
+
 
 def _tags(value: Any) -> list[str]:
     if isinstance(value, str):
@@ -33,9 +39,216 @@ def _excerpt(content: str, limit: int = 120) -> str:
     return compact[:limit] or "暂无摘要"
 
 
+def normalize_markdown_content(content: str) -> str:
+    """Normalize pasted Markdown without changing the user's facts or wording."""
+    text = str(content or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u00a0", " ").replace("\u200b", "")
+    stripped = text.strip()
+    fenced = re.match(r"^```(?:markdown|md)?\s*\n(?P<body>.*)\n```$", stripped, flags=re.I | re.S)
+    if fenced:
+        text = fenced.group("body")
+    # Some sources paste literal "\n" sequences instead of real line breaks.
+    if text.count("\\n") >= 2 and text.count("\n") <= 1:
+        text = text.replace("\\n", "\n")
+    text = re.sub(r"[ \t]+$", "", text, flags=re.M)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    text = re.sub(r"(?m)^\s*([*+-])\s{2,}", r"\1 ", text)
+    text = re.sub(r"(?m)^(\s*\d+\.)\s{2,}", r"\1 ", text)
+    return text.strip()
+
+
+def _plain_title(text: str) -> str:
+    value = str(text or "").strip()
+    value = re.sub(r"^#{1,6}\s+", "", value)
+    value = re.sub(r"^\s*[-*+]\s+", "", value)
+    value = re.sub(r"^\s*\d+\.\s+", "", value)
+    value = re.sub(r"[*_`~]+", "", value)
+    return value.strip()
+
+
+def _json_object_from_text(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip().strip("`")
+    raw = re.sub(r"^json\s*", "", raw, flags=re.I).strip()
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, flags=re.S)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def draft_from_natural_language(prompt: str, *, project_name: str = "") -> dict[str, Any]:
+    """Turn a user's own natural-language note into an editable note draft.
+
+    The model is instructed to preserve facts only. If LLM routing is unavailable,
+    return a deterministic draft instead of blocking note creation.
+    """
+    text = str(prompt or "").strip()
+    if not text:
+        return {"title": "", "content": "", "tags": [], "project_name": project_name.strip()}
+    fallback = {
+        "title": _title_from(text),
+        "content": text,
+        "tags": [],
+        "project_name": project_name.strip(),
+    }
+    try:
+        from .models_router import chat
+        raw = chat("default", [
+            {
+                "role": "system",
+                "content": (
+                    "你是 LeoJarvis 的个人记事整理器。把用户自己的输入整理为可编辑笔记草稿。"
+                    "必须保留原始事实，不添加不存在的信息，不做外部知识补充，不替用户下结论。"
+                    "输出 JSON 对象，字段必须是 title、content、tags、project_name。"
+                    "content 用简体中文 Markdown，结构清晰但不要冗长；tags 最多 6 个短标签。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"默认项目：{project_name.strip() or '无'}\n原始输入：\n{text[:4000]}",
+            },
+        ], temperature=0.2)
+        parsed = _json_object_from_text(raw)
+        title = str(parsed.get("title") or fallback["title"]).strip()[:80]
+        content = str(parsed.get("content") or fallback["content"]).strip()
+        tags = _tags(parsed.get("tags") or [])
+        project = str(parsed.get("project_name") or fallback["project_name"]).strip()
+        return {
+            "title": title or fallback["title"],
+            "content": content or fallback["content"],
+            "tags": tags,
+            "project_name": project,
+        }
+    except Exception:
+        return fallback
+
+
+_TRANSFORM_TEMPLATES: dict[str, dict[str, str]] = {
+    "summary": {
+        "label": "摘要",
+        "tag": "摘要",
+        "prompt": (
+            "把这条笔记整理成可复用的中文 Markdown 摘要。结构必须包含："
+            "## 核心结论、## 关键信息、## 可引用细节。只使用原文事实，不添加外部信息。"
+        ),
+    },
+    "key_points": {
+        "label": "要点",
+        "tag": "要点",
+        "prompt": (
+            "从这条笔记中提取关键概念和关键事实，输出中文 Markdown。"
+            "结构必须包含：## 关键概念、## 关键事实、## 需要保留的原文线索。不要编造。"
+        ),
+    },
+    "actions": {
+        "label": "行动项",
+        "tag": "行动项",
+        "prompt": (
+            "从这条笔记中提取下一步行动，输出中文 Markdown。"
+            "结构必须包含：## 可执行事项、## 依赖信息、## 风险与待确认。没有明确行动就写“原文未给出”。"
+        ),
+    },
+    "questions": {
+        "label": "问题",
+        "tag": "问题",
+        "prompt": (
+            "基于这条笔记生成后续研究问题，输出中文 Markdown。"
+            "结构必须包含：## 需要追问、## 需要补充的资料源、## 可验证假设。不要添加新事实。"
+        ),
+    },
+}
+
+
+def _fallback_transform(note: dict, template: dict[str, str]) -> str:
+    body = normalize_markdown_content(note.get("content") or note.get("excerpt") or "")
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    bullets = "\n".join(f"- {line[:180]}" for line in lines[:8])
+    if not bullets:
+        bullets = "- 原笔记暂无可整理正文。"
+    return f"## {template['label']}\n\n{bullets}"
+
+
+def transform_note(note_id: str, template_key: str = "summary") -> dict[str, Any]:
+    note = get_note(note_id)
+    if not note:
+        raise KeyError("note not found")
+    template = _TRANSFORM_TEMPLATES.get(template_key) or _TRANSFORM_TEMPLATES["summary"]
+    content = note.get("content") or note.get("excerpt") or ""
+    result = ""
+    try:
+        from .models_router import chat
+        result = chat("default", [
+            {
+                "role": "system",
+                "content": (
+                    "你是 LeoJarvis 的研究笔记整理器。你只能基于用户给出的笔记内容整理。"
+                    "必须使用简体中文 Markdown；不得添加来源中没有的事实；不得泄露或扩写密钥。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"任务：{template['prompt']}\n"
+                    f"原笔记标题：{note.get('title') or ''}\n"
+                    f"原笔记项目：{note.get('project_name') or ''}\n"
+                    f"原笔记内容：\n{content[:7000]}"
+                ),
+            },
+        ], temperature=0.2)
+        result = normalize_markdown_content(result)
+    except Exception:
+        result = ""
+    if not result:
+        result = _fallback_transform(note, template)
+    tags = list(dict.fromkeys(["AI整理", template["tag"], *note.get("tags", [])]))[:12]
+    new_note = save_note({
+        "title": f"{template['label']}：{note.get('title') or _title_from(content)}",
+        "content": result,
+        "excerpt": _excerpt(result),
+        "tags": tags,
+        "project_name": note.get("project_name") or "",
+        "source": "ai_transform",
+        "source_title": note.get("title") or "",
+        "source_url": note.get("source_url") or "",
+        "import_meta": {
+            "kind": "note_transformation",
+            "template": template_key,
+            "source_note_id": note_id,
+        },
+        "favorite": False,
+        "pinned": False,
+        "archived": False,
+    }, reason=f"transform:{template_key}")
+    return {"note": new_note, "template": template_key}
+
+
+def is_sensitive_text(text: str) -> bool:
+    return any(pattern.search(text or "") for pattern in _SENSITIVE_PATTERNS)
+
+
+def _redact_sensitive(text: str, limit: int = 160) -> str:
+    compact = " ".join((text or "").split())
+    compact = re.sub(
+        r"(?i)\b(api[_\s-]?key|token\s*key|secret|password|passwd|pwd)\b\s*[:=：]\s*\S+",
+        lambda m: f"{m.group(1)}：••••••",
+        compact,
+    )
+    compact = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[已隐藏密钥]", compact)
+    return compact[:limit] or "暂无摘要"
+
+
 def _title_from(content: str, fallback: str = "未命名记事") -> str:
     first = next((line.strip() for line in (content or "").splitlines() if line.strip()), "")
-    return first[:36] or fallback
+    return _plain_title(first)[:36] or fallback
 
 
 def _row(row) -> dict:
@@ -45,6 +258,8 @@ def _row(row) -> dict:
     item["favorite"] = bool(item.get("favorite"))
     item["pinned"] = bool(item.get("pinned"))
     item["archived"] = bool(item.get("archived"))
+    item["sensitive"] = is_sensitive_text(f"{item.get('title') or ''}\n{item.get('content') or ''}\n{item.get('tags') or ''}")
+    item["safe_excerpt"] = _redact_sensitive(item.get("excerpt") or item.get("content") or "") if item["sensitive"] else item.get("excerpt")
     return item
 
 
@@ -92,7 +307,28 @@ def migrate_journal_events() -> int:
     return migrated
 
 
-def list_notes(q: str = "", tag: str = "", status: str = "active", project: str = "", limit: int = 100) -> list[dict]:
+def _compact_note(item: dict) -> dict:
+    compact = {
+        key: item.get(key)
+        for key in (
+            "id", "title", "excerpt", "safe_excerpt", "tags", "source", "source_url", "source_title",
+            "favorite", "pinned", "archived", "deleted_ts", "created_ts", "updated_ts", "project_name",
+            "sensitive",
+        )
+    }
+    if compact.get("sensitive") and compact.get("safe_excerpt"):
+        compact["excerpt"] = compact["safe_excerpt"]
+    return compact
+
+
+def list_notes(
+    q: str = "",
+    tag: str = "",
+    status: str = "active",
+    project: str = "",
+    limit: int = 100,
+    compact: bool = False,
+) -> list[dict]:
     migrate_journal_events()
     clauses = []
     params: list[Any] = []
@@ -123,7 +359,8 @@ def list_notes(q: str = "", tag: str = "", status: str = "active", project: str 
             """,
             params,
         ).fetchall()
-    return [_row(r) for r in rows]
+    notes = [_row(r) for r in rows]
+    return [_compact_note(item) for item in notes] if compact else notes
 
 
 def get_note(note_id: str) -> dict | None:
@@ -137,7 +374,7 @@ def save_note(data: dict, note_id: str | None = None, reason: str = "save") -> d
     migrate_journal_events()
     now = db.now_ms()
     title = str(data.get("title") or "").strip()
-    content = str(data.get("content") or "").strip()
+    content = normalize_markdown_content(str(data.get("content") or ""))
     title = title or _title_from(content)
     tags = _tags(data.get("tags", []))
     excerpt = str(data.get("excerpt") or "").strip() or _excerpt(content)
@@ -334,6 +571,7 @@ def attach_file(*, file_name: str, mime_type: str = "", data_base64: str = "",
 def note_stats() -> dict:
     migrate_journal_events()
     notes = list_notes(status="all", limit=500)
+    recent = [_compact_note(note) for note in notes[:8]]
     tag_counts: dict[str, int] = {}
     for note in notes:
         for tag in note["tags"]:
@@ -352,5 +590,47 @@ def note_stats() -> dict:
         "archived": sum(1 for n in notes if n["archived"]),
         "tags": [{"tag": tag, "count": count} for tag, count in top_tags],
         "projects": [{"name": name, "count": count} for name, count in top_projects],
-        "recent": notes[:8],
+        "recent": recent,
+    }
+
+
+def notebook_overview() -> dict:
+    migrate_journal_events()
+    notes = list_notes(status="all", limit=500)
+    buckets: dict[str, dict[str, Any]] = {}
+    for note in notes:
+        name = str(note.get("project_name") or "").strip() or "未归档"
+        bucket = buckets.setdefault(name, {
+            "name": name,
+            "description": "Jarvis 个人记事项目空间",
+            "note_count": 0,
+            "source_count": 0,
+            "favorite": 0,
+            "pinned": 0,
+            "updated_ts": 0,
+            "tags": {},
+            "recent": [],
+        })
+        bucket["note_count"] += 1
+        bucket["favorite"] += 1 if note.get("favorite") else 0
+        bucket["pinned"] += 1 if note.get("pinned") else 0
+        bucket["updated_ts"] = max(int(bucket["updated_ts"] or 0), int(note.get("updated_ts") or 0))
+        if note.get("source_url") or note.get("source") in {"link_import", "attachment_import"}:
+            bucket["source_count"] += 1
+        for tag in note.get("tags") or []:
+            bucket["tags"][tag] = bucket["tags"].get(tag, 0) + 1
+        if len(bucket["recent"]) < 4:
+            bucket["recent"].append(_compact_note(note))
+    rows = []
+    for bucket in buckets.values():
+        tags = sorted(bucket.pop("tags").items(), key=lambda x: (-x[1], x[0]))[:6]
+        bucket["tags"] = [{"tag": tag, "count": count} for tag, count in tags]
+        rows.append(bucket)
+    rows.sort(key=lambda x: (x["name"] == "未归档", -int(x["updated_ts"] or 0), x["name"]))
+    return {
+        "notebooks": rows,
+        "templates": [
+            {"id": key, "label": value["label"], "tag": value["tag"]}
+            for key, value in _TRANSFORM_TEMPLATES.items()
+        ],
     }

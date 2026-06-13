@@ -90,8 +90,12 @@ export type BriefingData = {
   summary?: { today_focus: string; why_it_matters: string; next_action: string };
 };
 
-export async function getBriefing(): Promise<BriefingData> {
-  return readJson(await fetch(`${BASE}/briefing/today`), "读取资讯简报");
+export async function getBriefing(opts: { compact?: boolean; limit?: number; refresh?: boolean } = {}): Promise<BriefingData> {
+  const url = apiUrl("/briefing/today");
+  if (opts.compact !== false) url.searchParams.set("compact", "1");
+  if (opts.limit) url.searchParams.set("limit", String(opts.limit));
+  if (opts.refresh) url.searchParams.set("refresh", "1");
+  return readJson(await fetch(url), "读取资讯简报");
 }
 
 export async function getBriefingItem(eventId: string): Promise<BriefingItem> {
@@ -341,6 +345,7 @@ export type DeviceOpsStatus = {
   generated_at: number;
   summary: { targets: number; ready: number; missing: number; safe_default: boolean };
   targets: DeviceOpsTarget[];
+  cache?: { stale: boolean; refreshing: boolean; last_updated: number; ttl_seconds: number };
 };
 
 export type DeviceOpsPreview = {
@@ -358,8 +363,8 @@ export type DeviceOpsPreview = {
   install_hint?: string;
 };
 
-export async function getDeviceOpsStatus(): Promise<DeviceOpsStatus> {
-  return readJson(await fetch(`${BASE}/device-ops/status`), "读取设备管家状态");
+export async function getDeviceOpsStatus(refresh = false): Promise<DeviceOpsStatus> {
+  return readJson(await fetch(`${BASE}/device-ops/status${refresh ? "?refresh=1" : ""}`), "读取设备管家状态");
 }
 
 export async function previewDeviceOps(action: string, target_id = "local", path = ""): Promise<DeviceOpsPreview> {
@@ -842,8 +847,9 @@ export async function getAgents(): Promise<AgentRow[]> {
 export type PersonalNote = {
   id: string;
   title: string;
-  content: string;
+  content?: string;
   excerpt: string;
+  safe_excerpt?: string;
   tags: string[];
   source?: string;
   source_url?: string | null;
@@ -853,6 +859,7 @@ export type PersonalNote = {
   favorite: boolean;
   pinned: boolean;
   archived: boolean;
+  sensitive?: boolean;
   created_ts: number;
   updated_ts: number;
 };
@@ -865,6 +872,24 @@ export type PersonalNoteStats = {
   tags: { tag: string; count: number }[];
   projects?: { name: string; count: number }[];
   recent: PersonalNote[];
+};
+
+export type PersonalNotebook = {
+  name: string;
+  description: string;
+  note_count: number;
+  source_count: number;
+  favorite: number;
+  pinned: number;
+  updated_ts: number;
+  tags: { tag: string; count: number }[];
+  recent: PersonalNote[];
+};
+
+export type NoteTransformTemplate = {
+  id: string;
+  label: string;
+  tag: string;
 };
 
 export type PersonalNotesResponse = {
@@ -890,6 +915,7 @@ export type NoteInput = {
 
 export async function getPersonalNotes(q = "", tag = "", status = "active", project = ""): Promise<PersonalNotesResponse> {
   const url = apiUrl("/personal-notes");
+  url.searchParams.set("compact", "1");
   if (q) url.searchParams.set("q", q);
   if (tag) url.searchParams.set("tag", tag);
   if (status) url.searchParams.set("status", status);
@@ -903,6 +929,18 @@ export async function savePersonalNote(input: NoteInput, id?: string): Promise<{
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }), "保存个人记事");
+}
+
+export async function getPersonalNoteNotebooks(): Promise<{ ok: boolean; notebooks: PersonalNotebook[]; templates: NoteTransformTemplate[] }> {
+  return readJson(await fetch(`${BASE}/personal-notes/notebooks`), "读取 Notebook 项目");
+}
+
+export async function transformPersonalNote(id: string, template: string): Promise<{ ok: boolean; note: PersonalNote; template: string }> {
+  return readJson(await fetch(`${BASE}/personal-notes/${id}/transform`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template }),
+  }), "整理个人记事");
 }
 
 export async function deletePersonalNote(id: string): Promise<{ ok: boolean }> {

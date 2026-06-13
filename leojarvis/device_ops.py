@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -13,6 +14,10 @@ from . import remote_status
 
 
 SAFE_ACTIONS = {"status", "clean", "optimize", "purge", "installers", "analyze", "apps"}
+_FLEET_TTL = 45.0
+_FLEET_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_FLEET_LOCK = threading.Lock()
+_FLEET_REFRESHING = threading.Event()
 MO_CANDIDATES = (
     "/opt/homebrew/bin/mo",
     "/usr/local/bin/mo",
@@ -327,7 +332,7 @@ def remote_status_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def fleet_status() -> dict[str, Any]:
+def _probe_fleet_status() -> dict[str, Any]:
     hosts = [row for row in remote_status.configured_hosts() if row.get("enabled", True)]
     with ThreadPoolExecutor(max_workers=min(4, max(1, len(hosts)))) as pool:
         remote = list(pool.map(remote_status_row, hosts)) if hosts else []
@@ -344,6 +349,85 @@ def fleet_status() -> dict[str, Any]:
         },
         "targets": rows,
     }
+
+
+def _placeholder_fleet_status() -> dict[str, Any]:
+    hosts = [row for row in remote_status.configured_hosts() if row.get("enabled", True)]
+    rows = [
+        {
+            "target_id": str(row.get("id") or row.get("host") or ""),
+            "target_name": str(row.get("name") or row.get("host") or ""),
+            "host": str(row.get("host") or ""),
+            "kind": "ssh",
+            "online": None,
+            "mole_installed": False,
+            "mo_path": "",
+            "version": "",
+            "brew_installed": False,
+            "install_hint": "正在后台探测",
+            "capabilities": {},
+            "error": "",
+        }
+        for row in hosts
+    ] or [local_status()]
+    return {
+        "ok": True,
+        "generated_at": int(time.time()),
+        "summary": {
+            "targets": len(rows),
+            "ready": 0,
+            "missing": len(rows),
+            "safe_default": True,
+        },
+        "targets": rows,
+    }
+
+
+def _with_cache_state(data: dict[str, Any], *, stale: bool, refreshing: bool) -> dict[str, Any]:
+    out = dict(data)
+    out["cache"] = {
+        "stale": stale,
+        "refreshing": refreshing,
+        "last_updated": int(float(_FLEET_CACHE.get("ts") or 0)),
+        "ttl_seconds": int(_FLEET_TTL),
+    }
+    return out
+
+
+def _refresh_fleet_status() -> dict[str, Any]:
+    with _FLEET_LOCK:
+        data = _probe_fleet_status()
+        _FLEET_CACHE["data"] = data
+        _FLEET_CACHE["ts"] = time.time()
+        return data
+
+
+def _refresh_fleet_status_bg() -> None:
+    try:
+        _refresh_fleet_status()
+    finally:
+        _FLEET_REFRESHING.clear()
+
+
+def _trigger_refresh() -> None:
+    if _FLEET_REFRESHING.is_set():
+        return
+    _FLEET_REFRESHING.set()
+    threading.Thread(target=_refresh_fleet_status_bg, daemon=True).start()
+
+
+def fleet_status(*, max_age: float = _FLEET_TTL, block: bool = False, refresh: bool = False) -> dict[str, Any]:
+    now = time.time()
+    cached = _FLEET_CACHE.get("data")
+    fresh = cached is not None and now - float(_FLEET_CACHE.get("ts") or 0) < max_age
+    if refresh or block or (cached is None and block):
+        return _with_cache_state(_refresh_fleet_status(), stale=False, refreshing=False)
+    if cached is not None:
+        if not fresh:
+            _trigger_refresh()
+        return _with_cache_state(cached, stale=not fresh, refreshing=_FLEET_REFRESHING.is_set())
+    _trigger_refresh()
+    return _with_cache_state(_placeholder_fleet_status(), stale=True, refreshing=True)
 
 
 def _action_args(action: str, path: str = "") -> list[str]:

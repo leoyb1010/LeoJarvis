@@ -82,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "视图")
         viewMenuItem.submenu = viewMenu
         viewMenu.addItem(item("打开驾驶舱", #selector(openDashboard), "d"))
+        viewMenu.addItem(item("打开个人记事", #selector(openNotes), "n"))
+        viewMenu.addItem(item("新建记事", #selector(newNote), "N"))
+        viewMenu.addItem(item("打开情报中心", #selector(openIntelligence), "i"))
+        viewMenu.addItem(item("打开系统与设备", #selector(openSystem), "s"))
         viewMenu.addItem(item("打开设置", #selector(openSettings), ","))
         let commandItem = item("呼出 Jarvis", #selector(showCommand), "J")
         commandItem.keyEquivalentModifierMask = [.command, .shift]
@@ -142,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         menu.addItem(item("打开驾驶舱", #selector(openDashboard), "d"))
+        menu.addItem(item("打开个人记事", #selector(openNotes), "n"))
+        menu.addItem(item("新建记事", #selector(newNote), "N"))
+        menu.addItem(item("打开情报中心", #selector(openIntelligence), "i"))
+        menu.addItem(item("打开系统与设备", #selector(openSystem), "s"))
         menu.addItem(item("打开设置", #selector(openSettings), ","))
         let commandItem = item("呼出 Jarvis", #selector(showCommand), "J")
         commandItem.keyEquivalentModifierMask = [.command, .shift]
@@ -175,6 +183,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openDashboard() {
         window.showWindow(nil)
         window.loadView("dashboard")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openNotes() {
+        window.showWindow(nil)
+        window.openNotes()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func newNote() {
+        window.showWindow(nil)
+        window.openNewNote()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openIntelligence() {
+        window.showWindow(nil)
+        window.loadView("intelligence")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openSystem() {
+        window.showWindow(nil)
+        window.loadView("system")
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -348,6 +380,20 @@ final class MainWindowController: NSWindowController, WKNavigationDelegate {
             loadDashboard()
         }
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('leojarvis:open-command'))")
+    }
+
+    func openNotes() {
+        loadView("notes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('leojarvis:focus-notes'))")
+        }
+    }
+
+    func openNewNote() {
+        loadView("notes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('leojarvis:new-note'))")
+        }
     }
 
     private func showBootScreen(_ message: String) {

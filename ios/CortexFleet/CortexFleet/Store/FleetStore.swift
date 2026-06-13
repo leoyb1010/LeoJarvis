@@ -11,6 +11,8 @@ final class FleetStore: ObservableObject {
     @Published private(set) var reachStatus = ReachStatus.empty
     @Published private(set) var mobileNotes: [MobileNote] = []
     @Published private(set) var mobileNoteStats = MobileNoteStats.empty
+    @Published private(set) var mobileBriefing = MobileBriefingPayload()
+    @Published private(set) var sectionErrors: [String: String] = [:]
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
     @Published private(set) var isRefreshing = false
     @Published private(set) var isLoadingJarvis = false
@@ -65,7 +67,6 @@ final class FleetStore: ObservableObject {
         refreshLocal()
         await refreshJarvisContent(showLoading: false)
         isRefreshing = true
-        errorMessage = nil
 
         if bridgeSettings.enabled {
             LocalNetworkPermissionProbe.trigger()
@@ -239,33 +240,64 @@ final class FleetStore: ObservableObject {
 
     func refreshJarvisContent(showLoading: Bool = true) async {
         guard bridgeSettings.isUsable else {
-            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            setSectionError("bridge", FleetError.invalidBridgeURL.localizedDescription)
             return
         }
         if showLoading {
             isLoadingJarvis = true
         }
-        defer {
-            if showLoading {
-                isLoadingJarvis = false
-            }
-        }
         do {
             LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
-            async let overview = mobileBridge.loadOverview(settings: bridgeSettings, token: token)
-            async let notes = mobileBridge.loadNotes(settings: bridgeSettings, token: token)
-            async let deviceOps = mobileBridge.loadDeviceOpsStatus(settings: bridgeSettings, token: token)
-            async let reach = mobileBridge.loadReachStatus(settings: bridgeSettings, token: token)
-            let (overviewValue, notesValue, deviceOpsValue, reachValue) = try await (overview, notes, deviceOps, reach)
-            jarvisOverview = overviewValue
-            mobileNotes = notesValue.notes
-            mobileNoteStats = notesValue.stats
-            deviceOpsStatus = deviceOpsValue
-            reachStatus = reachValue
-            errorMessage = nil
+
+            do {
+                jarvisOverview = try await mobileBridge.loadOverview(settings: bridgeSettings, token: token)
+                clearSectionError("overview")
+            } catch {
+                setSectionError("overview", error.localizedDescription)
+            }
+
+            do {
+                let notesValue = try await mobileBridge.loadNotes(settings: bridgeSettings, token: token)
+                mobileNotes = notesValue.notes
+                mobileNoteStats = notesValue.stats
+                clearSectionError("notes")
+            } catch {
+                setSectionError("notes", error.localizedDescription)
+            }
+
+            do {
+                mobileBriefing = try await mobileBridge.loadBriefing(settings: bridgeSettings, token: token)
+                clearSectionError("briefing")
+            } catch {
+                setSectionError("briefing", error.localizedDescription)
+            }
+
+            if showLoading {
+                isLoadingJarvis = false
+            }
+
+            do {
+                deviceOpsStatus = try await mobileBridge.loadDeviceOpsStatus(settings: bridgeSettings, token: token)
+                clearSectionError("deviceOps")
+            } catch {
+                setSectionError("deviceOps", error.localizedDescription)
+            }
+
+            do {
+                reachStatus = try await mobileBridge.loadReachStatus(settings: bridgeSettings, token: token)
+                clearSectionError("reach")
+            } catch {
+                setSectionError("reach", error.localizedDescription)
+            }
+            if sectionErrors.isEmpty {
+                errorMessage = nil
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            setSectionError("bridge", error.localizedDescription)
+            if showLoading {
+                isLoadingJarvis = false
+            }
         }
     }
 
@@ -293,16 +325,64 @@ final class FleetStore: ObservableObject {
                 memory: jarvisOverview.memory,
                 timeline: jarvisOverview.timeline
             )
-            errorMessage = nil
+            clearSectionError("notes")
         } catch {
-            errorMessage = error.localizedDescription
+            setSectionError("notes", error.localizedDescription)
         }
     }
 
-    func createMobileNote(title: String, content: String, tags: [String], projectName: String) async -> Bool {
+    func loadMobileNoteDetail(_ noteID: String) async -> MobileNoteDetailPayload? {
         guard bridgeSettings.isUsable else {
             errorMessage = FleetError.invalidBridgeURL.localizedDescription
-            return false
+            return nil
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let detail = try await mobileBridge.loadNoteDetail(settings: bridgeSettings, token: token, noteID: noteID)
+            if let index = mobileNotes.firstIndex(where: { $0.id == detail.note.id }) {
+                mobileNotes[index] = detail.note
+            }
+            clearSectionError("notes")
+            return detail
+        } catch {
+            setSectionError("notes", error.localizedDescription)
+            return nil
+        }
+    }
+
+    func refreshMobileBriefing() async {
+        guard bridgeSettings.isUsable else {
+            setSectionError("briefing", FleetError.invalidBridgeURL.localizedDescription)
+            return
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            mobileBriefing = try await mobileBridge.loadBriefing(settings: bridgeSettings, token: token)
+            clearSectionError("briefing")
+        } catch {
+            setSectionError("briefing", error.localizedDescription)
+        }
+    }
+
+    func loadMobileBriefingDetail(_ item: MobileBriefingItem) async -> MobileBriefingItem {
+        guard let eventID = item.eventId, bridgeSettings.isUsable else { return item }
+        do {
+            let token = try keychain.bridgeToken()
+            let detail = try await mobileBridge.loadBriefingItem(settings: bridgeSettings, token: token, eventID: eventID)
+            clearSectionError("briefing")
+            return detail
+        } catch {
+            setSectionError("briefing", error.localizedDescription)
+            return item
+        }
+    }
+
+    func createMobileNote(title: String, content: String, tags: [String], projectName: String) async -> MobileNote? {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return nil
         }
         do {
             LocalNetworkPermissionProbe.trigger()
@@ -319,10 +399,93 @@ final class FleetStore: ObservableObject {
             await refreshMobileNotes()
             noticeMessage = "记事已保存到 Jarvis。"
             errorMessage = nil
-            return true
+            return note
         } catch {
             errorMessage = error.localizedDescription
-            return false
+            return nil
+        }
+    }
+
+    func updateMobileNote(
+        noteID: String,
+        title: String,
+        content: String,
+        tags: [String],
+        projectName: String,
+        favorite: Bool,
+        pinned: Bool,
+        archived: Bool
+    ) async -> MobileNote? {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return nil
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let note = try await mobileBridge.updateNote(
+                settings: bridgeSettings,
+                token: token,
+                noteID: noteID,
+                title: title,
+                content: content,
+                tags: tags,
+                projectName: projectName,
+                favorite: favorite,
+                pinned: pinned,
+                archived: archived
+            )
+            if let index = mobileNotes.firstIndex(where: { $0.id == note.id }) {
+                mobileNotes[index] = note
+            } else {
+                mobileNotes.insert(note, at: 0)
+            }
+            await refreshMobileNotes()
+            noticeMessage = "记事已更新。"
+            errorMessage = nil
+            return note
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func draftMobileNote(prompt: String, projectName: String) async -> MobileNoteDraft? {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return nil
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let draft = try await mobileBridge.draftNote(settings: bridgeSettings, token: token, prompt: prompt, projectName: projectName)
+            errorMessage = nil
+            return draft
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func uploadMobileAttachment(noteID: String, fileName: String, mimeType: String, dataBase64: String) async -> MobileNoteAttachment? {
+        guard bridgeSettings.isUsable else {
+            errorMessage = FleetError.invalidBridgeURL.localizedDescription
+            return nil
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            return try await mobileBridge.uploadNoteAttachment(
+                settings: bridgeSettings,
+                token: token,
+                noteID: noteID,
+                fileName: fileName,
+                mimeType: mimeType,
+                dataBase64: dataBase64
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -372,11 +535,22 @@ final class FleetStore: ObservableObject {
                 snapshots[host.id] = .pending(for: host)
             }
             persistHosts()
-            noticeMessage = "\(result.bridgeName) 已刷新 \(result.snapshots.filter(\.isOnline).count)/\(result.snapshots.count) 台。"
-            errorMessage = nil
+            clearSectionError("bridgeProbe")
         } catch {
-            errorMessage = error.localizedDescription
+            setSectionError("bridgeProbe", error.localizedDescription)
         }
+    }
+
+    func sectionError(_ key: String) -> String? {
+        sectionErrors[key]
+    }
+
+    private func setSectionError(_ key: String, _ message: String) {
+        sectionErrors[key] = message
+    }
+
+    private func clearSectionError(_ key: String) {
+        sectionErrors.removeValue(forKey: key)
     }
 
     func deleteHost(_ host: MonitoredHost) {

@@ -110,6 +110,28 @@ def _repo_speed(repo: dict) -> float:
     return float(repo.get("stars_per_day") or repo.get("cold_stars_per_day") or 0)
 
 
+def _repo_summary_zh(repo: dict, name: str, *, fallback: str = "") -> str:
+    summary = str(repo.get("summary_zh") or "").strip()
+    if summary and "英文来源摘要" not in summary and not has_noisy_english(summary):
+        return summary[:240]
+    raw = str(repo.get("display_description") or repo.get("description") or fallback or "").strip()
+    if raw:
+        zh = to_chinese(raw, context="驾驶舱 GitHub 项目介绍", max_chars=180, allow_llm=False)
+        if zh and "英文来源摘要" not in zh and not has_noisy_english(zh):
+            return f"{name}：{zh}"[:240]
+    topics = chinese_tags(repo.get("display_topics") or repo.get("topics") or [], allow_llm=False)
+    language = str(repo.get("language") or "").strip()
+    signals = []
+    if topics:
+        signals.append("主题：" + "、".join(topics[:4]))
+    if language:
+        signals.append(f"主要语言：{language}")
+    if _repo_speed(repo):
+        signals.append(f"增长约 {_repo_speed(repo):.1f}/天")
+    suffix = "；".join(signals) if signals else "需打开 README 确认具体用途"
+    return f"{name} 已进入 GitHub 雷达，{suffix}。"
+
+
 def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -> list[dict]:
     cards: list[dict] = []
     seen: set[str] = set()
@@ -128,9 +150,7 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
         repo = repo_index.get(name, {})
         stars = int(item.get("repo_stars") or repo.get("stars") or 0) if (item.get("repo_stars") or repo) else None
         speed = float(item.get("repo_speed") or _repo_speed(repo) or 0) if (item.get("repo_speed") or repo) else None
-        summary = repo.get("summary_zh") or repo.get("display_description") or item.get("take") or "已通过情报评分筛选，值得进入驾驶舱观察。"
-        if str(summary).startswith("这个 GitHub 项目值得进入雷达") or "英文来源摘要" in str(summary):
-            summary = repo.get("summary_zh") or repo.get("display_description") or "项目增长和活跃度达到雷达阈值，等待下一轮中文摘要补齐。"
+        summary = _repo_summary_zh(repo, name, fallback=item.get("take") or "已通过情报评分筛选，值得进入驾驶舱观察。")
         seen.add(name)
         source_detail = item.get("source_detail")
         if not source_detail:
@@ -166,12 +186,7 @@ def _processed_github_cards(briefing: dict, repos: list[dict], limit: int = 5) -
         if not name or name in seen:
             continue
         seen.add(name)
-        raw_description = str(repo.get("description") or "").strip()
-        description = to_chinese(raw_description or name, context="驾驶舱 GitHub 项目介绍", max_chars=180)
-        if not raw_description:
-            description = repo.get("summary_zh") or repo.get("display_description") or f"{name} 暂未提供仓库介绍，需打开 README 判断实际用途。"
-        elif "英文来源摘要" in str(description) or has_noisy_english(str(description)):
-            description = f"{name}：{raw_description[:240]}"
+        description = _repo_summary_zh(repo, name, fallback=f"{name} 暂未提供仓库介绍，需打开 README 判断实际用途。")
         source_detail_raw = _github_source_detail(name, {}, repo)
         source_detail, translated = _translate_source_detail(source_detail_raw)
         cards.append({
@@ -202,23 +217,102 @@ import threading as _threading
 
 _OVERVIEW_CACHE: dict = {"ts": 0.0, "data": None}
 _OVERVIEW_TTL = 6.0
+_OVERVIEW_STALE_TTL = 180.0
 _OVERVIEW_LOCK = _threading.Lock()
+_OVERVIEW_REFRESHING = _threading.Event()
+
+
+def _placeholder_overview() -> dict:
+    return {
+        "generated_at": int(time.time()),
+        "refreshing": True,
+        "health": {
+            "score": 100,
+            "system": {
+                "raw": "系统状态正在刷新",
+                "disk_pct": None,
+                "load": None,
+                "load_5": None,
+                "load_15": None,
+                "cores": None,
+                "load_pct": None,
+                "memory_free_pct": None,
+                "memory_used_pct": None,
+            },
+            "services_online": 0,
+            "services_total": 0,
+            "attention_items": [{"label": "状态刷新中", "level": "信息", "detail": "LeoJarvis 正在后台更新驾驶舱数据。"}],
+        },
+        "services": [],
+        "notifications": {"items": [], "count": 0},
+        "weather": {},
+        "runtime": {
+            "services_online": 0,
+            "services_total": 0,
+            "tools_ready": 0,
+            "tools_total": 0,
+            "tools_running": 0,
+            "agents_running": 0,
+            "agents_total": 0,
+            "ai_tools": [],
+            "agents": [],
+        },
+        "briefing": {"business": 0, "life": 0, "top": []},
+        "intelligence": {"events": 0, "github_repos": 0, "top_repos": []},
+        "notes": personal_notes.note_stats(),
+        "memory": _memory_stats(),
+        "signals": {"triage": {"notify": 0, "digest": 0, "ignore": 0}, "sources": []},
+        "timeline": [],
+    }
+
+
+def _refresh_overview_background() -> None:
+    if _OVERVIEW_REFRESHING.is_set():
+        return
+    _OVERVIEW_REFRESHING.set()
+
+    def run() -> None:
+        try:
+            data = _build_overview()
+            with _OVERVIEW_LOCK:
+                _OVERVIEW_CACHE["data"] = data
+                _OVERVIEW_CACHE["ts"] = time.time()
+        finally:
+            _OVERVIEW_REFRESHING.clear()
+
+    _threading.Thread(target=run, name="cockpit-overview-refresh", daemon=True).start()
 
 
 def overview(force: bool = False) -> dict:
     # 驾驶舱总览很重（系统探测 + 简报 + GitHub 雷达 + 多张表）。顶部状态条(每页)和驾驶舱
-    # 同时高频轮询它，没缓存就是每页都卡 1~2s。这里加 6s TTL：高频轮询直接命中缓存。
+    # 同时高频轮询它，没缓存就是每页都卡。缓存过期时先返回旧快照并后台刷新，避免首屏尾延迟。
     now = time.time()
     cached = _OVERVIEW_CACHE.get("data")
+    if force:
+        _OVERVIEW_REFRESHING.set()
+        try:
+            with _OVERVIEW_LOCK:
+                data = _build_overview()
+                _OVERVIEW_CACHE["data"] = data
+                _OVERVIEW_CACHE["ts"] = time.time()
+                return data
+        finally:
+            _OVERVIEW_REFRESHING.clear()
     if cached is not None and not force and (now - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_TTL:
         return cached
+    if cached is not None and not force and (now - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_STALE_TTL:
+        _refresh_overview_background()
+        return cached
+    if cached is None and not force and _OVERVIEW_REFRESHING.is_set():
+        return _placeholder_overview()
     with _OVERVIEW_LOCK:
         if _OVERVIEW_CACHE.get("data") is not None and not force and (time.time() - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_TTL:
             return _OVERVIEW_CACHE["data"]
-        data = _build_overview()
-        _OVERVIEW_CACHE["data"] = data
-        _OVERVIEW_CACHE["ts"] = time.time()
-        return data
+        if _OVERVIEW_CACHE.get("data") is not None and not force and (time.time() - _OVERVIEW_CACHE["ts"]) < _OVERVIEW_STALE_TTL:
+            _refresh_overview_background()
+            return _OVERVIEW_CACHE["data"]
+        _refresh_overview_background()
+        return _placeholder_overview()
 
 
 def _build_overview() -> dict:

@@ -3733,6 +3733,57 @@ textarea,
 .jarvis-notes-product {
   min-width: 0;
 }
+.notes-notebook-board {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, .7fr) minmax(180px, 1fr) auto;
+  gap: 9px;
+  align-items: stretch;
+  margin: -2px 0 12px;
+}
+.notebook-board-card {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card-bg), var(--bg) 28%);
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+.notebook-board-card.primary {
+  border-color: color-mix(in oklab, var(--accent), var(--line-soft) 58%);
+  background: color-mix(in oklab, var(--accent-soft), var(--card-bg) 72%);
+}
+.notebook-board-card span {
+  color: var(--meta);
+  font: 760 10px var(--font-mono);
+  text-transform: uppercase;
+}
+.notebook-board-card b {
+  min-width: 0;
+  color: var(--fg);
+  font: 760 18px/1.15 var(--font-display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notebook-board-card small {
+  min-width: 0;
+  color: var(--muted);
+  font: 600 11px/1.35 var(--font-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notebook-board-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(64px, 1fr));
+  gap: 7px;
+  align-self: stretch;
+}
+.notebook-board-actions .btn {
+  min-height: 32px;
+  padding-inline: 10px;
+}
 .jarvis-notes-shell {
   display: grid;
   grid-template-columns: minmax(236px, 278px) minmax(0, 1fr);
@@ -3813,6 +3864,12 @@ textarea,
   color: var(--meta);
   font: 700 10px var(--font-mono);
 }
+.notes-chip-panel small {
+  margin-left: 5px;
+  color: var(--accent);
+  font: 700 9px var(--font-mono);
+  opacity: .82;
+}
 .jarvis-notes-list {
   display: grid;
   gap: 7px;
@@ -3828,8 +3885,15 @@ textarea,
   background: color-mix(in oklab, var(--accent-soft), var(--card-bg) 72%);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 55%);
 }
+.jarvis-notes-list .note-card-top em.warn {
+  color: var(--warn);
+  background: color-mix(in oklab, var(--warn), transparent 86%);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
 .jarvis-notes-list .note-card p {
   -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
 }
 .note-project-pill {
   display: inline-flex;
@@ -3913,6 +3977,31 @@ textarea,
 }
 .jarvis-editor-head .editor-actions {
   max-width: 700px;
+}
+.notes-transform-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.notes-transform-menu .icon-btn {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.note-sensitive-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in oklab, var(--warn), var(--line-soft) 62%);
+  border-radius: 13px;
+  background: color-mix(in oklab, var(--warn), var(--card-bg) 91%);
+  color: var(--fg-2);
+  padding: 9px 11px;
+  font: 650 12px/1.45 var(--font-body);
+}
+.note-sensitive-banner b {
+  color: var(--warn);
+  white-space: nowrap;
 }
 .jarvis-editor-meta {
   display: grid;
@@ -3998,6 +4087,14 @@ textarea,
 .notes-markdown-preview li {
   margin: 4px 0;
 }
+.notes-markdown-preview blockquote {
+  margin: 0 0 12px;
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  color: var(--fg-2);
+  background: var(--accent-soft);
+  border-radius: 0 10px 10px 0;
+}
 .notes-markdown-preview a {
   color: var(--accent);
   overflow-wrap: anywhere;
@@ -4025,6 +4122,13 @@ textarea,
 }
 
 @media (max-width: 1180px) {
+  .notes-notebook-board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .notebook-board-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
   .jarvis-notes-shell {
     grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
   }
@@ -4037,10 +4141,15 @@ textarea,
   }
 }
 @media (max-width: 920px) {
+  .notes-notebook-board,
   .jarvis-notes-shell,
   .jarvis-notes-editor.split .jarvis-editor-body,
   .jarvis-editor-head {
     grid-template-columns: 1fr;
+  }
+  .notebook-board-actions {
+    grid-column: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .jarvis-notes-sidebar {
     position: static;
