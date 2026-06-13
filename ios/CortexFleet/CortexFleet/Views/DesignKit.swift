@@ -303,6 +303,134 @@ struct IntelCard: View {
     }
 }
 
+// MARK: - Relative time
+
+enum RelativeTime {
+    static func string(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "刚刚" }
+        if interval < 3600 { return "\(Int(interval / 60)) 分钟前" }
+        if interval < 86400 { return "\(Int(interval / 3600)) 小时前" }
+        if interval < 86400 * 7 { return "\(Int(interval / 86400)) 天前" }
+        return date.formatted(.dateTime.month().day())
+    }
+}
+
+// MARK: - Cover image (AsyncImage with skeleton + graceful fallback)
+
+struct CoverImage: View {
+    let url: String?
+    var height: CGFloat = 180
+    var corner: CGFloat = 12
+
+    var body: some View {
+        Group {
+            if let url, let u = URL(string: url) {
+                AsyncImage(url: u, transaction: .init(animation: .easeOut(duration: 0.25))) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
+                        placeholder
+                    case .empty:
+                        ZStack { placeholder; ProgressView() }
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    }
+
+    private var placeholder: some View {
+        LinearGradient(colors: [.gray.opacity(0.16), .gray.opacity(0.06)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(Image(systemName: "photo").font(.title).foregroundStyle(.tertiary))
+    }
+}
+
+// MARK: - News cards (magazine-style feed)
+
+/// A news article card. Adapts layout to whether a cover image exists:
+/// large hero card with cover, or compact text-forward card without.
+struct NewsCard: View {
+    let channel: Channel
+    let title: String
+    var summary: String?
+    var source: String
+    var date: Date?
+    var coverURL: String?
+    var priority: IntelPriority?
+    var isRead: Bool = false
+    var isFavorite: Bool = false
+    var large: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let coverURL, !coverURL.isEmpty {
+                CoverImage(url: coverURL, height: large ? 200 : 150)
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Label(channel.title, systemImage: channel.symbol)
+                        .font(.caption2.weight(.semibold)).foregroundStyle(channel.tint)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(channel.tint.opacity(0.12), in: Capsule())
+                    if let priority, priority.label == "高优先" {
+                        Text("热").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.red, in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                    if isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
+                }
+                Text(title)
+                    .font(large ? .headline : .subheadline.weight(.semibold))
+                    .foregroundStyle(isRead ? .secondary : .primary)
+                    .lineLimit(large ? 3 : 2)
+                if let summary, !summary.isEmpty {
+                    Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(large ? 3 : 2)
+                }
+                HStack(spacing: 6) {
+                    Text(source).font(.caption2).foregroundStyle(.tertiary)
+                    if let date { Text("·").font(.caption2).foregroundStyle(.tertiary)
+                        Text(RelativeTime.string(date)).font(.caption2).foregroundStyle(.tertiary) }
+                }
+            }
+            .padding(coverURL?.isEmpty == false ? 12 : 14)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.opacity(0.85), in: RoundedRectangle(cornerRadius: Brand.corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Brand.corner, style: .continuous)
+                .stroke(channel.tint.opacity(0.14), lineWidth: 1)
+        )
+    }
+}
+
+/// Skeleton placeholder row for the loading state.
+struct NewsCardSkeleton: View {
+    @State private var shimmer = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 12).fill(.gray.opacity(0.15)).frame(height: 140)
+            RoundedRectangle(cornerRadius: 4).fill(.gray.opacity(0.15)).frame(height: 14).frame(maxWidth: .infinity)
+            RoundedRectangle(cornerRadius: 4).fill(.gray.opacity(0.12)).frame(height: 10).frame(maxWidth: 200)
+        }
+        .padding(12)
+        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: Brand.corner))
+        .opacity(shimmer ? 0.5 : 1)
+        .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { shimmer = true } }
+    }
+}
+
 // MARK: - EmptyHint
 
 struct EmptyHint: View {

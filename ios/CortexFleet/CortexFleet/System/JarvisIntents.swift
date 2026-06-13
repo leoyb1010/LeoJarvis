@@ -51,7 +51,8 @@ enum SharedStore {
     static func container() throws -> ModelContainer {
         let schema = Schema([Note.self, NoteAttachment.self, FeedSource.self,
                              ProfileInterest.self, IntelItem.self,
-                             GitHubRepoSnapshot.self, DeviceSample.self])
+                             GitHubRepoSnapshot.self, DeviceSample.self,
+                             Notebook.self, NotebookSource.self])
         if let url = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: "group.com.leo.cortexfleet")?
             .appendingPathComponent("Jarvis.store") {

@@ -6,6 +6,34 @@ struct RawFeedItem {
     var link: String
     var summary: String
     var published: Date?
+    var coverURL: String?
+    var rawContent: String = ""   // full content/encoded HTML, for cover extraction
+}
+
+/// Extracts a cover image URL from a feed item: media:content/enclosure attrs
+/// captured during parsing, else the first <img src> in the content HTML.
+enum CoverExtractor {
+    static func cover(for item: RawFeedItem) -> String? {
+        if let c = item.coverURL, isImage(c) { return c }
+        return firstImage(in: item.rawContent) ?? firstImage(in: item.summary)
+    }
+
+    static func firstImage(in html: String) -> String? {
+        guard !html.isEmpty else { return nil }
+        let pattern = #"<img[^>]+src=["']([^"']+)["']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let m = regex.firstMatch(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html)),
+              let r = Range(m.range(at: 1), in: html) else { return nil }
+        let url = String(html[r])
+        return isImage(url) || url.hasPrefix("http") ? url : nil
+    }
+
+    static func isImage(_ url: String) -> Bool {
+        let lower = url.lowercased()
+        return lower.hasPrefix("http") && (lower.contains(".jpg") || lower.contains(".jpeg")
+            || lower.contains(".png") || lower.contains(".webp") || lower.contains("image")
+            || lower.contains(".gif") || lower.hasSuffix("/large") || lower.contains("media"))
+    }
 }
 
 /// Fetches and parses RSS 2.0 / Atom feeds using Foundation's `XMLParser`.
@@ -62,6 +90,17 @@ private final class FeedXMLParser: NSObject, XMLParserDelegate {
                 pendingAtomLink = href
             }
         }
+        // Cover image: media:content / media:thumbnail / enclosure (image/*).
+        if current != nil, current?.coverURL == nil {
+            if name == "media:content" || name == "media:thumbnail",
+               let url = attributeDict["url"], CoverExtractor.isImage(url) {
+                current?.coverURL = url
+            } else if name == "enclosure",
+                      let url = attributeDict["url"],
+                      (attributeDict["type"]?.hasPrefix("image") ?? false) || CoverExtractor.isImage(url) {
+                current?.coverURL = url
+            }
+        }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
@@ -87,7 +126,8 @@ private final class FeedXMLParser: NSObject, XMLParserDelegate {
             // RSS uses element text for the link; Atom uses href attribute.
             if !text.isEmpty { current?.link = text }
             else if let href = pendingAtomLink { current?.link = href }
-        case "description", "summary", "content":
+        case "description", "summary", "content", "content:encoded":
+            if !text.isEmpty, current?.rawContent.isEmpty ?? false { current?.rawContent = text }
             if current?.summary.isEmpty ?? false { current?.summary = stripHTML(text) }
         case "pubdate", "published", "updated", "date":
             if current?.published == nil { current?.published = parseDate(text) }

@@ -10,6 +10,8 @@ final class FeedSource {
     var url: String
     var domain: String       // "business" | "life"
     var category: String     // e.g. "AI科技" / "财经" / "中文科技"
+    var channel: String      // 频道 id：ai / tech / world / finance / china / engineering / science / ...
+    var origin: String       // "seed" | "rsshub" | "discover" | "manual"
     var enabled: Bool
     var limit: Int
     var lastFetched: Date?
@@ -21,6 +23,8 @@ final class FeedSource {
         url: String,
         domain: String = "business",
         category: String = "综合",
+        channel: String = "tech",
+        origin: String = "manual",
         enabled: Bool = true,
         limit: Int = 10,
         lastFetched: Date? = nil,
@@ -31,6 +35,8 @@ final class FeedSource {
         self.url = url
         self.domain = domain
         self.category = category
+        self.channel = channel
+        self.origin = origin
         self.enabled = enabled
         self.limit = limit
         self.lastFetched = lastFetched
@@ -73,6 +79,11 @@ final class IntelItem {
     var whyImportant: String?
     var relation: String?
     var nextStep: String?
+    var summaryZH: String?    // 详情按需 LLM 翻译/要点缓存
+    var coverURL: String?     // 封面图
+    var channel: String       // 频道 id
+    var isRead: Bool
+    var isFavorite: Bool
     var publishedAt: Date?
     var collectedAt: Date
     var dedupeKey: String
@@ -93,6 +104,11 @@ final class IntelItem {
         whyImportant: String? = nil,
         relation: String? = nil,
         nextStep: String? = nil,
+        summaryZH: String? = nil,
+        coverURL: String? = nil,
+        channel: String = "tech",
+        isRead: Bool = false,
+        isFavorite: Bool = false,
         publishedAt: Date? = nil,
         collectedAt: Date = Date(),
         dedupeKey: String
@@ -112,12 +128,21 @@ final class IntelItem {
         self.whyImportant = whyImportant
         self.relation = relation
         self.nextStep = nextStep
+        self.summaryZH = summaryZH
+        self.coverURL = coverURL
+        self.channel = channel
+        self.isRead = isRead
+        self.isFavorite = isFavorite
         self.publishedAt = publishedAt
         self.collectedAt = collectedAt
         self.dedupeKey = dedupeKey
     }
 
     var displayTitle: String { (titleZH?.isEmpty == false ? titleZH! : title) }
+    var displaySummary: String? {
+        if let z = summaryZH, !z.isEmpty { return z }
+        return summary
+    }
 }
 
 /// Star snapshot for the GitHub radar momentum calculation (backend
