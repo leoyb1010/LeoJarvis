@@ -22,6 +22,7 @@ final class Note {
     var createdAt: Date
     var updatedAt: Date
     var bridgeID: String?        // origin id when imported from the Mac bridge (dedupe)
+    var notebookID: String?      // owning Notebook (open-notebook model)
 
     @Relationship(deleteRule: .cascade, inverse: \NoteAttachment.note)
     var attachments: [NoteAttachment]

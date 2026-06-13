@@ -51,7 +51,7 @@ struct RootView: View {
             }
 
             NavigationStack {
-                NotesView()
+                NotebookView()
             }
             .tabItem {
                 Label("记事", systemImage: "note.text")

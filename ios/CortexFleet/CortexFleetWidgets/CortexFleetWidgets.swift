@@ -22,7 +22,8 @@ enum WidgetData {
     static func container() -> ModelContainer? {
         let schema = Schema([Note.self, NoteAttachment.self, FeedSource.self,
                              ProfileInterest.self, IntelItem.self,
-                             GitHubRepoSnapshot.self, DeviceSample.self])
+                             GitHubRepoSnapshot.self, DeviceSample.self,
+                             Notebook.self, NotebookSource.self])
         guard let url = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: "group.com.leo.cortexfleet")?
             .appendingPathComponent("Jarvis.store") else { return nil }

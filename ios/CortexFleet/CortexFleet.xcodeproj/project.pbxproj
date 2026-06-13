@@ -58,6 +58,13 @@
 		0F00012E2C00000000000001 /* ArticleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022E2C00000000000001 /* ArticleDetailView.swift */; };
 		0F00012F2C00000000000001 /* ShareCardTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00022F2C00000000000001 /* ShareCardTemplates.swift */; };
 		0F0001302C00000000000001 /* ShareRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002302C00000000000001 /* ShareRenderer.swift */; };
+		0F0001312C00000000000001 /* NotebookModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002312C00000000000001 /* NotebookModels.swift */; };
+		0F0001322C00000000000001 /* JinaReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002322C00000000000001 /* JinaReader.swift */; };
+		0F0001332C00000000000001 /* TransformTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002332C00000000000001 /* TransformTemplates.swift */; };
+		0F0001342C00000000000001 /* NotebookStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002342C00000000000001 /* NotebookStore.swift */; };
+		0F0001352C00000000000001 /* NotebookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002352C00000000000001 /* NotebookView.swift */; };
+		0F0001362C00000000000001 /* NotebookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002362C00000000000001 /* NotebookDetailView.swift */; };
+		0F00F1062C00000000000001 /* NotebookModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002312C00000000000001 /* NotebookModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -144,6 +151,12 @@
 		0F00022E2C00000000000001 /* ArticleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleDetailView.swift; sourceTree = "<group>"; };
 		0F00022F2C00000000000001 /* ShareCardTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardTemplates.swift; sourceTree = "<group>"; };
 		0F0002302C00000000000001 /* ShareRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareRenderer.swift; sourceTree = "<group>"; };
+		0F0002312C00000000000001 /* NotebookModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookModels.swift; sourceTree = "<group>"; };
+		0F0002322C00000000000001 /* JinaReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JinaReader.swift; sourceTree = "<group>"; };
+		0F0002332C00000000000001 /* TransformTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformTemplates.swift; sourceTree = "<group>"; };
+		0F0002342C00000000000001 /* NotebookStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookStore.swift; sourceTree = "<group>"; };
+		0F0002352C00000000000001 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
+		0F0002362C00000000000001 /* NotebookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -184,6 +197,7 @@
 				0F00040C2C00000000000001 /* System */,
 				0F00040D2C00000000000001 /* Jarvis */,
 				0F00040E2C00000000000001 /* Share */,
+				0F00040F2C00000000000001 /* Notebook */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -240,6 +254,8 @@
 				0F00021B2C00000000000001 /* SharedComponents.swift */,
 				0F0002202C00000000000001 /* OverviewView.swift */,
 				0F00022E2C00000000000001 /* ArticleDetailView.swift */,
+				0F0002352C00000000000001 /* NotebookView.swift */,
+				0F0002362C00000000000001 /* NotebookDetailView.swift */,
 				0F0002212C00000000000001 /* BriefingView.swift */,
 				0F0002182C00000000000001 /* NotesView.swift */,
 				0F0002192C00000000000001 /* NoteEditorView.swift */,
@@ -332,6 +348,17 @@
 				0F0002302C00000000000001 /* ShareRenderer.swift */,
 			);
 			path = Share;
+			sourceTree = "<group>";
+		};
+		0F00040F2C00000000000001 /* Notebook */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002312C00000000000001 /* NotebookModels.swift */,
+				0F0002322C00000000000001 /* JinaReader.swift */,
+				0F0002332C00000000000001 /* TransformTemplates.swift */,
+				0F0002342C00000000000001 /* NotebookStore.swift */,
+			);
+			path = Notebook;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -443,6 +470,7 @@
 				0F00F1052C00000000000001 /* ScanLiveActivity.swift in Sources */,
 				0F00F1012C00000000000001 /* NoteModels.swift in Sources */,
 				0F00F1022C00000000000001 /* FeedModels.swift in Sources */,
+				0F00F1062C00000000000001 /* NotebookModels.swift in Sources */,
 				0F00F1032C00000000000001 /* ScanActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -486,6 +514,12 @@
 				0F0001292C00000000000001 /* ScanActivityAttributes.swift in Sources */,
 				0F0001202C00000000000001 /* OverviewView.swift in Sources */,
 				0F00012E2C00000000000001 /* ArticleDetailView.swift in Sources */,
+				0F0001312C00000000000001 /* NotebookModels.swift in Sources */,
+				0F0001322C00000000000001 /* JinaReader.swift in Sources */,
+				0F0001332C00000000000001 /* TransformTemplates.swift in Sources */,
+				0F0001342C00000000000001 /* NotebookStore.swift in Sources */,
+				0F0001352C00000000000001 /* NotebookView.swift in Sources */,
+				0F0001362C00000000000001 /* NotebookDetailView.swift in Sources */,
 				0F00012F2C00000000000001 /* ShareCardTemplates.swift in Sources */,
 				0F0001302C00000000000001 /* ShareRenderer.swift in Sources */,
 				0F0001212C00000000000001 /* BriefingView.swift in Sources */,

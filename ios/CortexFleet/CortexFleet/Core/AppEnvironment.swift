@@ -21,6 +21,8 @@ final class AppEnvironment: ObservableObject {
             IntelItem.self,
             GitHubRepoSnapshot.self,
             DeviceSample.self,
+            Notebook.self,
+            NotebookSource.self,
         ])
 
         // Prefer an App Group store so widgets/Live Activities read the same data;
