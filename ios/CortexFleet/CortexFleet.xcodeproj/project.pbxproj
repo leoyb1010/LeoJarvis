@@ -37,6 +37,11 @@
 		0F00011F2C00000000000001 /* IntelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F00021F2C00000000000001 /* IntelEngine.swift */; };
 		0F0001202C00000000000001 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002202C00000000000001 /* OverviewView.swift */; };
 		0F0001212C00000000000001 /* BriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002212C00000000000001 /* BriefingView.swift */; };
+		0F0001222C00000000000001 /* JarvisTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002222C00000000000001 /* JarvisTools.swift */; };
+		0F0001232C00000000000001 /* JarvisVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002232C00000000000001 /* JarvisVoice.swift */; };
+		0F0001242C00000000000001 /* JarvisAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002242C00000000000001 /* JarvisAssistant.swift */; };
+		0F0001252C00000000000001 /* JarvisFloatingButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002252C00000000000001 /* JarvisFloatingButton.swift */; };
+		0F0001262C00000000000001 /* JarvisNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002262C00000000000001 /* JarvisNotifications.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,6 +76,11 @@
 		0F00021F2C00000000000001 /* IntelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelEngine.swift; sourceTree = "<group>"; };
 		0F0002202C00000000000001 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
 		0F0002212C00000000000001 /* BriefingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BriefingView.swift; sourceTree = "<group>"; };
+		0F0002222C00000000000001 /* JarvisTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisTools.swift; sourceTree = "<group>"; };
+		0F0002232C00000000000001 /* JarvisVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisVoice.swift; sourceTree = "<group>"; };
+		0F0002242C00000000000001 /* JarvisAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAssistant.swift; sourceTree = "<group>"; };
+		0F0002252C00000000000001 /* JarvisFloatingButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisFloatingButton.swift; sourceTree = "<group>"; };
+		0F0002262C00000000000001 /* JarvisNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisNotifications.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +111,7 @@
 				0F00040A2C00000000000001 /* Sources */,
 				0F00040B2C00000000000001 /* Notes */,
 				0F00040C2C00000000000001 /* System */,
+				0F00040D2C00000000000001 /* Jarvis */,
 				0F0004042C00000000000001 /* Models */,
 				0F0004052C00000000000001 /* Services */,
 				0F0004062C00000000000001 /* Store */,
@@ -206,8 +217,20 @@
 			isa = PBXGroup;
 			children = (
 				0F00021A2C00000000000001 /* NetworkProbe.swift */,
+				0F0002262C00000000000001 /* JarvisNotifications.swift */,
 			);
 			path = System;
+			sourceTree = "<group>";
+		};
+		0F00040D2C00000000000001 /* Jarvis */ = {
+			isa = PBXGroup;
+			children = (
+				0F0002242C00000000000001 /* JarvisAssistant.swift */,
+				0F0002222C00000000000001 /* JarvisTools.swift */,
+				0F0002232C00000000000001 /* JarvisVoice.swift */,
+				0F0002252C00000000000001 /* JarvisFloatingButton.swift */,
+			);
+			path = Jarvis;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -307,6 +330,11 @@
 				0F00011F2C00000000000001 /* IntelEngine.swift in Sources */,
 				0F00011A2C00000000000001 /* NetworkProbe.swift in Sources */,
 				0F00011B2C00000000000001 /* SharedComponents.swift in Sources */,
+				0F0001222C00000000000001 /* JarvisTools.swift in Sources */,
+				0F0001232C00000000000001 /* JarvisVoice.swift in Sources */,
+				0F0001242C00000000000001 /* JarvisAssistant.swift in Sources */,
+				0F0001252C00000000000001 /* JarvisFloatingButton.swift in Sources */,
+				0F0001262C00000000000001 /* JarvisNotifications.swift in Sources */,
 				0F0001202C00000000000001 /* OverviewView.swift in Sources */,
 				0F0001212C00000000000001 /* BriefingView.swift in Sources */,
 				0F0001162C00000000000001 /* NoteStore.swift in Sources */,

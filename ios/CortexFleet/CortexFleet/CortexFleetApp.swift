@@ -60,6 +60,7 @@ struct RootView: View {
                 Label("设置", systemImage: "gearshape")
             }
         }
+        .jarvisFloatingButton()
         .task {
             await store.refreshAll()
         }
