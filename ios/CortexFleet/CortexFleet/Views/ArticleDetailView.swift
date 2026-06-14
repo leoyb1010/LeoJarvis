@@ -32,7 +32,7 @@ struct ArticleDetailView: View {
                                 .font(.hudMono(11, .semibold)).foregroundStyle(ch.tint)
                             Spacer()
                             Text(item.sourceName).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
-                            Text(RelativeTime.string(item.publishedAt ?? item.collectedAt))
+                            Text(RelativeTime.string(item.contentDate))
                                 .font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
                         }
 
@@ -41,23 +41,27 @@ struct ArticleDetailView: View {
                             Text(item.title).font(.footnote).foregroundStyle(Brand.hudText.opacity(0.5))  // keep original (中英都留)
                         }
 
+                        if let zh = item.summaryZH, !zh.isEmpty {
+                            sourceCard("中文详情", zh, "character.bubble")
+                        } else if let summary = item.summary, !summary.isEmpty {
+                            sourceCard("RSS 原始摘要", summary, "text.quote")
+                        }
                         if fetchingSource {
                             HStack(spacing: 8) {
                                 ArcRing(progress: 0.3, size: 16)
                                 Text("抓取真实来源详情…").font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.7))
                             }
                         }
+                        if localizing {
+                            HStack(spacing: 8) {
+                                ArcRing(progress: 0.3, size: 16)
+                                Text("基于真实来源翻译中文…").font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.7))
+                            }
+                        }
                         if let sourceText = readableSourceText {
-                            sourceCard("真实来源详情", sourceText, "doc.text.magnifyingglass")
+                            sourceCard(ArticleDetailReader.containsCJK(sourceText) ? "真实来源详情" : "来源原文", sourceText, "doc.text.magnifyingglass")
                         } else if let error = item.sourceError, !error.isEmpty {
                             sectionCard("来源抓取失败", error, "exclamationmark.triangle")
-                        }
-
-                        if localizing { HStack(spacing: 8) { ArcRing(progress: 0.3, size: 16); Text("基于真实来源翻译中文…").font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.7)) } }
-                        if let zh = item.summaryZH, !zh.isEmpty {
-                            sectionCard("中文翻译 / 要点", zh, "character.bubble")
-                        } else if let summary = item.summary, !summary.isEmpty {
-                            sourceCard("RSS 原始摘要", summary, "text.quote")
                         }
 
                         enrich("为什么重要", item.whyImportant, "exclamationmark.circle")
@@ -85,6 +89,7 @@ struct ArticleDetailView: View {
 
     private var readableSourceText: String? {
         guard let text = item.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        guard ArticleDetailReader.isReadable(text) else { return nil }
         return text
     }
 
@@ -156,27 +161,32 @@ struct ArticleDetailView: View {
     }
 
     private func fetchSourceIfNeeded() async {
-        guard item.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+        guard readableSourceText == nil,
               let urlString = item.url,
               !urlString.isEmpty,
               !fetchingSource else { return }
         fetchingSource = true
         defer { fetchingSource = false }
         do {
-            let text = try await ArticleTextFetcher.fetch(urlString: urlString)
+            let text = try await ArticleDetailReader.fetch(urlString: urlString)
+            if item.sourceText != text { item.summaryZH = nil }
             item.sourceText = text
             item.sourceFetchedAt = Date()
             item.sourceError = nil
             try? context.save()
         } catch {
-            item.sourceError = error.localizedDescription
+            item.sourceText = nil
+            item.sourceFetchedAt = Date()
+            item.sourceError = "\(error.localizedDescription) 已显示 RSS 摘要，未展示网页乱码。"
             try? context.save()
         }
     }
 
     private func localizeIfNeeded() async {
-        let basis = item.sourceText ?? item.summary ?? item.title
-        guard item.summaryZH == nil, Localizer.hasLatin(basis), env.llmConfig.hasKey else { return }
+        let basis = readableSourceText ?? item.summary ?? item.title
+        let existingChinese = item.summaryZH?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let needsChinese = existingChinese?.isEmpty != false || !ArticleDetailReader.containsCJK(existingChinese ?? "")
+        guard needsChinese, Localizer.hasLatin(basis), env.llmConfig.hasKey else { return }
         localizing = true; defer { localizing = false }
         await env.intel.localizeDetail(item)
     }
@@ -187,94 +197,65 @@ struct ArticleDetailView: View {
     }
 }
 
-private enum ArticleTextFetcher {
+private enum ArticleDetailReader {
     static func fetch(urlString: String) async throws -> String {
-        guard let url = URL(string: urlString) else {
-            throw NSError(domain: "ArticleTextFetcher", code: -1, userInfo: [NSLocalizedDescriptionKey: "原文 URL 无效。"])
+        guard let article = await JinaReader.read(urlString, limit: 18000, timeout: 24) else {
+            throw NSError(domain: "ArticleDetailReader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Reader 无法读取原文，可能被来源站点阻止。"])
         }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 18
-        request.setValue("LeoJarvis-iOS/1.0 (+article-detail)", forHTTPHeaderField: "User-Agent")
-        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "ArticleTextFetcher", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "原文返回 HTTP \(http.statusCode)。"])
-        }
-        let raw = String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .isoLatin1)
-            ?? ""
-        let text = extractReadableText(from: raw)
-        guard text.count >= 80 else {
-            throw NSError(domain: "ArticleTextFetcher", code: -2, userInfo: [NSLocalizedDescriptionKey: "原文页面没有可读正文，可能需要登录或阻止了移动端抓取。"])
+        let text = cleanReaderText(article.text)
+        guard isReadable(text) else {
+            throw NSError(domain: "ArticleDetailReader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Reader 返回内容不可读。"])
         }
         return String(text.prefix(12000))
     }
 
-    private static func extractReadableText(from html: String) -> String {
-        let trimmed = html.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.contains("<") && trimmed.contains(">") else { return compact(trimmed) }
+    static func cleanReaderText(_ text: String) -> String {
+        var output: [String] = []
+        for rawLine in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines) {
+            var line = decodeEntities(rawLine)
+                .replacingOccurrences(of: "!\\[[^\\]]*\\]\\([^\\)]*\\)", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            line = line.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+            let lower = line.lowercased()
 
-        let candidates = [
-            largestBlock(in: trimmed, tag: "article"),
-            largestBlock(in: trimmed, tag: "main"),
-            largestBlock(in: trimmed, tag: "body"),
-            trimmed,
-        ].compactMap { $0 }
-
-        let stripped = candidates
-            .map(stripHTML)
-            .sorted { $0.count > $1.count }
-            .first ?? ""
-        return compact(stripped)
-    }
-
-    private static func largestBlock(in html: String, tag: String) -> String? {
-        let pattern = "<\(tag)\\b[^>]*>(.*?)</\(tag)>"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return nil }
-        let ns = NSRange(html.startIndex..<html.endIndex, in: html)
-        let matches = regex.matches(in: html, range: ns)
-        return matches.compactMap { match -> String? in
-            guard let range = Range(match.range(at: 1), in: html) else { return nil }
-            return String(html[range])
-        }.max { $0.count < $1.count }
-    }
-
-    private static func stripHTML(_ html: String) -> String {
-        var text = html
-        let removals = [
-            "<script\\b[^>]*>.*?</script>",
-            "<style\\b[^>]*>.*?</style>",
-            "<noscript\\b[^>]*>.*?</noscript>",
-            "<svg\\b[^>]*>.*?</svg>",
-            "<form\\b[^>]*>.*?</form>",
-            "<nav\\b[^>]*>.*?</nav>",
-            "<header\\b[^>]*>.*?</header>",
-            "<footer\\b[^>]*>.*?</footer>",
-            "<aside\\b[^>]*>.*?</aside>",
-        ]
-        for pattern in removals {
-            text = text.replacingOccurrences(of: pattern, with: " ", options: [.regularExpression, .caseInsensitive])
-        }
-        text = text.replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: "</(p|div|h[1-6]|li|section|blockquote)>", with: "\n", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: [.regularExpression, .caseInsensitive])
-        return decodeEntities(text)
-    }
-
-    private static func compact(_ text: String) -> String {
-        text
-            .components(separatedBy: .newlines)
-            .map { line in line.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ") }
-            .filter { line in
-                let lower = line.lowercased()
-                return line.count >= 12
-                    && !lower.contains("cookie")
-                    && !lower.contains("subscribe")
-                    && !lower.contains("privacy policy")
+            if line.isEmpty {
+                if output.last?.isEmpty == false { output.append("") }
+                continue
             }
-            .prefix(80)
-            .joined(separator: "\n\n")
+            if lower.hasPrefix("title:")
+                || lower.hasPrefix("url source:")
+                || lower.hasPrefix("markdown content:")
+                || lower.hasPrefix("published time:")
+                || lower.hasPrefix("warning:")
+                || lower.hasPrefix("favicon:")
+                || lower.hasPrefix("image:")
+                || lower.contains("enable javascript")
+                || lower.contains("please enable cookies")
+                || lower.contains("subscribe to")
+                || lower.contains("privacy policy") {
+                continue
+            }
+            output.append(line)
+        }
+
+        return output
+            .joined(separator: "\n")
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func isReadable(_ text: String) -> Bool {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 80 else { return false }
+        let lower = clean.lowercased()
+        let hardBlocks = ["<!doctype", "<html", "</html", "<script", "__next_data__", "webpackjsonp", "window.__"]
+        if hardBlocks.contains(where: { lower.contains($0) }) { return false }
+        let markupCount = clean.filter { $0 == "<" || $0 == ">" || $0 == "{" || $0 == "}" }.count
+        return Double(markupCount) / Double(max(clean.count, 1)) < 0.035
+    }
+
+    static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { $0.value >= 0x4E00 && $0.value <= 0x9FFF }
     }
 
     private static func decodeEntities(_ value: String) -> String {

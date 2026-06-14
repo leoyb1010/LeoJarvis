@@ -143,11 +143,17 @@ struct LLMClient {
     }
 
     /// Convenience: single-turn prompt with an optional system instruction.
-    func complete(system: String? = nil, user: String, temperature: Double = 0.3) async throws -> String {
+    func complete(
+        system: String? = nil,
+        user: String,
+        temperature: Double = 0.3,
+        maxTokens: Int? = nil,
+        timeout: TimeInterval = 30
+    ) async throws -> String {
         var messages: [LLMMessage] = []
         if let system, !system.isEmpty { messages.append(.init(role: "system", content: system)) }
         messages.append(.init(role: "user", content: user))
-        return try await chat(messages, temperature: temperature)
+        return try await chat(messages, temperature: temperature, maxTokens: maxTokens, timeout: timeout)
     }
 
     private struct ChatResponse: Decodable {

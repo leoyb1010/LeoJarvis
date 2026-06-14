@@ -47,12 +47,19 @@ enum Localizer {
         return cjk >= max(2, text.count / 4)
     }
 
-    /// High-quality LLM translation + key points for the detail view. Returns the
-    /// localized summary; caller caches it onto the item.
+    /// High-quality Chinese detail for the article view. Returns a readable
+    /// Chinese source digest; caller caches it onto the item.
     static func translateDetail(title: String, body: String, client: LLMClient) async -> String? {
-        let source = "\(title)\n\n\(body.prefix(4000))"
+        let source = "\(title)\n\n\(body.prefix(8000))"
         return try? await client.complete(
-            system: "你是中英翻译与摘要助手。把英文资讯翻成通顺中文并给 2-4 句要点；如已是中文则直接给 2-4 句要点。只输出中文结果。",
-            user: source, temperature: 0.2)
+            system: """
+            你是 LeoJarvis 的中文资讯编辑。基于给定真实原文输出中文详情，不要编造原文没有的信息。
+            要求：
+            1. 只输出中文。
+            2. 先给 1 段 80-140 字的概览。
+            3. 再列出 5-8 条事实要点，保留原文中的名称、时间、数字、产品、机构和结论。
+            4. 如果原文信息不足，明确写“原文未提供”，不要补充猜测。
+            """,
+            user: source, temperature: 0.15, maxTokens: 1800, timeout: 45)
     }
 }

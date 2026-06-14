@@ -7,8 +7,10 @@ import SwiftData
 @MainActor
 final class AppEnvironment: ObservableObject {
     static let appGroup = "group.com.leo.cortexfleet"
-    private static let feedCatalogVersion = 2
+    private static let feedCatalogVersion = 3
     private static let feedCatalogVersionKey = "intel.feedCatalogVersion"
+    private static let refreshLogicVersion = 3
+    private static let refreshLogicVersionKey = "intel.refreshLogicVersion"
 
     let container: ModelContainer
     let llmConfig: LLMConfigStore
@@ -43,6 +45,7 @@ final class AppEnvironment: ObservableObject {
         self.container = container
         let config = LLMConfigStore()
         self.llmConfig = config
+        Self.invalidateScanStateIfNeeded()
         self.intel = IntelEngine(context: container.mainContext, llmConfig: config)
 
         Self.seedIfNeeded(context: container.mainContext)
@@ -61,6 +64,13 @@ final class AppEnvironment: ObservableObject {
         seedFeeds(context: context)
         seedInterests(context: context)
         try? context.save()
+    }
+
+    private static func invalidateScanStateIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.integer(forKey: refreshLogicVersionKey) < refreshLogicVersion else { return }
+        defaults.removeObject(forKey: "intel.lastScan")
+        defaults.set(refreshLogicVersion, forKey: refreshLogicVersionKey)
     }
 
     private static func seedFeeds(context: ModelContext) {

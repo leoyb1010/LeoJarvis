@@ -94,7 +94,7 @@ final class IntelEngine: ObservableObject {
         if newItems.isEmpty, !failedSources.isEmpty {
             lastError = "扫描完成，但 \(failedSources.count)/\(enabledSources.count) 个 RSS 源失败。请到「设置 → 信源状态」查看错误。"
         } else if newItems.isEmpty {
-            lastError = "扫描完成，没有发现新的情报。"
+            lastError = "扫描完成，过去 24 小时没有新的 RSS / GitHub 情报。"
         } else {
             lastError = nil
         }
@@ -118,8 +118,10 @@ final class IntelEngine: ObservableObject {
             )
         }
         let ingestor = RSSIngestor()
-        let existingKeys = existingDedupeKeys()
-        var created: [IntelItem] = []
+        var existingByKey = existingItemsByDedupeKey()
+        var visibleItems: [IntelItem] = []
+        var visibleKeys = Set<String>()
+        let freshCutoff = IntelItem.freshCutoff()
 
         await withTaskGroup(of: (RSSFeedSpec, [RawFeedItem], String?).self) { group in
             for source in specs {
@@ -135,7 +137,22 @@ final class IntelEngine: ObservableObject {
                 }
                 for raw in items {
                     let key = Self.dedupeKey(raw.title)
-                    guard !existingKeys.contains(key), !created.contains(where: { $0.dedupeKey == key }) else { continue }
+                    if let existing = existingByKey[key] {
+                        existing.sourceName = source.name
+                        existing.summary = raw.summary.isEmpty ? existing.summary : raw.summary
+                        existing.url = raw.link.isEmpty ? existing.url : raw.link
+                        existing.tags = [source.category]
+                        existing.channel = source.channel
+                        existing.domain = source.domain
+                        existing.coverURL = CoverExtractor.cover(for: raw) ?? existing.coverURL
+                        existing.publishedAt = raw.published ?? existing.publishedAt
+                        existing.sourceError = nil
+                        if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                            visibleItems.append(existing)
+                            visibleKeys.insert(key)
+                        }
+                        continue
+                    }
                     let verdict = judge.evaluate(title: raw.title, summary: raw.summary)
                     guard verdict.triage != "ignore" else { continue }
                     // Cheap inline Chinese localization for readability (no network).
@@ -158,11 +175,15 @@ final class IntelEngine: ObservableObject {
                         dedupeKey: key
                     )
                     context.insert(item)
-                    created.append(item)
+                    existingByKey[key] = item
+                    if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(item)
+                        visibleKeys.insert(key)
+                    }
                 }
             }
         }
-        return created
+        return visibleItems
     }
 
     // MARK: - GitHub
@@ -171,8 +192,10 @@ final class IntelEngine: ObservableObject {
         var radar = GitHubRadar(token: keychain.gitHubToken())
         let snapshots = (try? context.fetch(FetchDescriptor<GitHubRepoSnapshot>())) ?? []
         var snapByName = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.repoFullName, $0) })
-        let existingKeys = existingDedupeKeys()
-        var created: [IntelItem] = []
+        var existingByKey = existingItemsByDedupeKey()
+        var visibleItems: [IntelItem] = []
+        var visibleKeys = Set<String>()
+        let freshCutoff = IntelItem.freshCutoff()
         var seenRepos = Set<String>()
 
         for query in SeedData.githubQueries.prefix(8) {
@@ -204,7 +227,6 @@ final class IntelEngine: ObservableObject {
 
                 guard radar.isRecentSignal(m) else { continue }
                 let key = Self.dedupeKey("gh:" + repo.fullName)
-                guard !existingKeys.contains(key), !created.contains(where: { $0.dedupeKey == key }) else { continue }
 
                 let velocityText: String
                 if let measured = m.starsPerDay { velocityText = "实测 \(measured) star/天" }
@@ -215,6 +237,21 @@ final class IntelEngine: ObservableObject {
                 let verdict = judge.evaluate(title: repo.fullName + " " + (repo.description ?? ""),
                                              summary: tags.joined(separator: " "),
                                              extraSignal: min(m.bestVelocity / 100, 0.3))
+                if let existing = existingByKey[key] {
+                    existing.summary = [repo.description, "⭐️ \(repo.stars) · \(velocityText)"].compactMap { $0 }.joined(separator: "\n")
+                    existing.tags = tags
+                    existing.score = max(verdict.score, existing.score)
+                    existing.triage = verdict.triage == "ignore" ? existing.triage : verdict.triage
+                    existing.priority = Judge.priority(score: max(existing.score, 0.5), triage: existing.triage)
+                    existing.publishedAt = repo.pushedAt ?? existing.publishedAt
+                    existing.url = repo.url
+                    existing.sourceError = nil
+                    if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(existing)
+                        visibleKeys.insert(key)
+                    }
+                    continue
+                }
                 let item = IntelItem(
                     kind: "github_repo",
                     domain: "business",
@@ -231,10 +268,14 @@ final class IntelEngine: ObservableObject {
                     dedupeKey: key
                 )
                 context.insert(item)
-                created.append(item)
+                existingByKey[key] = item
+                if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                    visibleItems.append(item)
+                    visibleKeys.insert(key)
+                }
             }
         }
-        return created
+        return visibleItems
     }
 
     // MARK: - LLM enrichment (localize title + why/relation/next)
@@ -266,8 +307,8 @@ final class IntelEngine: ObservableObject {
 
     // MARK: - Helpers
 
-    private func existingDedupeKeys() -> Set<String> {
-        Set(((try? context.fetch(FetchDescriptor<IntelItem>())) ?? []).map(\.dedupeKey))
+    private func existingItemsByDedupeKey() -> [String: IntelItem] {
+        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<IntelItem>())) ?? []).map { ($0.dedupeKey, $0) })
     }
 
     private func pruneOld(keepDays: Int = 10, maxItems: Int = 400) {

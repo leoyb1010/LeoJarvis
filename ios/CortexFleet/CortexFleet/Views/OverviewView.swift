@@ -15,8 +15,16 @@ struct OverviewView: View {
     @State private var detail: IntelItem?
 
     private var topItems: [IntelItem] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? .distantPast
-        return items.filter { $0.collectedAt >= cutoff }.sorted { $0.score > $1.score }.prefix(24).map { $0 }
+        let cutoff = IntelItem.freshCutoff()
+        return items
+            .filter { $0.contentDate >= cutoff }
+            .sorted { lhs, rhs in
+                if lhs.contentDate != rhs.contentDate { return lhs.contentDate > rhs.contentDate }
+                if lhs.collectedAt != rhs.collectedAt { return lhs.collectedAt > rhs.collectedAt }
+                return lhs.score > rhs.score
+            }
+            .prefix(24)
+            .map { $0 }
     }
     private var hotCount: Int { items.filter { $0.priority == "高优先" }.count }
     private var greeting: String {
@@ -53,8 +61,12 @@ struct OverviewView: View {
 
     private var shouldAutoRefresh: Bool {
         guard !env.intel.isScanning else { return false }
-        guard let last = env.intel.lastScan else { return true }
-        return items.isEmpty || Date().timeIntervalSince(last) > 15 * 60
+        if let last = env.intel.lastScan, Date().timeIntervalSince(last) < 10 * 60 {
+            return false
+        }
+        if items.isEmpty || topItems.isEmpty { return true }
+        let newestContent = items.map(\.contentDate).max() ?? .distantPast
+        return Date().timeIntervalSince(newestContent) > 30 * 60
     }
 
     private var header: some View {
@@ -79,7 +91,7 @@ struct OverviewView: View {
                     label: "\(Int(store.localSnapshot.health.rounded()))")
             VStack(alignment: .leading, spacing: 8) {
                 Text("晨间简报").font(.hudMono(10)).foregroundStyle(Brand.gold)
-                Text("iPhone 本机保留 \(items.count) 条情报，\(hotCount) 条值得关注。")
+                Text("iPhone 本机保留 \(items.count) 条情报，过去 24 小时 \(topItems.count) 条更新。")
                     .font(.subheadline).foregroundStyle(Brand.hudText).fixedSize(horizontal: false, vertical: true)
                 if let last = env.intel.lastScan {
                     Text("上次扫描 · \(RelativeTime.string(last))").font(.hudMono(9)).foregroundStyle(Brand.hudText.opacity(0.5))
@@ -118,12 +130,12 @@ struct OverviewView: View {
         } else if let progress = env.intel.progressText {
             MessageBanner(text: progress, level: .good)
         } else if topItems.isEmpty {
-            EmptyHint(text: "下拉刷新或点右上角扫描获取情报。", systemImage: "antenna.radiowaves.left.and.right").padding(.top, 30)
+            EmptyHint(text: "过去 24 小时没有新内容。下拉刷新会重新扫描信源，不再用旧缓存撑首页。", systemImage: "antenna.radiowaves.left.and.right").padding(.top, 30)
         } else {
             ForEach(topItems) { item in
                 Button { item.isRead = true; detail = item } label: {
                     IntelCard(kind: item.intelKind, title: item.displayTitle, summary: item.displaySummary,
-                              meta: "\(item.sourceName) · \(RelativeTime.string(item.publishedAt ?? item.collectedAt))",
+                              meta: "\(item.sourceName) · 发布\(RelativeTime.string(item.contentDate))",
                               priority: IntelPriority(scoreText: item.priority), tags: item.tags)
                 }
                 .buttonStyle(.plain)

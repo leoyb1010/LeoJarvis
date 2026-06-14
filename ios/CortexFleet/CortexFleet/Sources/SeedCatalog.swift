@@ -68,7 +68,7 @@ enum SeedCatalog {
         Feed(name: "The Gradient", url: "https://thegradient.pub/rss/", domain: "business", category: "AI", channel: .ai, limit: 8),
         Feed(name: "Ahead of AI", url: "https://magazine.sebastianraschka.com/feed", domain: "business", category: "AI", channel: .ai, limit: 8),
         Feed(name: "Import AI", url: "https://jack-clark.net/feed/", domain: "business", category: "AI", channel: .ai, limit: 8),
-        Feed(name: "VentureBeat AI", url: "https://venturebeat.com/category/ai/feed/", domain: "business", category: "AI", channel: .ai, limit: 8),
+        Feed(name: "VentureBeat AI", url: "https://feeds.feedburner.com/venturebeat/SZYF", domain: "business", category: "AI", channel: .ai, limit: 8),
         Feed(name: "NVIDIA Blog", url: "https://blogs.nvidia.com/feed/", domain: "business", category: "AI", channel: .ai, limit: 8),
         Feed(name: "BAIR Berkeley", url: "https://bair.berkeley.edu/blog/feed.xml", domain: "business", category: "AI", channel: .ai, limit: 6),
         Feed(name: "Lilian Weng", url: "https://lilianweng.github.io/index.xml", domain: "business", category: "AI", channel: .ai, limit: 6),

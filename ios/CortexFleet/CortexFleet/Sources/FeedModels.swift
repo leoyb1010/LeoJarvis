@@ -152,6 +152,16 @@ final class IntelItem {
         if let z = summaryZH, !z.isEmpty { return z }
         return summary
     }
+
+    /// The real timeline for a piece of intelligence. RSS uses the published
+    /// date when the feed provides one; GitHub uses `pushedAt`; local-only
+    /// fallback uses first collection time. Do not mutate this just because a
+    /// scan saw the same old item again.
+    var contentDate: Date { publishedAt ?? collectedAt }
+
+    static func freshCutoff(now: Date = Date()) -> Date {
+        now.addingTimeInterval(-24 * 60 * 60)
+    }
 }
 
 /// Star snapshot for the GitHub radar momentum calculation (backend

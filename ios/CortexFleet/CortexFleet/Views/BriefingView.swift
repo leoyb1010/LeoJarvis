@@ -14,8 +14,13 @@ struct BriefingView: View {
     @State private var detail: IntelItem?
 
     private var recent: [IntelItem] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date.distantPast
-        return items.filter { $0.collectedAt >= cutoff }
+        let cutoff = IntelItem.freshCutoff()
+        return items
+            .filter { $0.contentDate >= cutoff }
+            .sorted {
+                if $0.contentDate != $1.contentDate { return $0.contentDate > $1.contentDate }
+                return $0.score > $1.score
+            }
     }
     private var business: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "business" } }
     private var life: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "life" } }
@@ -35,7 +40,7 @@ struct BriefingView: View {
                     }
                     statsRow
                     if recent.isEmpty && mail.isEmpty {
-                        EmptyHint(text: "暂无简报。下拉刷新会直接在 iPhone 本机扫描 RSS / GitHub 信源。", systemImage: "newspaper")
+                        EmptyHint(text: "过去 24 小时暂无新简报。下拉刷新会直接在 iPhone 本机扫描 RSS / GitHub 信源。", systemImage: "newspaper")
                             .padding(.top, 28)
                     } else {
                         section("业务资讯", .news, Brand.accent, business, "briefing.business", expanded: true)
@@ -67,8 +72,9 @@ struct BriefingView: View {
             else {
                 ForEach(rows.prefix(24)) { item in
                     Button { detail = item } label: {
-                        IntelCard(kind: item.intelKind, title: item.displayTitle, summary: item.summary,
-                                  meta: item.sourceName, priority: IntelPriority(scoreText: item.priority), tags: item.tags)
+                        IntelCard(kind: item.intelKind, title: item.displayTitle, summary: item.displaySummary,
+                                  meta: "\(item.sourceName) · 发布\(RelativeTime.string(item.contentDate))",
+                                  priority: IntelPriority(scoreText: item.priority), tags: item.tags)
                     }.buttonStyle(.plain)
                 }
             }
