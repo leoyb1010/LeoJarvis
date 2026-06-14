@@ -21,26 +21,30 @@ struct BriefingView: View {
     private var github: [IntelItem] { recent.filter { $0.kind == "github_repo" } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Brand.stack) {
-                statsRow
+        ZStack {
+            HUDBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Brand.stack) {
+                    statsRow
 
-                if recent.isEmpty {
-                    EmptyHint(text: "暂无简报。下拉刷新或在总览页扫描信源。", systemImage: "newspaper")
-                        .padding(.top, 28)
-                } else {
-                    section("业务资讯", .news, .blue, business, "briefing.business", expanded: true)
-                    section("GitHub 项目", .github, IntelKind.github.tint, github, "briefing.github", expanded: true)
-                    section("生活资讯", .life, IntelKind.life.tint, life, "briefing.life", expanded: false)
+                    if recent.isEmpty {
+                        EmptyHint(text: "暂无简报。下拉刷新或在总览页扫描信源。", systemImage: "newspaper")
+                            .padding(.top, 28)
+                    } else {
+                        section("业务资讯", .news, Brand.accent, business, "briefing.business", expanded: true)
+                        section("GitHub 项目", .github, IntelKind.github.tint, github, "briefing.github", expanded: true)
+                        section("生活资讯", .life, IntelKind.life.tint, life, "briefing.life", expanded: false)
+                    }
                 }
+                .padding(16)
             }
-            .padding(16)
         }
         .navigationTitle("简报")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { Task { await env.intel.scan() } } label: {
-                    if env.intel.isScanning { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                    if env.intel.isScanning { ArcRing(progress: 0.3, size: 20) }
+                    else { Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent) }
                 }.disabled(env.intel.isScanning)
             }
         }
@@ -65,20 +69,21 @@ struct BriefingView: View {
 
     private var statsRow: some View {
         HStack(spacing: 10) {
-            stat("资讯", business.count + life.count, "newspaper", .blue)
-            stat("GitHub", github.count, "chevron.left.forwardslash.chevron.right", .purple)
-            stat("高优先", recent.filter { $0.priority == "高优先" }.count, "flame", .red)
+            stat("资讯", business.count + life.count, "newspaper", Brand.accent)
+            stat("GitHub", github.count, "chevron.left.forwardslash.chevron.right", IntelKind.github.tint)
+            stat("高优先", recent.filter { $0.priority == "高优先" }.count, "flame", Brand.gold)
         }
     }
 
     private func stat(_ title: String, _ value: Int, _ symbol: String, _ tint: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: symbol).font(.subheadline).foregroundStyle(tint)
-            Text("\(value)").font(.title3.weight(.bold))
-            Text(title).font(.caption2).foregroundStyle(.secondary)
+                .shadow(color: tint.opacity(0.6), radius: 4)
+            Text("\(value)").font(.hudDisplay(22, .bold)).foregroundStyle(Brand.hudText)
+            Text(title).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
-        .background(.background.opacity(0.7), in: RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
+        .hudSurface(corner: Brand.tileCorner, stroke: tint.opacity(0.3), brackets: false)
     }
 }
 
@@ -90,55 +95,61 @@ struct IntelDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 6) {
-                        Label(item.intelKind.label, systemImage: item.intelKind.symbol)
-                            .font(.caption.weight(.semibold)).foregroundStyle(item.intelKind.tint)
-                        Text(IntelPriority(scoreText: item.priority).label)
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(IntelPriority(scoreText: item.priority).tint)
-                        Spacer()
-                        Text(item.sourceName).font(.caption2).foregroundStyle(.tertiary)
-                    }
+            ZStack {
+                HUDBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 6) {
+                            Label(item.intelKind.label, systemImage: item.intelKind.symbol)
+                                .font(.hudMono(11, .semibold)).foregroundStyle(item.intelKind.tint)
+                            Text(IntelPriority(scoreText: item.priority).label)
+                                .font(.hudMono(11, .bold))
+                                .foregroundStyle(IntelPriority(scoreText: item.priority).tint)
+                            Spacer()
+                            Text(item.sourceName).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
+                        }
 
-                    Text(item.displayTitle).font(.title3.weight(.bold))
-                    if let summary = item.summary { Text(summary).font(.body).foregroundStyle(.secondary) }
+                        Text(item.displayTitle).font(.hudDisplay(22, .bold)).foregroundStyle(Brand.hudText)
+                        if let summary = item.summary { Text(summary).font(.body).foregroundStyle(Brand.hudText.opacity(0.7)) }
 
-                    enrichment("为什么重要", item.whyImportant, "exclamationmark.circle")
-                    enrichment("和我有什么关系", item.relation, "person.crop.circle")
-                    enrichment("下一步建议", item.nextStep, "arrow.forward.circle")
+                        enrichment("为什么重要", item.whyImportant, "exclamationmark.circle")
+                        enrichment("和我有什么关系", item.relation, "person.crop.circle")
+                        enrichment("下一步建议", item.nextStep, "arrow.forward.circle")
 
-                    if !item.tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(item.tags, id: \.self) { Text("#\($0)").font(.caption2).foregroundStyle(.tint)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(.thinMaterial, in: Capsule()) }
+                        if !item.tags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(item.tags, id: \.self) { Text("#\($0)").font(.hudMono(10)).foregroundStyle(Brand.accent.opacity(0.85))
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(Brand.accent.opacity(0.08), in: Capsule())
+                                        .overlay(Capsule().stroke(Brand.accent.opacity(0.3), lineWidth: 0.7)) }
+                                }
                             }
                         }
-                    }
 
-                    if let urlString = item.url, let url = URL(string: urlString) {
-                        Button { openURL(url) } label: {
-                            Label("打开原文", systemImage: "safari").frame(maxWidth: .infinity)
-                        }.buttonStyle(.borderedProminent).padding(.top, 8)
+                        if let urlString = item.url, let url = URL(string: urlString) {
+                            Button { openURL(url) } label: {
+                                Label("打开原文", systemImage: "safari").font(.hudMono(13, .semibold))
+                                    .foregroundStyle(Brand.void).frame(maxWidth: .infinity).padding(.vertical, 6)
+                            }.background(Brand.accent, in: Capsule()).padding(.top, 8)
+                        }
                     }
+                    .padding(16)
                 }
-                .padding(16)
             }
             .navigationTitle("情报详情")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.tint(Brand.accent) } }
         }
+        .tint(Brand.accent)
     }
 
     @ViewBuilder
     private func enrichment(_ title: String, _ text: String?, _ symbol: String) -> some View {
         if let text, !text.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Label(title, systemImage: symbol).font(.caption.weight(.semibold)).foregroundStyle(.tint)
-                Text(text).font(.callout)
+                Label(title, systemImage: symbol).font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
+                Text(text).font(.callout).foregroundStyle(Brand.hudText.opacity(0.85))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .jarvisCard(corner: Brand.tileCorner)

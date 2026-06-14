@@ -132,6 +132,20 @@ extension View {
     func jarvisCard(stroke: Color = Brand.hairline, corner: CGFloat = Brand.corner) -> some View {
         self.padding(Brand.cardPadding).hudSurface(corner: corner, stroke: stroke)
     }
+
+    /// 给 Form / List 套上 HUD 底（透明列背景 + 能量底 + 青色 tint），
+    /// 用于设置、编辑器、SSH、Notebook 等表单页一键 HUD 化。
+    func hudFormBackground() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(HUDBackground())
+            .tint(Brand.accent)
+    }
+
+    /// HUD 列表行底（半透明面板）
+    func hudRow() -> some View {
+        self.listRowBackground(Brand.panel.opacity(0.18))
+    }
 }
 
 // MARK: - SectionHeader

@@ -14,18 +14,22 @@ struct OverviewView: View {
     @State private var detail: IntelItem?
 
     var body: some View {
-        VStack(spacing: 0) {
-            channelBar
-            Divider().opacity(0.4)
-            FeedChannelView(channel: channel, items: items, onOpen: { detail = $0 })
-                .environmentObject(env)
+        ZStack {
+            HUDBackground()
+            VStack(spacing: 0) {
+                channelBar
+                Rectangle().fill(Brand.accent.opacity(0.18)).frame(height: 1)
+                FeedChannelView(channel: channel, items: items, onOpen: { detail = $0 })
+                    .environmentObject(env)
+            }
         }
         .navigationTitle("今日资讯")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { Task { await env.intel.scan() } } label: {
-                    if env.intel.isScanning { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                    if env.intel.isScanning { ArcRing(progress: 0.3, size: 20) }
+                    else { Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent) }
                 }.disabled(env.intel.isScanning)
             }
         }
@@ -37,19 +41,22 @@ struct OverviewView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Channel.allCases) { ch in
+                    let on = channel == ch
                     Button { withAnimation(.snappy) { channel = ch } } label: {
                         HStack(spacing: 4) {
                             Image(systemName: ch.symbol).font(.caption2)
-                            Text(ch.title).font(.subheadline.weight(channel == ch ? .bold : .regular))
+                            Text(ch.title).font(.hudMono(13, on ? .bold : .regular))
                         }
-                        .foregroundStyle(channel == ch ? .white : .primary)
+                        .foregroundStyle(on ? Brand.void : ch.tint)
                         .padding(.horizontal, 13).padding(.vertical, 8)
-                        .background(channel == ch ? AnyShapeStyle(ch.tint) : AnyShapeStyle(.thinMaterial), in: Capsule())
+                        .background(on ? AnyShapeStyle(ch.tint) : AnyShapeStyle(Brand.panel.opacity(0.35)), in: Capsule())
+                        .overlay(Capsule().stroke(ch.tint.opacity(on ? 0 : 0.45), lineWidth: 1))
+                        .shadow(color: on ? ch.tint.opacity(0.6) : .clear, radius: 6)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
+            .padding(.horizontal, 14).padding(.vertical, 9)
         }
     }
 }

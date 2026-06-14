@@ -38,24 +38,25 @@ struct DeviceDetailView: View {
     var body: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
+                HStack(spacing: 16) {
+                    ArcRing(progress: snapshot.isOnline ? snapshot.health / 100 : 0, size: 70, color: tone.color,
+                            label: snapshot.isOnline ? "\(Int(snapshot.health.rounded()))" : "-")
+                    VStack(alignment: .leading, spacing: 6) {
                         Label(snapshot.status, systemImage: tone.symbol)
-                            .font(.headline)
+                            .font(.hudDisplay(17, .semibold))
                             .foregroundStyle(tone.color)
-                        Spacer()
-                        Text(snapshot.isOnline ? "\(Int(snapshot.health.rounded()))" : "-")
-                            .font(.system(size: 38, weight: .bold, design: .rounded))
-                            .foregroundStyle(tone.color)
+                        Text(snapshot.address)
+                            .font(.hudMono(11))
+                            .foregroundStyle(Brand.hudText.opacity(0.6))
+                        Text(snapshot.privacy)
+                            .font(.hudMono(9))
+                            .foregroundStyle(Brand.hudText.opacity(0.4))
+                            .lineLimit(2)
                     }
-                    Text(snapshot.address)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text(snapshot.privacy)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
                 .padding(.vertical, 6)
+                .listRowBackground(Color.clear)
             }
 
             Section("系统") {
@@ -121,12 +122,14 @@ struct DeviceDetailView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(HUDBackground())
         .navigationTitle(snapshot.name)
         .toolbar {
             Button {
                 Task { await store.refreshHost(hostID) }
             } label: {
-                Image(systemName: "arrow.clockwise")
+                Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent)
             }
             .disabled(store.isRefreshing)
             .accessibilityLabel("刷新此主机")
@@ -264,23 +267,25 @@ struct DetailRow: View {
 
     var body: some View {
         HStack {
-            Text(title)
+            Text(title).font(.hudMono(12)).foregroundStyle(Brand.hudText.opacity(0.7))
             Spacer(minLength: 16)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(value)
-                    .fontWeight(.semibold)
+                    .font(.hudDisplay(15, .semibold))
+                    .foregroundStyle(Brand.hudText)
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                 if !detail.isEmpty {
                     Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.hudMono(10))
+                        .foregroundStyle(Brand.hudText.opacity(0.5))
                         .multilineTextAlignment(.trailing)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
                 }
             }
         }
+        .listRowBackground(Brand.panel.opacity(0.18))
     }
 }

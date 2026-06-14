@@ -13,38 +13,41 @@ struct FleetDashboardView: View {
     private var samples: [DeviceSample]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Brand.stack) {
-                LocalDeviceCard(snapshot: store.localSnapshot)
+        ZStack {
+            HUDBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Brand.stack) {
+                    LocalDeviceCard(snapshot: store.localSnapshot)
 
-                if recentSamples.count >= 2 {
-                    DeviceTrendCard(samples: recentSamples)
-                }
+                    if recentSamples.count >= 2 {
+                        DeviceTrendCard(samples: recentSamples)
+                    }
 
-                CollapsibleSection(
-                    title: "SSH 主机",
-                    systemImage: "server.rack",
-                    count: store.hosts.count,
-                    accent: .indigo,
-                    defaultExpanded: false,
-                    storageKey: "device.sshHosts"
-                ) {
-                    sshSectionBody
-                }
+                    CollapsibleSection(
+                        title: "SSH 主机",
+                        systemImage: "server.rack",
+                        count: store.hosts.count,
+                        accent: Brand.gold,
+                        defaultExpanded: false,
+                        storageKey: "device.sshHosts"
+                    ) {
+                        sshSectionBody
+                    }
 
-                if let message = store.errorMessage {
-                    MessageBanner(text: message, level: .bad)
-                } else if let message = store.noticeMessage {
-                    MessageBanner(text: message, level: .good)
+                    if let message = store.errorMessage {
+                        MessageBanner(text: message, level: .bad)
+                    } else if let message = store.noticeMessage {
+                        MessageBanner(text: message, level: .good)
+                    }
                 }
+                .padding(16)
             }
-            .padding(16)
         }
         .navigationTitle("设备")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { store.refreshLocal(); recordSample() } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent)
                 }
                 .accessibilityLabel("刷新本机")
             }
@@ -66,13 +69,13 @@ struct FleetDashboardView: View {
         } else {
             HStack {
                 Text("\(store.remoteOnlineCount)/\(store.hosts.count) 在线")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.hudMono(11)).foregroundStyle(Brand.hudText.opacity(0.6))
                 Spacer()
                 Button {
                     Task { await store.refreshAll() }
                 } label: {
                     Label(store.isRefreshing ? "探测中…" : "探测全部", systemImage: "bolt.horizontal.circle")
-                        .font(.caption.weight(.semibold))
+                        .font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
                 }
                 .disabled(store.isRefreshing)
             }
@@ -115,27 +118,33 @@ private struct DeviceTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "本机趋势", subtitle: "电量与存储占用", systemImage: "chart.xyaxis.line")
+            SectionHeader(title: "本机趋势", subtitle: "电量与存储占用 · 遥测", systemImage: "chart.xyaxis.line")
             Chart {
                 ForEach(samples) { s in
                     if let battery = s.batteryPercent {
-                        LineMark(
-                            x: .value("时间", s.timestamp),
-                            y: .value("电量", battery)
-                        )
-                        .foregroundStyle(by: .value("指标", "电量%"))
-                        .interpolationMethod(.catmullRom)
+                        AreaMark(x: .value("时间", s.timestamp), y: .value("电量", battery))
+                            .foregroundStyle(LinearGradient(colors: [Brand.vital.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom))
+                            .interpolationMethod(.catmullRom)
+                        LineMark(x: .value("时间", s.timestamp), y: .value("电量", battery))
+                            .foregroundStyle(by: .value("指标", "电量%"))
+                            .interpolationMethod(.catmullRom)
                     }
-                    LineMark(
-                        x: .value("时间", s.timestamp),
-                        y: .value("存储", s.storageUsedPercent)
-                    )
-                    .foregroundStyle(by: .value("指标", "存储占用%"))
-                    .interpolationMethod(.catmullRom)
+                    LineMark(x: .value("时间", s.timestamp), y: .value("存储", s.storageUsedPercent))
+                        .foregroundStyle(by: .value("指标", "存储占用%"))
+                        .interpolationMethod(.catmullRom)
                 }
             }
             .chartYScale(domain: 0...100)
-            .chartForegroundStyleScale(["电量%": Color.green, "存储占用%": Color.orange])
+            .chartForegroundStyleScale(["电量%": Brand.vital, "存储占用%": Brand.gold])
+            .chartXAxis { AxisMarks { _ in
+                AxisGridLine().foregroundStyle(Brand.accent.opacity(0.08))
+                AxisValueLabel().font(.hudMono(8)).foregroundStyle(Brand.hudText.opacity(0.4))
+            } }
+            .chartYAxis { AxisMarks { _ in
+                AxisGridLine().foregroundStyle(Brand.accent.opacity(0.08))
+                AxisValueLabel().font(.hudMono(8)).foregroundStyle(Brand.hudText.opacity(0.4))
+            } }
+            .chartLegend(position: .bottom)
             .frame(height: 160)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

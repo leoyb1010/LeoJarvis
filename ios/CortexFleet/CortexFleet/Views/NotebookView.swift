@@ -54,6 +54,7 @@ struct NotebookView: View {
             }
             .padding(16)
         }
+        .hudFormBackground()
         .navigationTitle("记事")
         .sheet(isPresented: $newNotebook) { NewNotebookSheet() }
         .sheet(isPresented: $quickNote) { NavigationStack { NoteEditorView(note: nil) } }
@@ -113,6 +114,7 @@ private struct NewNotebookSheet: View {
                     }
                 }
             }
+            .hudFormBackground()
             .navigationTitle("新建 Notebook").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

@@ -17,12 +17,12 @@ struct DeviceCardView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(snapshot.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                        .font(.hudDisplay(17, .semibold))
+                        .foregroundStyle(Brand.hudText)
                         .lineLimit(1)
                     Text(snapshot.address)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.hudMono(10))
+                        .foregroundStyle(Brand.hudText.opacity(0.5))
                         .lineLimit(1)
                 }
 
@@ -30,11 +30,11 @@ struct DeviceCardView: View {
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(snapshot.isOnline ? "\(Int(snapshot.health.rounded()))" : "-")
-                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .font(.hudDisplay(22, .bold))
                         .foregroundStyle(tone.color)
                     Text(snapshot.status)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.hudMono(10, .semibold))
+                        .foregroundStyle(Brand.hudText.opacity(0.5))
                 }
             }
 
@@ -55,11 +55,7 @@ struct DeviceCardView: View {
             }
         }
         .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(tone.color.opacity(0.24), lineWidth: 1)
-        )
+        .hudSurface(corner: Brand.tileCorner, stroke: tone.color.opacity(0.3))
     }
 
     private var cpuDetail: String {

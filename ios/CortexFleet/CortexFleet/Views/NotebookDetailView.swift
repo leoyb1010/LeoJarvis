@@ -29,6 +29,7 @@ struct NotebookDetailView: View {
             case .chat: NotebookChatView(notebook: notebook)
             }
         }
+        .hudFormBackground()
         .navigationTitle("\(notebook.emoji) \(notebook.name)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -175,6 +176,7 @@ private struct AddSourceSheet: View {
                     TextEditor(text: $text).frame(minHeight: 160)
                 }
             }
+            .hudFormBackground()
             .navigationTitle("添加资料").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

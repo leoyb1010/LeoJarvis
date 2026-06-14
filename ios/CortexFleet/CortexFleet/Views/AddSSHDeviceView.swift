@@ -58,6 +58,7 @@ struct AddSSHDeviceView: View {
                 .disabled(saving || !canSave)
             }
         }
+        .hudFormBackground()
         .navigationTitle(draft.id == nil ? "添加 SSH" : "编辑 SSH")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

@@ -85,6 +85,7 @@ struct NoteEditorView: View {
                 }
             }
         }
+        .hudFormBackground()
         .navigationTitle(isNew ? "新建记事" : "编辑记事")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
