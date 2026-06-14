@@ -61,12 +61,12 @@ struct OverviewView: View {
 
     private var shouldAutoRefresh: Bool {
         guard !env.intel.isScanning else { return false }
-        if let last = env.intel.lastScan, Date().timeIntervalSince(last) < 10 * 60 {
+        if let last = env.intel.lastScan, Date().timeIntervalSince(last) < 60 * 60 {
             return false
         }
         if items.isEmpty || topItems.isEmpty { return true }
         let newestContent = items.map(\.contentDate).max() ?? .distantPast
-        return Date().timeIntervalSince(newestContent) > 30 * 60
+        return Date().timeIntervalSince(newestContent) > 60 * 60
     }
 
     private var header: some View {
@@ -107,15 +107,64 @@ struct OverviewView: View {
     }
 
     private var telemetry: some View {
-        HStack(spacing: 10) {
-            MetricTile(title: "电量", value: batteryText, detail: store.localSnapshot.batteryState, systemImage: "battery.75percent")
-            MetricTile(title: "存储", value: "\(Int(store.localSnapshot.storageUsedPercent.rounded()))%", detail: "已用", systemImage: "internaldrive")
-            MetricTile(title: "在线设备", value: "\(store.remoteOnlineCount + 1)", detail: "节点", systemImage: "server.rack")
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                MetricTile(title: "电量", value: batteryText, detail: store.localSnapshot.batteryState, systemImage: "battery.75percent")
+                MetricTile(title: "存储", value: "\(Int(store.localSnapshot.storageUsedPercent.rounded()))%", detail: "已用", systemImage: "internaldrive")
+                MetricTile(title: "延迟", value: store.networkLatency.valueText, detail: store.networkLatency.detailText, systemImage: "speedometer")
+                MetricTile(title: "在线设备", value: "\(store.remoteOnlineCount + 1)", detail: "节点", systemImage: "server.rack")
+            }
+            gmailStatusStrip
         }
     }
     private var batteryText: String {
         guard let v = store.localSnapshot.batteryPercent else { return "-" }
         return "\(Int(v.rounded()))%"
+    }
+
+    private var gmailStatusStrip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: store.mobileGmailConfig.enabled ? "envelope.badge.fill" : "envelope.badge")
+                .foregroundStyle(store.mobileGmailConfig.enabled ? Brand.vital : Brand.gold)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(gmailTitle)
+                    .font(.hudMono(11, .semibold))
+                    .foregroundStyle(Brand.hudText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(gmailDetail)
+                    .font(.hudMono(10))
+                    .foregroundStyle(Brand.hudText.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+            Text("扫描间隔 60 分钟")
+                .font(.hudMono(10, .semibold))
+                .foregroundStyle(Brand.accent.opacity(0.85))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Brand.accent.opacity(0.1), in: Capsule())
+        }
+        .padding(12)
+        .hudSurface(corner: Brand.tileCorner, stroke: (store.mobileGmailConfig.enabled ? Brand.vital : Brand.gold).opacity(0.25), brackets: false)
+    }
+
+    private var gmailTitle: String {
+        let gmail = store.mobileGmailConfig
+        if gmail.enabled, !gmail.user.isEmpty { return "Gmail 已配置 · \(gmail.user)" }
+        if store.mobileMailStatus.enabled { return "邮件监控已启用" }
+        return "Gmail 未启用"
+    }
+
+    private var gmailDetail: String {
+        let gmail = store.mobileGmailConfig
+        if gmail.enabled {
+            return "\(gmail.host):\(gmail.port) · \(gmail.mailbox) · \(gmail.search) · 最多 \(gmail.limit) 封"
+        }
+        if let error = store.sectionError("mail") { return error }
+        return "设置中可配置 Gmail App Password / IMAP"
     }
 
     @ViewBuilder private var feed: some View {

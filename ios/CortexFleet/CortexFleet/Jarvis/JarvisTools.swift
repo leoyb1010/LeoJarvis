@@ -39,6 +39,7 @@ final class JarvisTools {
     }
 
     static let catalog: [JarvisTool] = [
+        JarvisTool(name: "capture_daily_input", summary: "把一段日常自然语言整理成笔记，并按需要同时创建日程、提醒事项和本地强提醒。", parameters: ["original": "用户原话", "analysis": "整理后的中文分析", "note": "笔记对象 {title, content, tags}", "calendar_event": "日程对象 {title,start,end,notes}(可选)", "reminder": "提醒对象 {title,due,notes}(可选)", "alarm": "本地强提醒对象 {title,at,body}(可选)"], risk: .confirm),
         JarvisTool(name: "write_note", summary: "把内容记成一条个人笔记。", parameters: ["title": "标题(可选)", "content": "笔记正文", "tags": "标签数组(可选)"], risk: .auto),
         JarvisTool(name: "search_notes", summary: "在本地笔记里搜索。", parameters: ["query": "关键词"], risk: .auto),
         JarvisTool(name: "ask_intel", summary: "基于本地信源情报回答问题(RAG)。", parameters: ["query": "问题"], risk: .auto),
@@ -63,6 +64,7 @@ final class JarvisTools {
 
     func invoke(_ tool: String, args: [String: Any]) async -> ToolResult {
         switch tool {
+        case "capture_daily_input": return await captureDailyInput(args)
         case "write_note": return writeNote(args)
         case "search_notes": return searchNotes(args)
         case "ask_intel": return await askIntel(args)
@@ -75,6 +77,48 @@ final class JarvisTools {
     }
 
     // MARK: - Notes / RAG
+
+    private func captureDailyInput(_ args: [String: Any]) async -> ToolResult {
+        let original = string(args["original"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let analysis = string(args["analysis"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteArgs = dictionary(args["note"])
+        var eventArgs = dictionary(args["calendar_event"] ?? args["event"])
+        var reminderArgs = dictionary(args["reminder"])
+        var alarmArgs = dictionary(args["alarm"])
+
+        let noteTitle = string(noteArgs["title"], fallback: NoteStore.makeExcerpt(original.isEmpty ? analysis : original, limit: 24))
+        let explicitContent = string(noteArgs["content"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteContent = makeCaptureNoteContent(original: original, analysis: analysis, explicitContent: explicitContent,
+                                                 eventArgs: eventArgs, reminderArgs: reminderArgs, alarmArgs: alarmArgs)
+        let tags = stringArray(noteArgs["tags"]) + inferredTags(eventArgs: eventArgs, reminderArgs: reminderArgs, alarmArgs: alarmArgs)
+        let note = noteStore.create(
+            title: noteTitle.isEmpty ? "Jarvis 日常记录" : noteTitle,
+            content: noteContent,
+            tags: Array(Set(tags)).sorted(),
+            projectName: string(noteArgs["project"], fallback: "Jarvis 日常"),
+            source: "jarvis-capture"
+        )
+
+        var messages = ["已写入笔记「\(note.displayTitle)」"]
+
+        if !eventArgs.isEmpty {
+            eventArgs["skip_note"] = true
+            let result = await createEvent(eventArgs)
+            messages.append(result.message)
+        }
+        if !reminderArgs.isEmpty {
+            reminderArgs["skip_note"] = true
+            let result = await createReminder(reminderArgs)
+            messages.append(result.message)
+        }
+        if !alarmArgs.isEmpty {
+            alarmArgs["skip_note"] = true
+            let result = await createAlarm(alarmArgs)
+            messages.append(result.message)
+        }
+
+        return ToolResult(ok: true, message: messages.joined(separator: "\n"))
+    }
 
     private func writeNote(_ args: [String: Any]) -> ToolResult {
         let content = (args["content"] as? String) ?? (args["text"] as? String) ?? ""
@@ -130,6 +174,11 @@ final class JarvisTools {
         event.calendar = eventStore.defaultCalendarForNewEvents
         do {
             try eventStore.save(event, span: .thisEvent)
+            if !bool(args["skip_note"]) {
+                logSystemAction(title: "创建日程：\(event.title ?? "新日程")",
+                                body: "时间：\(event.startDate.formatted(.dateTime.year().month().day().hour().minute()))\n备注：\(event.notes ?? "-")",
+                                tags: ["Jarvis", "日程"])
+            }
             return ToolResult(ok: true, message: "已创建日程「\(event.title ?? "")」 \(event.startDate.formatted(.dateTime.month().day().hour().minute()))")
         } catch {
             return ToolResult(ok: false, message: "创建日程失败：\(error.localizedDescription)")
@@ -146,8 +195,14 @@ final class JarvisTools {
             reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
             reminder.addAlarm(EKAlarm(absoluteDate: due))
         }
+        reminder.notes = args["notes"] as? String
         do {
             try eventStore.save(reminder, commit: true)
+            if !bool(args["skip_note"]) {
+                logSystemAction(title: "创建提醒：\(reminder.title ?? "新提醒")",
+                                body: "到期：\(parseDate(args["due"])?.formatted(.dateTime.year().month().day().hour().minute()) ?? "-")\n备注：\(reminder.notes ?? "-")",
+                                tags: ["Jarvis", "提醒"])
+            }
             return ToolResult(ok: true, message: "已创建提醒「\(reminder.title ?? "")」")
         } catch {
             return ToolResult(ok: false, message: "创建提醒失败：\(error.localizedDescription)")
@@ -161,6 +216,11 @@ final class JarvisTools {
         let granted = await JarvisNotifications.shared.requestAuthorization()
         guard granted else { return ToolResult(ok: false, message: "没有通知权限，无法设置定时提醒。") }
         await JarvisNotifications.shared.schedule(title: "⏰ \(title)", body: "Jarvis 定时提醒", at: at)
+        if !bool(args["skip_note"]) {
+            logSystemAction(title: "设置强提醒：\(title)",
+                            body: "时间：\(at.formatted(.dateTime.year().month().day().hour().minute()))\n形式：本地通知",
+                            tags: ["Jarvis", "强提醒"])
+        }
         return ToolResult(ok: true, message: "已设置 \(at.formatted(.dateTime.month().day().hour().minute())) 的提醒「\(title)」（系统通知形式）。")
     }
 
@@ -192,6 +252,78 @@ final class JarvisTools {
     }
 
     // MARK: - Helpers
+
+    private func makeCaptureNoteContent(
+        original: String,
+        analysis: String,
+        explicitContent: String,
+        eventArgs: [String: Any],
+        reminderArgs: [String: Any],
+        alarmArgs: [String: Any]
+    ) -> String {
+        var sections: [String] = []
+        if !explicitContent.isEmpty {
+            sections.append(explicitContent)
+        }
+        if !analysis.isEmpty {
+            sections.append("## Jarvis 分析\n\(analysis)")
+        }
+        if !original.isEmpty {
+            sections.append("## 原始输入\n\(original)")
+        }
+
+        var actions: [String] = []
+        if !eventArgs.isEmpty {
+            actions.append("- 日程：\(string(eventArgs["title"], fallback: "新日程")) · \(string(eventArgs["start"], fallback: "-"))")
+        }
+        if !reminderArgs.isEmpty {
+            actions.append("- 提醒事项：\(string(reminderArgs["title"], fallback: "新提醒")) · \(string(reminderArgs["due"], fallback: "-"))")
+        }
+        if !alarmArgs.isEmpty {
+            actions.append("- 强提醒：\(string(alarmArgs["title"], fallback: "提醒")) · \(string(alarmArgs["at"], fallback: "-"))")
+        }
+        if !actions.isEmpty {
+            sections.append("## 自动动作\n\(actions.joined(separator: "\n"))")
+        }
+        if sections.isEmpty {
+            sections.append("## 原始输入\n\(original.isEmpty ? "Jarvis 日常记录" : original)")
+        }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private func inferredTags(eventArgs: [String: Any], reminderArgs: [String: Any], alarmArgs: [String: Any]) -> [String] {
+        var tags = ["Jarvis"]
+        if !eventArgs.isEmpty { tags.append("日程") }
+        if !reminderArgs.isEmpty { tags.append("提醒") }
+        if !alarmArgs.isEmpty { tags.append("强提醒") }
+        return tags
+    }
+
+    private func logSystemAction(title: String, body: String, tags: [String]) {
+        noteStore.create(title: title, content: body, tags: tags, projectName: "Jarvis 日常", source: "jarvis-action-log")
+    }
+
+    private func dictionary(_ value: Any?) -> [String: Any] {
+        value as? [String: Any] ?? [:]
+    }
+
+    private func string(_ value: Any?, fallback: String = "") -> String {
+        if let value = value as? String { return value }
+        if let value { return "\(value)" }
+        return fallback
+    }
+
+    private func stringArray(_ value: Any?) -> [String] {
+        if let value = value as? [String] { return value }
+        if let value = value as? [Any] { return value.compactMap { $0 as? String } }
+        return []
+    }
+
+    private func bool(_ value: Any?) -> Bool {
+        if let value = value as? Bool { return value }
+        if let value = value as? String { return ["true", "1", "yes"].contains(value.lowercased()) }
+        return false
+    }
 
     private func parseDate(_ value: Any?) -> Date? {
         guard let s = value as? String else { return nil }

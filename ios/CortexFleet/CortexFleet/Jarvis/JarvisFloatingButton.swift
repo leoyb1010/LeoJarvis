@@ -212,7 +212,12 @@ struct JarvisChatSheet: View {
     }
 
     private func argsPreview(_ args: [String: Any]) -> String {
-        args.map { "\($0.key)=\($0.value)" }.joined(separator: "  ")
+        guard JSONSerialization.isValidJSONObject(args),
+              let data = try? JSONSerialization.data(withJSONObject: args, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return args.map { "\($0.key)=\($0.value)" }.joined(separator: "  ")
+        }
+        return text
     }
 }
 

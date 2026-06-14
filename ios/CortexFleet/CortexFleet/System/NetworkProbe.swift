@@ -43,3 +43,55 @@ final class NetworkProbe: @unchecked Sendable {
         return _expensive
     }
 }
+
+struct NetworkLatencySnapshot: Equatable {
+    var latencyMs: Int?
+    var measuredAt: Date?
+    var error: String?
+
+    static let empty = NetworkLatencySnapshot()
+
+    var valueText: String {
+        if let latencyMs {
+            return "\(latencyMs)ms"
+        }
+        return NetworkProbe.shared.currentType
+    }
+
+    var detailText: String {
+        if let measuredAt {
+            return "探测 \(RelativeTime.string(measuredAt))"
+        }
+        if let error, !error.isEmpty {
+            return "探测失败"
+        }
+        return NetworkProbe.shared.isExpensive ? "计费网络" : "网络可用"
+    }
+}
+
+enum NetworkLatencyProbe {
+    static func measure(timeout: TimeInterval = 5) async -> NetworkLatencySnapshot {
+        guard NetworkProbe.shared.currentType != "离线" else {
+            return NetworkLatencySnapshot(latencyMs: nil, measuredAt: Date(), error: "offline")
+        }
+        guard let url = URL(string: "https://captive.apple.com/hotspot-detect.html") else {
+            return NetworkLatencySnapshot(latencyMs: nil, measuredAt: Date(), error: "bad-url")
+        }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = timeout
+        request.setValue("LeoJarvis-iOS/1.0 (+network-latency)", forHTTPHeaderField: "User-Agent")
+
+        let started = Date()
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return NetworkLatencySnapshot(latencyMs: nil, measuredAt: Date(), error: "http")
+            }
+            let elapsed = max(Date().timeIntervalSince(started), 0.001)
+            return NetworkLatencySnapshot(latencyMs: Int((elapsed * 1000).rounded()), measuredAt: Date(), error: nil)
+        } catch {
+            return NetworkLatencySnapshot(latencyMs: nil, measuredAt: Date(), error: error.localizedDescription)
+        }
+    }
+}

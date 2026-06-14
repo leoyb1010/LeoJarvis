@@ -14,6 +14,7 @@ final class FleetStore: ObservableObject {
     @Published private(set) var mobileBriefing = MobileBriefingPayload()
     @Published private(set) var mobileGmailConfig = MobileGmailConfig()
     @Published private(set) var mobileMailStatus = MobileMailStatus()
+    @Published private(set) var networkLatency = NetworkLatencySnapshot.empty
     @Published private(set) var sectionErrors: [String: String] = [:]
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
     @Published private(set) var isRefreshing = false
@@ -68,6 +69,7 @@ final class FleetStore: ObservableObject {
 
     func refreshAll() async {
         refreshLocal()
+        await refreshNetworkLatency()
         await refreshJarvisContent(showLoading: false)
         isRefreshing = true
 
@@ -116,6 +118,10 @@ final class FleetStore: ObservableObject {
         let result = await sshProbe.probe(host)
         snapshots[result.hostID] = result
         isRefreshing = false
+    }
+
+    func refreshNetworkLatency() async {
+        networkLatency = await NetworkLatencyProbe.measure()
     }
 
     func saveHost(_ draft: HostDraft) {
@@ -292,6 +298,14 @@ final class FleetStore: ObservableObject {
                 clearSectionError("reach")
             } catch {
                 setSectionError("reach", error.localizedDescription)
+            }
+            do {
+                let payload = try await mobileBridge.loadMailConfig(settings: bridgeSettings, token: token)
+                mobileGmailConfig = payload.gmail
+                mobileMailStatus = payload.email
+                clearSectionError("mail")
+            } catch {
+                setSectionError("mail", error.localizedDescription)
             }
             if sectionErrors.isEmpty {
                 errorMessage = nil

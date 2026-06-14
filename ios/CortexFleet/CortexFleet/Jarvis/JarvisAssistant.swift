@@ -50,11 +50,11 @@ final class JarvisAssistant: ObservableObject {
     }
 
     static let suggestions = [
-        "记一条笔记：…",
-        "明天上午9点提醒我交周报",
+        "明天上午9点提醒我交周报，并记录到笔记",
+        "下周二下午3点和客户开会，提前30分钟提醒我，备注关注 iOS 简报刷新",
+        "今晚10点叫我整理今天的想法，顺便写入笔记",
         "今天有什么重点情报",
         "导航到最近的咖啡店",
-        "在日历里加一个下午3点的会议",
     ]
 
     func reset() { turns = []; history = [] }
@@ -254,21 +254,29 @@ final class JarvisAssistant: ObservableObject {
     }
 
     static func systemPrompt() -> String {
-        """
+        let now = ISO8601DateFormatter().string(from: Date())
+        let timeZone = TimeZone.current.identifier
+        return """
         你是 Jarvis，运行在用户 iPhone 上的全能个人助理。你可以调用本机工具来真正动手。
         每次只输出一个 JSON 对象，二选一：
         1) 需要动手：{"thought":"简述","action":{"tool":"工具名","args":{...}}}
         2) 直接回答：{"final":"给用户的中文回复"}
         不要输出 JSON 以外的任何文字，不要用代码块包裹。
 
+        当前时间：\(now)
+        当前时区：\(timeZone)
+
         可用工具：
         \(JarvisTools.describe())
 
         规则：
-        - 用户要记笔记 → write_note；问情报/资讯 → ask_intel；查笔记 → search_notes。
-        - 安排日程 → create_calendar_event；提醒事项 → create_reminder；定时叫我 → create_alarm。
+        - 用户的一句话里只要包含「记录/分析/安排/提醒/闹钟/日程」等日常输入，优先使用 capture_daily_input；它会自动写笔记，并可同时创建日程、提醒事项和本地强提醒。
+        - capture_daily_input 的 note.content 要整理成中文笔记；analysis 要写清楚你的判断；calendar_event/reminder/alarm 只在用户明确需要时填写。
+        - 用户明确“只记一下” → write_note；问情报/资讯 → ask_intel；查笔记 → search_notes。
+        - 用户明确“只建日程” → create_calendar_event；只建提醒事项 → create_reminder；只定时叫我/闹钟 → create_alarm。
         - 找地点/导航 → open_maps。
-        - 时间统一用 ISO8601（如 2026-06-14T09:00:00），按用户本地时区推断具体日期。
+        - 时间统一用 ISO8601（如 2026-06-14T09:00:00），必须按当前时间和当前时区推断具体日期。
+        - 如果用户说“明天/下周二/今晚”，必须换算成明确 ISO8601；如果缺少日期或时间且无法合理推断，先用 final 追问。
         - 工具执行后会把结果回给你，你据此给出简洁的中文 final 回复。
         - 信息不足时先用 final 追问，不要瞎调用工具。
         """
