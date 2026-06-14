@@ -55,17 +55,20 @@ struct NetworkLatencySnapshot: Equatable {
         if let latencyMs {
             return "\(latencyMs)ms"
         }
-        return NetworkProbe.shared.currentType
+        return "--ms"
     }
 
     var detailText: String {
+        if NetworkProbe.shared.currentType == "离线" {
+            return "离线"
+        }
         if let measuredAt {
-            return "探测 \(RelativeTime.string(measuredAt))"
+            return RelativeTime.string(measuredAt)
         }
         if let error, !error.isEmpty {
-            return "探测失败"
+            return "失败"
         }
-        return NetworkProbe.shared.isExpensive ? "计费网络" : "网络可用"
+        return "待探测"
     }
 }
 

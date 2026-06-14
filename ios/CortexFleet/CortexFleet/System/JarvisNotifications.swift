@@ -14,7 +14,7 @@ final class JarvisNotifications {
         (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
-    func schedule(title: String, body: String, at date: Date, id: String = UUID().uuidString) async {
+    func schedule(title: String, body: String, at date: Date, id: String = UUID().uuidString) async throws -> NotificationScheduleStatus {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -22,7 +22,9 @@ final class JarvisNotifications {
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-        try? await center.add(request)
+        try await center.add(request)
+        let pending = await center.pendingNotificationRequests()
+        return NotificationScheduleStatus(identifier: id, fireDate: date, pendingCount: pending.count)
     }
 
     /// Fire an immediate informational notification (e.g. high-priority intel).
@@ -35,4 +37,10 @@ final class JarvisNotifications {
                                             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
         try? await center.add(request)
     }
+}
+
+struct NotificationScheduleStatus {
+    let identifier: String
+    let fireDate: Date
+    let pendingCount: Int
 }

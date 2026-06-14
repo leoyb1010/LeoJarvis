@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // ═══════════════════════════════════════════════════════════════════
 //  OverviewView.swift · ARC REACTOR 仪表盘（接真实数据）
@@ -13,6 +16,7 @@ struct OverviewView: View {
     private var items: [IntelItem]
 
     @State private var detail: IntelItem?
+    @State private var isSyncingAll = false
 
     private var topItems: [IntelItem] {
         let cutoff = IntelItem.freshCutoff()
@@ -36,6 +40,9 @@ struct OverviewView: View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 header
+                if isSyncingAll || env.intel.isScanning || store.isRefreshing || store.isLoadingJarvis {
+                    syncStatusStrip
+                }
                 heroCore
                 telemetry
                 feed
@@ -48,14 +55,14 @@ struct OverviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await refreshIntel() } } label: {
-                    if env.intel.isScanning { ProgressView().tint(Brand.accent) }
-                    else { Image(systemName: "arrow.clockwise") }
-                }.disabled(env.intel.isScanning)
+                JarvisSyncButton(isActive: isSyncingAll || env.intel.isScanning || store.isRefreshing || store.isLoadingJarvis,
+                                 pulseDate: store.lastScanPulseAt) {
+                    Task { await refreshEverything() }
+                }
             }
         }
-        .refreshable { await refreshIntel() }
-        .task { if shouldAutoRefresh { await refreshIntel() } }
+        .refreshable { await refreshEverything() }
+        .task { await refreshOverview(forceIntel: false) }
         .sheet(item: $detail) { ArticleDetailView(item: $0).environmentObject(env) }
     }
 
@@ -84,6 +91,32 @@ struct OverviewView: View {
         .padding(.top, 2)
     }
 
+    private var syncStatusStrip: some View {
+        HStack(spacing: 10) {
+            ArcRing(progress: 0.72, size: 22, color: Brand.vital)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("JARVIS 正在同步")
+                    .font(.hudMono(10, .semibold))
+                    .foregroundStyle(Brand.vital)
+                Text("刷新情报、设备、延迟与 Gmail 状态")
+                    .font(.hudMono(9))
+                    .foregroundStyle(Brand.hudText.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            Spacer(minLength: 0)
+            Text("SCAN")
+                .font(.hudMono(9, .bold))
+                .foregroundStyle(Brand.void)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Brand.vital, in: Capsule())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .hudSurface(corner: Brand.tileCorner, stroke: Brand.vital.opacity(0.32), brackets: false)
+    }
+
     private var heroCore: some View {
         HStack(spacing: 16) {
             ArcRing(progress: store.localSnapshot.health / 100, size: 100,
@@ -108,15 +141,26 @@ struct OverviewView: View {
 
     private var telemetry: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                MetricTile(title: "电量", value: batteryText, detail: store.localSnapshot.batteryState, systemImage: "battery.75percent")
-                MetricTile(title: "存储", value: "\(Int(store.localSnapshot.storageUsedPercent.rounded()))%", detail: "已用", systemImage: "internaldrive")
-                MetricTile(title: "延迟", value: store.networkLatency.valueText, detail: store.networkLatency.detailText, systemImage: "speedometer")
-                MetricTile(title: "在线设备", value: "\(store.remoteOnlineCount + 1)", detail: "节点", systemImage: "server.rack")
+            LazyVGrid(columns: telemetryColumns, spacing: 8) {
+                OverviewStatusTile(title: "电量", value: batteryText, detail: store.localSnapshot.batteryState, systemImage: "battery.75percent") {
+                    openSettings(.battery)
+                }
+                OverviewStatusTile(title: "存储", value: "\(Int(store.localSnapshot.storageUsedPercent.rounded()))%", detail: "已用", systemImage: "internaldrive") {
+                    openSettings(.storage)
+                }
+                OverviewStatusTile(title: "延迟", value: store.networkLatency.valueText, detail: store.networkLatency.detailText, systemImage: "speedometer") {
+                    openSettings(.wifi)
+                }
+                OverviewStatusTile(title: "在线设备", value: "\(store.remoteOnlineCount + 1)", detail: "节点", systemImage: "server.rack")
             }
             gmailStatusStrip
         }
     }
+
+    private var telemetryColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8), count: 4)
+    }
+
     private var batteryText: String {
         guard let v = store.localSnapshot.batteryPercent else { return "-" }
         return "\(Int(v.rounded()))%"
@@ -193,12 +237,31 @@ struct OverviewView: View {
         }
     }
 
-    private func refreshIntel() async {
+    private func refreshOverview(forceIntel: Bool) async {
+        await store.refreshNetworkLatency()
+        if forceIntel || shouldAutoRefresh {
+            await env.intel.scan()
+        }
+    }
+
+    private func refreshEverything() async {
+        isSyncingAll = true
+        store.pulseScan()
+        await store.refreshAll()
         await env.intel.scan()
+        try? await Task.sleep(for: .milliseconds(700))
+        isSyncingAll = false
+    }
+
+    private func openSettings(_ destination: SystemSettingsDestination) {
+        Task { await destination.open() }
     }
 
     @ViewBuilder private func cardMenu(_ item: IntelItem) -> some View {
-        Button { Task { try? await env.intel.analyzeIntoNote(item) } } label: {
+        Button {
+            let modelID = item.persistentModelID
+            Task { _ = try? await env.intel.analyzeIntoNote(modelID: modelID) }
+        } label: {
             Label("AI 分析入笔记", systemImage: "sparkles.rectangle.stack")
         }
         Button { item.isFavorite.toggle() } label: {
@@ -207,5 +270,98 @@ struct OverviewView: View {
         if let url = item.url, let u = URL(string: url) {
             Link(destination: u) { Label("打开原文", systemImage: "safari") }
         }
+    }
+}
+
+private struct OverviewStatusTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let systemImage: String
+    let action: (() -> Void)?
+
+    init(title: String, value: String, detail: String, systemImage: String, action: (() -> Void)? = nil) {
+        self.title = title
+        self.value = value
+        self.detail = detail
+        self.systemImage = systemImage
+        self.action = action
+    }
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) { tileBody }
+                    .buttonStyle(.plain)
+            } else {
+                tileBody
+            }
+        }
+        .dynamicTypeSize(.small ... .large)
+    }
+
+    private var tileBody: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Brand.accent)
+                    .frame(width: 12)
+                Text(title)
+                    .font(.hudMono(8.5, .semibold))
+                    .foregroundStyle(Brand.hudText.opacity(0.56))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .allowsTightening(true)
+                Spacer(minLength: 0)
+            }
+            Text(value)
+                .font(.hudDisplay(15, .bold))
+                .foregroundStyle(Brand.hudText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+            Text(detail)
+                .font(.hudMono(8.5))
+                .foregroundStyle(Brand.hudText.opacity(0.48))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .allowsTightening(true)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+        .hudSurface(corner: Brand.tileCorner, brackets: false)
+        .contentShape(RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
+    }
+}
+
+private enum SystemSettingsDestination {
+    case battery
+    case storage
+    case wifi
+
+    var candidates: [String] {
+        switch self {
+        case .battery:
+            return ["App-Prefs:root=BATTERY_USAGE", "prefs:root=BATTERY_USAGE"]
+        case .storage:
+            return ["App-Prefs:root=General&path=STORAGE_MGMT", "prefs:root=General&path=STORAGE_MGMT", "App-Prefs:root=General"]
+        case .wifi:
+            return ["App-Prefs:root=WIFI", "prefs:root=WIFI"]
+        }
+    }
+
+    @MainActor func open() async {
+        #if canImport(UIKit)
+        for rawValue in candidates {
+            guard let url = URL(string: rawValue) else { continue }
+            if await UIApplication.shared.open(url) {
+                return
+            }
+        }
+        guard let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
+        _ = await UIApplication.shared.open(fallback)
+        #endif
     }
 }

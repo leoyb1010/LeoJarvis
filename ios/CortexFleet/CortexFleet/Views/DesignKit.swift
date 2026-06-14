@@ -81,8 +81,106 @@ struct HUDBackground: View {
             RadialGradient(colors: [Color(red: 0.05, green: 0.135, blue: 0.21), Brand.void],
                            center: .top, startRadius: 0, endRadius: 760)
             HUDGrid().stroke(Brand.accent.opacity(0.06), lineWidth: 1)
+            AmbientScanLayer()
         }
         .ignoresSafeArea()
+    }
+}
+
+enum HUDScanPulse {
+    static let notificationName = Notification.Name("com.leo.cortexfleet.hudScanPulse")
+
+    static func trigger() {
+        NotificationCenter.default.post(name: notificationName, object: nil)
+    }
+}
+
+struct AmbientScanLayer: View {
+    @State private var scheduledSweep = false
+    @State private var manualSweep = false
+    @State private var manualTrigger = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geo in
+            if !reduceMotion {
+                let height = geo.size.height
+                ZStack {
+                    sweepLayer(active: scheduledSweep, width: geo.size.width, height: height, opacity: 0.62)
+                    sweepLayer(active: manualSweep, width: geo.size.width, height: height, opacity: 0.92)
+                }
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+                .task { await runScheduledSweepLoop() }
+                .onReceive(NotificationCenter.default.publisher(for: HUDScanPulse.notificationName)) { _ in
+                    manualTrigger += 1
+                }
+                .task(id: manualTrigger) {
+                    guard manualTrigger > 0 else { return }
+                    await runManualSweep()
+                }
+            }
+        }
+    }
+
+    private func sweepLayer(active: Bool, width: CGFloat, height: CGFloat, opacity: Double) -> some View {
+        ZStack {
+            scanBeam(width: width)
+                .offset(y: active ? height + 180 : -180)
+            scanLine(width: width)
+                .offset(y: active ? height + 116 : -116)
+        }
+        .opacity(opacity)
+    }
+
+    @MainActor
+    private func runScheduledSweepLoop() async {
+        while !Task.isCancelled {
+            scheduledSweep = false
+            try? await Task.sleep(for: .milliseconds(250))
+            withAnimation(.linear(duration: 4.8)) {
+                scheduledSweep = true
+            }
+            try? await Task.sleep(for: .milliseconds(55_200))
+        }
+    }
+
+    @MainActor
+    private func runManualSweep() async {
+        manualSweep = false
+        try? await Task.sleep(for: .milliseconds(80))
+        withAnimation(.linear(duration: 2.8)) {
+            manualSweep = true
+        }
+        try? await Task.sleep(for: .milliseconds(3_100))
+        manualSweep = false
+    }
+
+    private func scanBeam(width: CGFloat) -> some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: Brand.accent.opacity(0.02), location: 0.28),
+                        .init(color: Brand.accent.opacity(0.14), location: 0.5),
+                        .init(color: Brand.vital.opacity(0.05), location: 0.62),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(width: width, height: 140)
+            .blur(radius: 4)
+    }
+
+    private func scanLine(width: CGFloat) -> some View {
+        VStack(spacing: 3) {
+            Rectangle().fill(Brand.accent.opacity(0.42)).frame(width: width, height: 1)
+            Rectangle().fill(Brand.vital.opacity(0.18)).frame(width: width, height: 1)
+        }
+        .shadow(color: Brand.accent.opacity(0.55), radius: 12)
     }
 }
 
@@ -107,6 +205,64 @@ struct ArcRing: View {
             }
         }
         .frame(width: size, height: size)
+    }
+}
+
+struct JarvisSyncButton: View {
+    let isActive: Bool
+    let pulseDate: Date
+    let action: () -> Void
+
+    @State private var spinning = false
+    @State private var flash = false
+
+    var body: some View {
+        Button {
+            flash = true
+            action()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+                flash = false
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Brand.accent.opacity(isActive || flash ? 0.18 : 0.08))
+                    .frame(width: 42, height: 42)
+                    .blur(radius: isActive || flash ? 7 : 4)
+                Circle()
+                    .stroke(Brand.accent.opacity(0.55), lineWidth: 1)
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .trim(from: 0.12, to: 0.82)
+                    .stroke(Brand.vital.opacity(0.82), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .frame(width: 30, height: 30)
+                    .rotationEffect(.degrees(spinning || isActive ? 360 : 0))
+                Image(systemName: isActive ? "waveform.path.ecg" : "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Brand.hudText)
+            }
+            .shadow(color: Brand.accent.opacity(isActive || flash ? 0.62 : 0.28), radius: isActive || flash ? 12 : 6)
+            .scaleEffect(flash ? 1.08 : 1)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("刷新所有 Jarvis 信息")
+        .onAppear { updateSpin() }
+        .onChange(of: isActive) { _, _ in updateSpin() }
+        .onChange(of: pulseDate) { _, _ in
+            flash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { flash = false }
+        }
+    }
+
+    private func updateSpin() {
+        if isActive {
+            withAnimation(.linear(duration: 1.05).repeatForever(autoreverses: false)) {
+                spinning = true
+            }
+        } else {
+            spinning = false
+        }
     }
 }
 

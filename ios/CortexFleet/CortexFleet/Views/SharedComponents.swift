@@ -19,6 +19,7 @@ struct MetricTile: View {
                 .shadow(color: Brand.accent.opacity(0.5), radius: 3)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
+                    .lineLimit(1).minimumScaleFactor(0.65).allowsTightening(true)
                 Text(value).font(.hudDisplay(16, .semibold)).foregroundStyle(Brand.hudText)
                     .lineLimit(1).minimumScaleFactor(0.75)
                 Text(detail).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.5))

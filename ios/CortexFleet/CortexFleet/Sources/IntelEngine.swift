@@ -37,6 +37,13 @@ final class IntelEngine: ObservableObject {
 
     /// "AI 分析入笔记": summarize an article into a Note (with relation/next-step).
     @discardableResult
+    func analyzeIntoNote(modelID: PersistentIdentifier) async throws -> Note? {
+        guard let item = context.model(for: modelID) as? IntelItem else { return nil }
+        return try await analyzeIntoNote(item)
+    }
+
+    /// "AI 分析入笔记": summarize an article into a Note (with relation/next-step).
+    @discardableResult
     func analyzeIntoNote(_ item: IntelItem) async throws -> Note {
         let store = NoteStore(context: context, llmConfig: llmConfig)
         var body = "来源：\(item.sourceName)\n原文：\(item.url ?? "-")\n\n\(item.summary ?? item.title)"
@@ -189,7 +196,7 @@ final class IntelEngine: ObservableObject {
     // MARK: - GitHub
 
     private func scanGitHub(judge: Judge) async -> [IntelItem] {
-        var radar = GitHubRadar(token: keychain.gitHubToken())
+        let radar = GitHubRadar(token: keychain.gitHubToken())
         let snapshots = (try? context.fetch(FetchDescriptor<GitHubRepoSnapshot>())) ?? []
         var snapByName = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.repoFullName, $0) })
         var existingByKey = existingItemsByDedupeKey()

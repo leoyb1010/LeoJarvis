@@ -270,10 +270,10 @@ final class JarvisAssistant: ObservableObject {
         \(JarvisTools.describe())
 
         规则：
-        - 用户的一句话里只要包含「记录/分析/安排/提醒/闹钟/日程」等日常输入，优先使用 capture_daily_input；它会自动写笔记，并可同时创建日程、提醒事项和本地强提醒。
+        - 用户的一句话里只要包含「记录/分析/安排/提醒/闹钟/日程」等日常输入，优先使用 capture_daily_input；它会自动写笔记，并可同时创建系统日历日程、系统提醒事项和系统通知强提醒。
         - capture_daily_input 的 note.content 要整理成中文笔记；analysis 要写清楚你的判断；calendar_event/reminder/alarm 只在用户明确需要时填写。
         - 用户明确“只记一下” → write_note；问情报/资讯 → ask_intel；查笔记 → search_notes。
-        - 用户明确“只建日程” → create_calendar_event；只建提醒事项 → create_reminder；只定时叫我/闹钟 → create_alarm。
+        - 用户明确“只建日程” → create_calendar_event；只建提醒事项 → create_reminder；只定时叫我/闹钟 → create_alarm（系统通知队列，不声称写入系统时钟 App）。
         - 找地点/导航 → open_maps。
         - 时间统一用 ISO8601（如 2026-06-14T09:00:00），必须按当前时间和当前时区推断具体日期。
         - 如果用户说“明天/下周二/今晚”，必须换算成明确 ISO8601；如果缺少日期或时间且无法合理推断，先用 final 追问。

@@ -24,7 +24,7 @@ struct ToolResult {
 
 /// The on-device tool bus. Ported in spirit from `agent/tools.py` + `gate.py`,
 /// but the tools act on iOS capabilities: notes, EventKit calendar/reminders,
-/// local notifications (alarm), Maps, and local-intel RAG search.
+/// system notification scheduling, Maps, and local-intel RAG search.
 @MainActor
 final class JarvisTools {
     private let context: ModelContext
@@ -39,13 +39,13 @@ final class JarvisTools {
     }
 
     static let catalog: [JarvisTool] = [
-        JarvisTool(name: "capture_daily_input", summary: "把一段日常自然语言整理成笔记，并按需要同时创建日程、提醒事项和本地强提醒。", parameters: ["original": "用户原话", "analysis": "整理后的中文分析", "note": "笔记对象 {title, content, tags}", "calendar_event": "日程对象 {title,start,end,notes}(可选)", "reminder": "提醒对象 {title,due,notes}(可选)", "alarm": "本地强提醒对象 {title,at,body}(可选)"], risk: .confirm),
+        JarvisTool(name: "capture_daily_input", summary: "把一段日常自然语言整理成笔记，并按需要同时创建系统日程、系统提醒事项和系统通知强提醒。", parameters: ["original": "用户原话", "analysis": "整理后的中文分析", "note": "笔记对象 {title, content, tags}", "calendar_event": "日程对象 {title,start,end,notes}(可选)", "reminder": "提醒对象 {title,due,notes}(可选)", "alarm": "系统通知强提醒对象 {title,at,body}(可选)"], risk: .confirm),
         JarvisTool(name: "write_note", summary: "把内容记成一条个人笔记。", parameters: ["title": "标题(可选)", "content": "笔记正文", "tags": "标签数组(可选)"], risk: .auto),
         JarvisTool(name: "search_notes", summary: "在本地笔记里搜索。", parameters: ["query": "关键词"], risk: .auto),
         JarvisTool(name: "ask_intel", summary: "基于本地信源情报回答问题(RAG)。", parameters: ["query": "问题"], risk: .auto),
         JarvisTool(name: "create_calendar_event", summary: "在系统日历创建日程。", parameters: ["title": "标题", "start": "开始时间 ISO8601", "end": "结束时间 ISO8601(可选)", "notes": "备注(可选)"], risk: .confirm),
         JarvisTool(name: "create_reminder", summary: "在系统提醒事项创建提醒。", parameters: ["title": "提醒内容", "due": "到期时间 ISO8601(可选)"], risk: .confirm),
-        JarvisTool(name: "create_alarm", summary: "设置一个定时提醒(本地通知)。", parameters: ["title": "提醒内容", "at": "时间 ISO8601"], risk: .confirm),
+        JarvisTool(name: "create_alarm", summary: "设置一个系统通知强提醒，并返回通知队列状态。", parameters: ["title": "提醒内容", "at": "时间 ISO8601", "body": "通知正文(可选)"], risk: .confirm),
         JarvisTool(name: "open_maps", summary: "在地图里搜索地点或导航。", parameters: ["query": "地点或目的地"], risk: .auto),
     ]
 
@@ -209,19 +209,26 @@ final class JarvisTools {
         }
     }
 
-    /// iOS has no public alarm API; approximate with a scheduled local notification.
+    /// iOS does not allow third-party apps to write into the Clock app alarm list.
+    /// Use the system notification scheduler and report the pending queue status.
     private func createAlarm(_ args: [String: Any]) async -> ToolResult {
         guard let at = parseDate(args["at"]) else { return ToolResult(ok: false, message: "没有解析到时间。") }
         let title = (args["title"] as? String) ?? "提醒"
+        let body = string(args["body"], fallback: "Jarvis 定时提醒")
         let granted = await JarvisNotifications.shared.requestAuthorization()
-        guard granted else { return ToolResult(ok: false, message: "没有通知权限，无法设置定时提醒。") }
-        await JarvisNotifications.shared.schedule(title: "⏰ \(title)", body: "Jarvis 定时提醒", at: at)
+        guard granted else { return ToolResult(ok: false, message: "没有通知权限，无法加入系统通知队列。请在系统设置中允许 LeoJarvis 通知。") }
+        let status: NotificationScheduleStatus
+        do {
+            status = try await JarvisNotifications.shared.schedule(title: "Jarvis 强提醒：\(title)", body: body, at: at)
+        } catch {
+            return ToolResult(ok: false, message: "加入系统通知队列失败：\(error.localizedDescription)")
+        }
         if !bool(args["skip_note"]) {
             logSystemAction(title: "设置强提醒：\(title)",
-                            body: "时间：\(at.formatted(.dateTime.year().month().day().hour().minute()))\n形式：本地通知",
+                            body: "时间：\(at.formatted(.dateTime.year().month().day().hour().minute()))\n形式：系统通知\n队列 ID：\(status.identifier)",
                             tags: ["Jarvis", "强提醒"])
         }
-        return ToolResult(ok: true, message: "已设置 \(at.formatted(.dateTime.month().day().hour().minute())) 的提醒「\(title)」（系统通知形式）。")
+        return ToolResult(ok: true, message: "已加入系统通知队列：\(at.formatted(.dateTime.month().day().hour().minute()))「\(title)」。当前待触发通知 \(status.pendingCount) 条。")
     }
 
     private func requestCalendar() async -> Bool {

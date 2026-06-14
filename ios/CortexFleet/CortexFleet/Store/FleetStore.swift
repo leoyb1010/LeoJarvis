@@ -20,6 +20,7 @@ final class FleetStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var isLoadingJarvis = false
     @Published private(set) var isSavingMailConfig = false
+    @Published private(set) var lastScanPulseAt = Date.distantPast
     @Published var noticeMessage: String?
     @Published var errorMessage: String?
 
@@ -67,9 +68,15 @@ final class FleetStore: ObservableObject {
         localSnapshot = LocalDeviceProbe.snapshot()
     }
 
+    func pulseScan() {
+        lastScanPulseAt = Date()
+        HUDScanPulse.trigger()
+    }
+
     func refreshAll() async {
+        pulseScan()
         refreshLocal()
-        await refreshNetworkLatency()
+        await refreshNetworkLatency(pulse: false)
         await refreshJarvisContent(showLoading: false)
         isRefreshing = true
 
@@ -107,6 +114,7 @@ final class FleetStore: ObservableObject {
     }
 
     func refreshHost(_ hostID: String) async {
+        pulseScan()
         if bridgeSettings.enabled {
             await refreshAll()
             return
@@ -120,7 +128,8 @@ final class FleetStore: ObservableObject {
         isRefreshing = false
     }
 
-    func refreshNetworkLatency() async {
+    func refreshNetworkLatency(pulse: Bool = true) async {
+        if pulse { pulseScan() }
         networkLatency = await NetworkLatencyProbe.measure()
     }
 
@@ -248,6 +257,7 @@ final class FleetStore: ObservableObject {
     }
 
     func refreshJarvisContent(showLoading: Bool = true) async {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("bridge", FleetError.invalidBridgeURL.localizedDescription)
             return
@@ -319,6 +329,7 @@ final class FleetStore: ObservableObject {
     }
 
     func refreshMobileNotes() async {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             errorMessage = FleetError.invalidBridgeURL.localizedDescription
             return
@@ -369,6 +380,7 @@ final class FleetStore: ObservableObject {
     }
 
     func refreshMobileBriefing(refresh: Bool = false) async {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("briefing", FleetError.invalidBridgeURL.localizedDescription)
             return
@@ -384,6 +396,7 @@ final class FleetStore: ObservableObject {
     }
 
     func refreshSourcesFromBridge() async {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("sources", FleetError.invalidBridgeURL.localizedDescription)
             return
@@ -415,6 +428,7 @@ final class FleetStore: ObservableObject {
     }
 
     func loadMobileMailConfig() async {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
             return
@@ -432,6 +446,7 @@ final class FleetStore: ObservableObject {
     }
 
     func saveMobileGmailConfig(_ config: MobileGmailConfig, appPassword: String) async -> MobileGmailTestResult? {
+        pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
             return nil
@@ -463,6 +478,7 @@ final class FleetStore: ObservableObject {
     }
 
     func loadMobileBriefingDetail(_ item: MobileBriefingItem) async -> MobileBriefingItem {
+        pulseScan()
         guard let eventID = item.eventId, bridgeSettings.isUsable else { return item }
         do {
             let token = try keychain.bridgeToken()
