@@ -80,6 +80,9 @@ final class IntelItem {
     var relation: String?
     var nextStep: String?
     var summaryZH: String?    // 详情按需 LLM 翻译/要点缓存
+    var sourceText: String?    // 原文 URL 抓取出的真实正文/摘录
+    var sourceFetchedAt: Date?
+    var sourceError: String?
     var coverURL: String?     // 封面图
     var channel: String       // 频道 id
     var isRead: Bool
@@ -105,6 +108,9 @@ final class IntelItem {
         relation: String? = nil,
         nextStep: String? = nil,
         summaryZH: String? = nil,
+        sourceText: String? = nil,
+        sourceFetchedAt: Date? = nil,
+        sourceError: String? = nil,
         coverURL: String? = nil,
         channel: String = "tech",
         isRead: Bool = false,
@@ -129,6 +135,9 @@ final class IntelItem {
         self.relation = relation
         self.nextStep = nextStep
         self.summaryZH = summaryZH
+        self.sourceText = sourceText
+        self.sourceFetchedAt = sourceFetchedAt
+        self.sourceError = sourceError
         self.coverURL = coverURL
         self.channel = channel
         self.isRead = isRead

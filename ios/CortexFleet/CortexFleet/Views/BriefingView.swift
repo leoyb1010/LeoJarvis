@@ -33,17 +33,14 @@ struct BriefingView: View {
                     if let error = env.intel.lastError {
                         MessageBanner(text: error, level: .warn)
                     }
-                    if let bridgeError = store.sectionError("sources") ?? store.sectionError("briefing") {
-                        MessageBanner(text: "Bridge 信源：\(bridgeError)", level: .warn)
-                    }
                     statsRow
                     if recent.isEmpty && mail.isEmpty {
-                        EmptyHint(text: "暂无简报。下拉刷新或在总览页扫描信源。", systemImage: "newspaper")
+                        EmptyHint(text: "暂无简报。下拉刷新会直接在 iPhone 本机扫描 RSS / GitHub 信源。", systemImage: "newspaper")
                             .padding(.top, 28)
                     } else {
                         section("业务资讯", .news, Brand.accent, business, "briefing.business", expanded: true)
                         section("GitHub 项目", .github, IntelKind.github.tint, github, "briefing.github", expanded: true)
-                        mailSection
+                        if !mail.isEmpty { mailSection }
                         section("生活资讯", .life, IntelKind.life.tint, life, "briefing.life", expanded: false)
                     }
                 }
@@ -54,13 +51,13 @@ struct BriefingView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { Task { await refreshAllSources() } } label: {
-                    if env.intel.isScanning || store.isLoadingJarvis { ArcRing(progress: 0.3, size: 20) }
+                    if env.intel.isScanning { ArcRing(progress: 0.3, size: 20) }
                     else { Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent) }
-                }.disabled(env.intel.isScanning || store.isLoadingJarvis)
+                }.disabled(env.intel.isScanning)
             }
         }
         .refreshable { await refreshAllSources() }
-        .sheet(item: $detail) { IntelDetailView(item: $0) }
+        .sheet(item: $detail) { ArticleDetailView(item: $0).environmentObject(env) }
     }
 
     private func section(_ title: String, _ kind: IntelKind, _ accent: Color, _ rows: [IntelItem], _ key: String, expanded: Bool) -> some View {
@@ -102,7 +99,7 @@ struct BriefingView: View {
         CollapsibleSection(title: "邮件监控", systemImage: "envelope", count: mail.count, accent: Brand.vital,
                            defaultExpanded: true, storageKey: "briefing.mail") {
             if mail.isEmpty {
-                EmptyHint(text: "暂无进入观察区的邮件。请确认 Mac mini Bridge 已启用 Apple Mail/IMAP/Gmail，并下拉刷新。")
+                EmptyHint(text: "暂无进入观察区的邮件。")
             } else {
                 ForEach(mail) { item in
                     MailBriefingCard(item: item)
@@ -113,9 +110,6 @@ struct BriefingView: View {
 
     private func refreshAllSources() async {
         await env.intel.scan()
-        if store.bridgeSettings.isUsable, store.bridgeTokenIsSaved() {
-            await store.refreshSourcesFromBridge()
-        }
     }
 }
 

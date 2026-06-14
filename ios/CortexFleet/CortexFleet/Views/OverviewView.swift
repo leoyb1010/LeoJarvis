@@ -8,7 +8,6 @@ import SwiftData
 struct OverviewView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var store: FleetStore
-    @EnvironmentObject private var llmConfig: LLMConfigStore
 
     @Query(sort: [SortDescriptor(\IntelItem.collectedAt, order: .reverse)])
     private var items: [IntelItem]
@@ -48,8 +47,14 @@ struct OverviewView: View {
             }
         }
         .refreshable { await refreshIntel() }
-        .task { if items.isEmpty { await refreshIntel() } }
+        .task { if shouldAutoRefresh { await refreshIntel() } }
         .sheet(item: $detail) { ArticleDetailView(item: $0).environmentObject(env) }
+    }
+
+    private var shouldAutoRefresh: Bool {
+        guard !env.intel.isScanning else { return false }
+        guard let last = env.intel.lastScan else { return true }
+        return items.isEmpty || Date().timeIntervalSince(last) > 15 * 60
     }
 
     private var header: some View {
@@ -74,16 +79,13 @@ struct OverviewView: View {
                     label: "\(Int(store.localSnapshot.health.rounded()))")
             VStack(alignment: .leading, spacing: 8) {
                 Text("晨间简报").font(.hudMono(10)).foregroundStyle(Brand.gold)
-                Text("今晨为你保留 \(items.count) 条情报，\(hotCount) 条值得关注，邮件 \(store.mobileBriefing.mailItems.count) 封。")
+                Text("iPhone 本机保留 \(items.count) 条情报，\(hotCount) 条值得关注。")
                     .font(.subheadline).foregroundStyle(Brand.hudText).fixedSize(horizontal: false, vertical: true)
                 if let last = env.intel.lastScan {
                     Text("上次扫描 · \(RelativeTime.string(last))").font(.hudMono(9)).foregroundStyle(Brand.hudText.opacity(0.5))
                 }
                 if let error = env.intel.lastError {
                     Text(error).font(.hudMono(9)).foregroundStyle(Brand.gold.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
-                }
-                if let bridgeError = store.sectionError("sources") {
-                    Text("Bridge 信源：\(bridgeError)").font(.hudMono(9)).foregroundStyle(Color.red.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
@@ -132,9 +134,6 @@ struct OverviewView: View {
 
     private func refreshIntel() async {
         await env.intel.scan()
-        if store.bridgeSettings.isUsable, store.bridgeTokenIsSaved() {
-            await store.refreshSourcesFromBridge()
-        }
     }
 
     @ViewBuilder private func cardMenu(_ item: IntelItem) -> some View {

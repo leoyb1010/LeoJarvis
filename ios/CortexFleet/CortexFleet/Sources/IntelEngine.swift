@@ -28,7 +28,8 @@ final class IntelEngine: ObservableObject {
     /// cached onto `item.summaryZH`.
     func localizeDetail(_ item: IntelItem) async {
         guard item.summaryZH == nil, let client = llmConfig.makeClient() else { return }
-        if let zh = await Localizer.translateDetail(title: item.title, body: item.summary ?? "", client: client) {
+        let body = item.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? item.sourceText! : (item.summary ?? "")
+        if let zh = await Localizer.translateDetail(title: item.title, body: body, client: client) {
             item.summaryZH = zh
             try? context.save()
         }
