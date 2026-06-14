@@ -2,9 +2,9 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// Device page (第四页). iPhone-first: the local device is the hero card with a
-/// trend chart; SSH hosts are a collapsible, manually-probed section (no more
-/// 30s auto-refresh). All remote "capability" cards are gone — iOS is self-contained.
+// ═══════════════════════════════════════════════════════════════════
+//  FleetDashboardView.swift · 设备 — HUD 主题对齐（布局/逻辑不变）
+// ═══════════════════════════════════════════════════════════════════
 struct FleetDashboardView: View {
     @EnvironmentObject private var store: FleetStore
     @Environment(\.modelContext) private var context
@@ -13,36 +13,34 @@ struct FleetDashboardView: View {
     private var samples: [DeviceSample]
 
     var body: some View {
-        ZStack {
-            HUDBackground()
-            ScrollView {
-                VStack(alignment: .leading, spacing: Brand.stack) {
-                    LocalDeviceCard(snapshot: store.localSnapshot)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Brand.stack) {
+                LocalDeviceCard(snapshot: store.localSnapshot)
 
-                    if recentSamples.count >= 2 {
-                        DeviceTrendCard(samples: recentSamples)
-                    }
-
-                    CollapsibleSection(
-                        title: "SSH 主机",
-                        systemImage: "server.rack",
-                        count: store.hosts.count,
-                        accent: Brand.gold,
-                        defaultExpanded: false,
-                        storageKey: "device.sshHosts"
-                    ) {
-                        sshSectionBody
-                    }
-
-                    if let message = store.errorMessage {
-                        MessageBanner(text: message, level: .bad)
-                    } else if let message = store.noticeMessage {
-                        MessageBanner(text: message, level: .good)
-                    }
+                if recentSamples.count >= 2 {
+                    DeviceTrendCard(samples: recentSamples)
                 }
-                .padding(16)
+
+                CollapsibleSection(
+                    title: "SSH 主机",
+                    systemImage: "server.rack",
+                    count: store.hosts.count,
+                    accent: Brand.accent,
+                    defaultExpanded: false,
+                    storageKey: "device.sshHosts"
+                ) {
+                    sshSectionBody
+                }
+
+                if let message = store.errorMessage {
+                    MessageBanner(text: message, level: .bad)
+                } else if let message = store.noticeMessage {
+                    MessageBanner(text: message, level: .good)
+                }
             }
+            .padding(16)
         }
+        .scrollContentBackground(.hidden)
         .navigationTitle("设备")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -52,14 +50,8 @@ struct FleetDashboardView: View {
                 .accessibilityLabel("刷新本机")
             }
         }
-        .refreshable {
-            store.refreshLocal()
-            recordSample()
-        }
-        .task {
-            store.refreshLocal()
-            recordSample()
-        }
+        .refreshable { store.refreshLocal(); recordSample() }
+        .task { store.refreshLocal(); recordSample() }
     }
 
     @ViewBuilder
@@ -69,11 +61,9 @@ struct FleetDashboardView: View {
         } else {
             HStack {
                 Text("\(store.remoteOnlineCount)/\(store.hosts.count) 在线")
-                    .font(.hudMono(11)).foregroundStyle(Brand.hudText.opacity(0.6))
+                    .font(.hudMono(11)).foregroundStyle(Brand.vital)
                 Spacer()
-                Button {
-                    Task { await store.refreshAll() }
-                } label: {
+                Button { Task { await store.refreshAll() } } label: {
                     Label(store.isRefreshing ? "探测中…" : "探测全部", systemImage: "bolt.horizontal.circle")
                         .font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
                 }
@@ -90,11 +80,8 @@ struct FleetDashboardView: View {
         }
     }
 
-    private var recentSamples: [DeviceSample] {
-        Array(samples.suffix(48))
-    }
+    private var recentSamples: [DeviceSample] { Array(samples.suffix(48)) }
 
-    /// Record a lightweight metric sample (throttled to ~once per 10 min) for the trend chart.
     private func recordSample() {
         let snap = store.localSnapshot
         if let last = samples.last, Date().timeIntervalSince(last.timestamp) < 600 { return }
@@ -105,7 +92,6 @@ struct FleetDashboardView: View {
             thermal: snap.thermalState
         )
         context.insert(sample)
-        // Keep only the most recent ~200 samples.
         if samples.count > 200 {
             for old in samples.prefix(samples.count - 200) { context.delete(old) }
         }
@@ -118,13 +104,10 @@ private struct DeviceTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "本机趋势", subtitle: "电量与存储占用 · 遥测", systemImage: "chart.xyaxis.line")
+            SectionHeader(title: "本机趋势", subtitle: "电量与存储占用", systemImage: "chart.xyaxis.line")
             Chart {
                 ForEach(samples) { s in
                     if let battery = s.batteryPercent {
-                        AreaMark(x: .value("时间", s.timestamp), y: .value("电量", battery))
-                            .foregroundStyle(LinearGradient(colors: [Brand.vital.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom))
-                            .interpolationMethod(.catmullRom)
                         LineMark(x: .value("时间", s.timestamp), y: .value("电量", battery))
                             .foregroundStyle(by: .value("指标", "电量%"))
                             .interpolationMethod(.catmullRom)
@@ -136,15 +119,6 @@ private struct DeviceTrendCard: View {
             }
             .chartYScale(domain: 0...100)
             .chartForegroundStyleScale(["电量%": Brand.vital, "存储占用%": Brand.gold])
-            .chartXAxis { AxisMarks { _ in
-                AxisGridLine().foregroundStyle(Brand.accent.opacity(0.08))
-                AxisValueLabel().font(.hudMono(8)).foregroundStyle(Brand.hudText.opacity(0.4))
-            } }
-            .chartYAxis { AxisMarks { _ in
-                AxisGridLine().foregroundStyle(Brand.accent.opacity(0.08))
-                AxisValueLabel().font(.hudMono(8)).foregroundStyle(Brand.hudText.opacity(0.4))
-            } }
-            .chartLegend(position: .bottom)
             .frame(height: 160)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

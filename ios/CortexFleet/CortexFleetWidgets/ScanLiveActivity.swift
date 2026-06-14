@@ -7,36 +7,48 @@ import ActivityKit
 struct ScanLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ScanActivityAttributes.self) { context in
-            // Lock screen / banner.
-            HStack(spacing: 12) {
-                Image(systemName: context.state.done ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
-                    .foregroundStyle(context.state.done ? .green : .blue)
-                VStack(alignment: .leading) {
-                    Text(context.attributes.title).font(.caption.weight(.semibold))
-                    Text(context.state.phase).font(.caption2).foregroundStyle(.secondary)
+            // Lock screen / banner — ARC REACTOR energy core scanning state.
+            HStack(spacing: 14) {
+                HUDRing(progress: context.state.done ? 1 : 0.35, size: 40,
+                        color: context.state.done ? HUD.vital : HUD.accent,
+                        label: context.state.done ? "✓" : nil)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.attributes.title).font(HUD.display(14, .bold)).foregroundStyle(HUD.text)
+                    Text(context.state.phase).font(HUD.mono(10)).foregroundStyle(HUD.accent.opacity(0.8))
                 }
                 Spacer()
-                if context.state.found > 0 { Text("\(context.state.found) 条").font(.caption.weight(.bold)) }
+                if context.state.found > 0 {
+                    Text("\(context.state.found)").font(HUD.display(22, .bold)).foregroundStyle(HUD.gold)
+                        + Text(" 条").font(HUD.mono(10)).foregroundStyle(HUD.text.opacity(0.6))
+                }
             }
             .padding()
-            .activityBackgroundTint(Color.black.opacity(0.2))
+            .activityBackgroundTint(HUD.void.opacity(0.85))
+            .activitySystemActionForegroundColor(HUD.accent)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: "sparkles").foregroundStyle(.tint)
+                    HUDRing(progress: context.state.done ? 1 : 0.35, size: 34,
+                            color: context.state.done ? HUD.vital : HUD.accent)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.phase).font(.caption)
+                    VStack(spacing: 2) {
+                        Text(context.attributes.title).font(HUD.mono(11, .semibold)).foregroundStyle(HUD.text)
+                        Text(context.state.phase).font(HUD.mono(9)).foregroundStyle(HUD.accent.opacity(0.8))
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if context.state.found > 0 { Text("\(context.state.found)").font(.caption.weight(.bold)) }
+                    if context.state.found > 0 {
+                        Text("\(context.state.found)").font(HUD.display(20, .bold)).foregroundStyle(HUD.gold)
+                    }
                 }
             } compactLeading: {
-                Image(systemName: context.state.done ? "checkmark" : "antenna.radiowaves.left.and.right")
+                HUDRing(progress: context.state.done ? 1 : 0.35, size: 18,
+                        color: context.state.done ? HUD.vital : HUD.accent)
             } compactTrailing: {
-                if context.state.found > 0 { Text("\(context.state.found)") }
+                if context.state.found > 0 { Text("\(context.state.found)").font(HUD.mono(12, .bold)).foregroundStyle(HUD.gold) }
             } minimal: {
-                Image(systemName: "sparkles")
+                HUDRing(progress: 0.6, size: 18, color: HUD.accent)
             }
         }
     }

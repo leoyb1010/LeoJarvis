@@ -1,9 +1,9 @@
 import SwiftUI
 import SwiftData
 
-/// Briefing (简报). Same local `IntelItem` source as the overview, organized into
-/// collapsible, color-coded sections by type and domain. Replaces the old
-/// bridge-backed MobileBriefingView wall-of-text.
+// ═══════════════════════════════════════════════════════════════════
+//  BriefingView.swift · 简报（主体已 HUD，本次补齐情报详情 HUD 化）
+// ═══════════════════════════════════════════════════════════════════
 struct BriefingView: View {
     @EnvironmentObject private var env: AppEnvironment
 
@@ -26,7 +26,6 @@ struct BriefingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Brand.stack) {
                     statsRow
-
                     if recent.isEmpty {
                         EmptyHint(text: "暂无简报。下拉刷新或在总览页扫描信源。", systemImage: "newspaper")
                             .padding(.top, 28)
@@ -87,7 +86,7 @@ struct BriefingView: View {
     }
 }
 
-/// Shared detail sheet for an intelligence item, including AI-enriched fields.
+/// 情报详情 —— HUD 化。
 struct IntelDetailView: View {
     let item: IntelItem
     @Environment(\.dismiss) private var dismiss
@@ -101,16 +100,21 @@ struct IntelDetailView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(spacing: 6) {
                             Label(item.intelKind.label, systemImage: item.intelKind.symbol)
-                                .font(.hudMono(11, .semibold)).foregroundStyle(item.intelKind.tint)
+                                .font(.hudMono(10, .semibold)).foregroundStyle(item.intelKind.tint)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(item.intelKind.tint.opacity(0.12), in: Capsule())
+                                .overlay(Capsule().stroke(item.intelKind.tint.opacity(0.4), lineWidth: 0.7))
                             Text(IntelPriority(scoreText: item.priority).label)
-                                .font(.hudMono(11, .bold))
+                                .font(.hudMono(10, .bold))
                                 .foregroundStyle(IntelPriority(scoreText: item.priority).tint)
                             Spacer()
                             Text(item.sourceName).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
                         }
 
-                        Text(item.displayTitle).font(.hudDisplay(22, .bold)).foregroundStyle(Brand.hudText)
-                        if let summary = item.summary { Text(summary).font(.body).foregroundStyle(Brand.hudText.opacity(0.7)) }
+                        Text(item.displayTitle).font(.hudDisplay(23, .bold)).foregroundStyle(Brand.hudText)
+                        if let summary = item.summary {
+                            Text(summary).font(.body).foregroundStyle(Brand.hudText.opacity(0.7))
+                        }
 
                         enrichment("为什么重要", item.whyImportant, "exclamationmark.circle")
                         enrichment("和我有什么关系", item.relation, "person.crop.circle")
@@ -119,19 +123,19 @@ struct IntelDetailView: View {
                         if !item.tags.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
-                                    ForEach(item.tags, id: \.self) { Text("#\($0)").font(.hudMono(10)).foregroundStyle(Brand.accent.opacity(0.85))
-                                        .padding(.horizontal, 8).padding(.vertical, 4)
-                                        .background(Brand.accent.opacity(0.08), in: Capsule())
-                                        .overlay(Capsule().stroke(Brand.accent.opacity(0.3), lineWidth: 0.7)) }
+                                    ForEach(item.tags, id: \.self) {
+                                        Text("#\($0)").font(.hudMono(10)).foregroundStyle(Brand.accent.opacity(0.85))
+                                            .padding(.horizontal, 8).padding(.vertical, 4)
+                                            .background(Brand.accent.opacity(0.1), in: Capsule())
+                                    }
                                 }
                             }
                         }
 
                         if let urlString = item.url, let url = URL(string: urlString) {
                             Button { openURL(url) } label: {
-                                Label("打开原文", systemImage: "safari").font(.hudMono(13, .semibold))
-                                    .foregroundStyle(Brand.void).frame(maxWidth: .infinity).padding(.vertical, 6)
-                            }.background(Brand.accent, in: Capsule()).padding(.top, 8)
+                                Label("打开原文", systemImage: "safari").frame(maxWidth: .infinity)
+                            }.buttonStyle(.borderedProminent).tint(Brand.accent).padding(.top, 8)
                         }
                     }
                     .padding(16)
@@ -141,7 +145,6 @@ struct IntelDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.tint(Brand.accent) } }
         }
-        .tint(Brand.accent)
     }
 
     @ViewBuilder
@@ -149,7 +152,7 @@ struct IntelDetailView: View {
         if let text, !text.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Label(title, systemImage: symbol).font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
-                Text(text).font(.callout).foregroundStyle(Brand.hudText.opacity(0.85))
+                Text(text).font(.callout).foregroundStyle(Brand.hudText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .jarvisCard(corner: Brand.tileCorner)

@@ -79,7 +79,7 @@ struct IntelWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "IntelWidget", provider: IntelProvider()) { entry in
             IntelWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { LinearGradient(colors: [HUD.panel.opacity(0.6), HUD.void], startPoint: .top, endPoint: .bottom) }
         }
         .configurationDisplayName("今日要闻")
         .description("Jarvis 本地信源的今日要闻，多条带图。")
@@ -87,19 +87,7 @@ struct IntelWidget: Widget {
     }
 }
 
-private func channelColor(_ id: String) -> Color {
-    switch id {
-    case "ai": return .indigo
-    case "tech": return .cyan
-    case "world": return .orange
-    case "finance": return .green
-    case "china": return .red
-    case "engineering": return .purple
-    case "science": return .teal
-    case "github": return .pink
-    default: return .blue
-    }
-}
+private func channelColor(_ id: String) -> Color { HUD.channelColor(id) }
 
 struct IntelWidgetView: View {
     @Environment(\.widgetFamily) var family
@@ -114,11 +102,11 @@ struct IntelWidgetView: View {
             }
         case .systemSmall:
             VStack(alignment: .leading, spacing: 4) {
-                Label("今日要闻", systemImage: "newspaper").font(.caption2.weight(.bold)).foregroundStyle(.tint)
+                Label("今日要闻", systemImage: "newspaper").font(HUD.mono(10, .bold)).foregroundStyle(HUD.accent)
                 ForEach(Array(entry.items.prefix(3).enumerated()), id: \.offset) { _, item in
                     HStack(spacing: 4) {
                         Capsule().fill(channelColor(item.channel)).frame(width: 3, height: 12)
-                        Text(item.title).font(.system(size: 11)).lineLimit(1)
+                        Text(item.title).font(.system(size: 11)).foregroundStyle(HUD.text).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
@@ -126,19 +114,19 @@ struct IntelWidgetView: View {
         default:
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("今日要闻", systemImage: "newspaper").font(.caption.weight(.bold)).foregroundStyle(.tint)
+                    Label("今日要闻", systemImage: "newspaper").font(HUD.mono(11, .bold)).foregroundStyle(HUD.accent)
                     Spacer()
-                    Text(entry.date, style: .time).font(.caption2).foregroundStyle(.secondary)
+                    Text(entry.date, style: .time).font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.45))
                 }
                 if entry.items.isEmpty {
-                    Text("暂无情报，打开 App 扫描").font(.caption2).foregroundStyle(.secondary)
+                    Text("暂无情报，打开 App 扫描").font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.5))
                 } else {
                     ForEach(Array(entry.items.prefix(family == .systemLarge ? 5 : 3).enumerated()), id: \.offset) { _, item in
                         HStack(spacing: 8) {
                             Capsule().fill(channelColor(item.channel)).frame(width: 3)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(2)
-                                Text(item.source).font(.system(size: 10)).foregroundStyle(.secondary)
+                                Text(item.title).font(.system(size: 13, weight: .medium)).foregroundStyle(HUD.text).lineLimit(2)
+                                Text(item.source).font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.5))
                             }
                             Spacer(minLength: 0)
                             if let cover = item.coverURL, let u = URL(string: cover) {
@@ -162,13 +150,13 @@ struct GitHubRadarWidget: Widget {
         StaticConfiguration(kind: "GitHubRadarWidget", provider: GitHubProvider()) { entry in
             VStack(alignment: .leading, spacing: 6) {
                 Label("GitHub 雷达", systemImage: "chevron.left.forwardslash.chevron.right")
-                    .font(.caption.weight(.bold)).foregroundStyle(.purple)
-                if entry.items.isEmpty { Text("暂无项目").font(.caption2).foregroundStyle(.secondary) }
+                    .font(HUD.mono(11, .bold)).foregroundStyle(HUD.channelColor("github"))
+                if entry.items.isEmpty { Text("暂无项目").font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.5)) }
                 else { ForEach(Array(entry.items.prefix(3).enumerated()), id: \.offset) { _, i in
-                    Text("• \(i.title)").font(.caption2).lineLimit(1) } }
+                    HStack(spacing: 4) { Capsule().fill(HUD.channelColor("github")).frame(width: 3, height: 11); Text(i.title).font(HUD.mono(10)).foregroundStyle(HUD.text).lineLimit(1) } } }
                 Spacer(minLength: 0)
             }
-            .containerBackground(.fill.tertiary, for: .widget)
+            .containerBackground(for: .widget) { LinearGradient(colors: [HUD.panel.opacity(0.6), HUD.void], startPoint: .top, endPoint: .bottom) }
         }
         .configurationDisplayName("GitHub 雷达")
         .description("涨幅最快的开源项目。")
@@ -210,7 +198,7 @@ struct DeviceHealthWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "DeviceHealthWidget", provider: DeviceProvider()) { entry in
             DeviceWidgetView(device: entry.device)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { LinearGradient(colors: [HUD.panel.opacity(0.6), HUD.void], startPoint: .top, endPoint: .bottom) }
         }
         .configurationDisplayName("本机健康")
         .description("iPhone 电量、存储、温控多维仪表。")
@@ -222,25 +210,44 @@ struct DeviceWidgetView: View {
     @Environment(\.widgetFamily) var family
     let device: WidgetDevice?
 
+    // Rough health from battery + storage for the energy ring.
+    private var health: Double {
+        guard let d = device else { return 0 }
+        var score = 100.0
+        if d.storageUsed > 90 { score -= 20 } else if d.storageUsed > 80 { score -= 10 }
+        if d.thermal != "正常" { score -= 12 }
+        if let b = d.battery, b < 0.2 { score -= 8 }
+        return max(0, score)
+    }
+
     var body: some View {
         if family == .accessoryCircular {
-            Gauge(value: device?.battery ?? 0) { Image(systemName: "iphone") }
-                .gaugeStyle(.accessoryCircularCapacity)
+            Gauge(value: device?.battery ?? 0) { Image(systemName: "bolt.fill") }
+                .gaugeStyle(.accessoryCircularCapacity).tint(HUD.accent)
         } else if family == .systemMedium {
             HStack(spacing: 14) {
-                metric("电量", device?.battery.map { "\(Int($0*100))%" } ?? "-", "battery.100", .green)
-                metric("存储", device.map { "\(Int($0.storageUsed))%" } ?? "-", "internaldrive", .orange)
-                metric("温控", device?.thermal ?? "-", "thermometer.medium", .red)
+                HUDRing(progress: health / 100, size: 56, color: HUD.accent, label: "\(Int(health))")
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        metric("电量", device?.battery.map { "\(Int($0*100))%" } ?? "-", "battery.100", HUD.vital)
+                        metric("存储", device.map { "\(Int($0.storageUsed))%" } ?? "-", "internaldrive", HUD.gold)
+                        metric("温控", device?.thermal ?? "-", "thermometer.medium", HUD.accent)
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
         } else {
-            VStack(alignment: .leading, spacing: 5) {
-                Label("本机", systemImage: "iphone").font(.caption.weight(.bold)).foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("本机", systemImage: "iphone").font(HUD.mono(11, .bold)).foregroundStyle(HUD.vital)
+                    Spacer()
+                    HUDRing(progress: health / 100, size: 30, color: HUD.accent, label: "\(Int(health))")
+                }
                 if let d = device {
                     if let b = d.battery { row("电量", "\(Int(b*100))%") }
                     row("存储", "\(Int(d.storageUsed))%")
                     row("温控", d.thermal)
-                } else { Text("打开 App 采样").font(.caption2).foregroundStyle(.secondary) }
+                } else { Text("打开 App 采样").font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.5)) }
                 Spacer(minLength: 0)
             }
         }
@@ -249,11 +256,12 @@ struct DeviceWidgetView: View {
     private func metric(_ t: String, _ v: String, _ icon: String, _ c: Color) -> some View {
         VStack(spacing: 3) {
             Image(systemName: icon).foregroundStyle(c)
-            Text(v).font(.caption.weight(.bold))
-            Text(t).font(.caption2).foregroundStyle(.secondary)
+            Text(v).font(HUD.display(14, .bold)).foregroundStyle(HUD.text)
+            Text(t).font(HUD.mono(8)).foregroundStyle(HUD.text.opacity(0.5))
         }.frame(maxWidth: .infinity)
     }
     private func row(_ t: String, _ v: String) -> some View {
-        HStack { Text(t).font(.caption2).foregroundStyle(.secondary); Spacer(); Text(v).font(.caption2.weight(.semibold)) }
+        HStack { Text(t).font(HUD.mono(9)).foregroundStyle(HUD.text.opacity(0.55)); Spacer()
+            Text(v).font(HUD.mono(11, .semibold)).foregroundStyle(HUD.text) }
     }
 }

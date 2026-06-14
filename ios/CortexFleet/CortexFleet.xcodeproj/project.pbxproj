@@ -66,6 +66,8 @@
 		0F0001362C00000000000001 /* NotebookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002362C00000000000001 /* NotebookDetailView.swift */; };
 		0F00F1062C00000000000001 /* NotebookModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002312C00000000000001 /* NotebookModels.swift */; };
 		0F0001372C00000000000001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0002372C00000000000001 /* OnboardingView.swift */; };
+		0F0001382C00000000000001 /* HUDKit.swift in Sources (app) */ = {isa = PBXBuildFile; fileRef = 0F00F0032C00000000000001 /* HUDKit.swift */; };
+		0F00F1072C00000000000001 /* HUDKit.swift in Sources (widget) */ = {isa = PBXBuildFile; fileRef = 0F00F0032C00000000000001 /* HUDKit.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -159,6 +161,7 @@
 		0F0002352C00000000000001 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
 		0F0002362C00000000000001 /* NotebookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDetailView.swift; sourceTree = "<group>"; };
 		0F0002372C00000000000001 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		0F00F0032C00000000000001 /* HUDKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDKit.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -338,6 +341,7 @@
 			children = (
 				0F00F0012C00000000000001 /* CortexFleetWidgets.swift */,
 				0F00F0022C00000000000001 /* ScanLiveActivity.swift */,
+				0F00F0032C00000000000001 /* HUDKit.swift */,
 				0F00F0032C00000000000001 /* Info.plist */,
 				0F00F0042C00000000000001 /* CortexFleetWidgets.entitlements */,
 			);
@@ -471,6 +475,7 @@
 			files = (
 				0F00F1042C00000000000001 /* CortexFleetWidgets.swift in Sources */,
 				0F00F1052C00000000000001 /* ScanLiveActivity.swift in Sources */,
+				0F00F1072C00000000000001 /* HUDKit.swift in Sources (widget) */,
 				0F00F1012C00000000000001 /* NoteModels.swift in Sources */,
 				0F00F1022C00000000000001 /* FeedModels.swift in Sources */,
 				0F00F1062C00000000000001 /* NotebookModels.swift in Sources */,
@@ -492,6 +497,7 @@
 				0F0001082C00000000000001 /* SettingsView.swift in Sources */,
 				0F0001092C00000000000001 /* AddSSHDeviceView.swift in Sources */,
 				0F0001102C00000000000001 /* DesignKit.swift in Sources */,
+				0F0001382C00000000000001 /* HUDKit.swift in Sources (app) */,
 				0F0001112C00000000000001 /* LLMSettings.swift in Sources */,
 				0F0001122C00000000000001 /* LLMClient.swift in Sources */,
 				0F0001132C00000000000001 /* AppEnvironment.swift in Sources */,
