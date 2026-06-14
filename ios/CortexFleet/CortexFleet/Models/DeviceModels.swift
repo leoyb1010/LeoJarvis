@@ -973,6 +973,62 @@ struct MobileBriefingPayload: Decodable, Equatable {
     }
 }
 
+struct MobileGmailConfig: Codable, Equatable {
+    var enabled: Bool
+    var user: String
+    var host: String
+    var port: Int
+    var mailbox: String
+    var search: String
+    var limit: Int
+    var hasPassword: Bool
+
+    init(
+        enabled: Bool = false,
+        user: String = "",
+        host: String = "imap.gmail.com",
+        port: Int = 993,
+        mailbox: String = "INBOX",
+        search: String = "UNSEEN",
+        limit: Int = 20,
+        hasPassword: Bool = false
+    ) {
+        self.enabled = enabled
+        self.user = user
+        self.host = host
+        self.port = port
+        self.mailbox = mailbox
+        self.search = search
+        self.limit = limit
+        self.hasPassword = hasPassword
+    }
+}
+
+struct MobileMailStatus: Decodable, Equatable {
+    let enabled: Bool
+    let appleMailFallback: Bool
+    let appleMailUnreadOnly: Bool
+    let accountCount: Int
+
+    init(enabled: Bool = false, appleMailFallback: Bool = true, appleMailUnreadOnly: Bool = false, accountCount: Int = 0) {
+        self.enabled = enabled
+        self.appleMailFallback = appleMailFallback
+        self.appleMailUnreadOnly = appleMailUnreadOnly
+        self.accountCount = accountCount
+    }
+}
+
+struct MobileMailConfigPayload: Decodable, Equatable {
+    let gmail: MobileGmailConfig
+    let email: MobileMailStatus
+}
+
+struct MobileGmailTestResult: Decodable, Equatable {
+    let ok: Bool
+    let unread: Int?
+    let message: String
+}
+
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self

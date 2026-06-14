@@ -32,13 +32,21 @@ final class JarvisAssistant: ObservableObject {
 
     private let tools: JarvisTools
     private let llmConfig: LLMConfigStore
+    private let bridge = MobileBridgeClient()
+    private let keychain = KeychainVault()
+    private var bridgeSettings: BridgeSettings?
     private var history: [LLMMessage] = []
 
     private let maxSteps = 5
 
-    init(context: ModelContext, llmConfig: LLMConfigStore) {
+    init(context: ModelContext, llmConfig: LLMConfigStore, bridgeSettings: BridgeSettings? = nil) {
         self.tools = JarvisTools(context: context, llmConfig: llmConfig)
         self.llmConfig = llmConfig
+        self.bridgeSettings = bridgeSettings
+    }
+
+    func updateBridgeSettings(_ settings: BridgeSettings) {
+        bridgeSettings = settings
     }
 
     static let suggestions = [
@@ -62,7 +70,8 @@ final class JarvisAssistant: ObservableObject {
         defer { busy = false }
 
         guard let client = llmConfig.makeClient() else {
-            appendAssistant(LLMError.notConfigured.localizedDescription, speak: speakReply)
+            if await sendViaBridge(content, speakReply: speakReply) { return }
+            appendAssistant(LLMError.notConfigured.localizedDescription + "\n\n也没有可用的 Mac mini Bridge fallback。", speak: speakReply)
             return
         }
 
@@ -72,14 +81,24 @@ final class JarvisAssistant: ObservableObject {
         for _ in 0..<maxSteps {
             let raw: String
             do { raw = try await client.chat(convo, temperature: 0.2) }
-            catch { appendAssistant("出错了：\(error.localizedDescription)", speak: speakReply); return }
+            catch {
+                if await sendViaBridge(content, speakReply: speakReply) { return }
+                appendAssistant("出错了：\(error.localizedDescription)", speak: speakReply)
+                return
+            }
 
             let action = Self.parseAction(raw)
 
             // Final answer.
             if let final = action["final"] as? String, action["action"] == nil {
-                appendAssistant(final, speak: speakReply)
-                history.append(LLMMessage(role: "assistant", content: final))
+                let streamed = await streamFinalAnswer(
+                    client: client,
+                    userText: content,
+                    draft: final,
+                    toolObservation: nil,
+                    speakReply: speakReply
+                )
+                history.append(LLMMessage(role: "assistant", content: streamed))
                 return
             }
 
@@ -107,6 +126,15 @@ final class JarvisAssistant: ObservableObject {
             convo.append(LLMMessage(role: "assistant", content: raw))
             convo.append(LLMMessage(role: "user", content: "[工具 \(tool) 结果]\n\(result.message)"))
             history.append(LLMMessage(role: "assistant", content: "[执行 \(tool)] \(result.message)"))
+            let streamed = await streamFinalAnswer(
+                client: client,
+                userText: content,
+                draft: "工具 \(tool) 已执行。",
+                toolObservation: result.message,
+                speakReply: speakReply
+            )
+            history.append(LLMMessage(role: "assistant", content: streamed))
+            return
         }
         appendAssistant("（已到最大步数，先停下。你可以让我继续。）", speak: speakReply)
     }
@@ -131,6 +159,64 @@ final class JarvisAssistant: ObservableObject {
     private func appendAssistant(_ text: String, speak: ((String) -> Void)?) {
         turns.append(JarvisTurn(kind: .assistant, text: text))
         speak?(text)
+    }
+
+    private func appendAssistantPlaceholder() -> UUID {
+        let turn = JarvisTurn(kind: .assistant, text: "")
+        turns.append(turn)
+        return turn.id
+    }
+
+    private func appendAssistantDelta(_ delta: String, to id: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].text += delta
+    }
+
+    private func streamFinalAnswer(
+        client: LLMClient,
+        userText: String,
+        draft: String,
+        toolObservation: String?,
+        speakReply: ((String) -> Void)?
+    ) async -> String {
+        let id = appendAssistantPlaceholder()
+        let toolText = toolObservation.map { "\n工具结果：\($0)" } ?? ""
+        let messages = [
+            LLMMessage(role: "system", content: "你是 Jarvis。直接用简体中文回答用户，不要 JSON，不要代码块。回答要简洁、明确、可执行。"),
+            LLMMessage(role: "user", content: "用户输入：\(userText)\n参考草稿：\(draft)\(toolText)")
+        ]
+        do {
+            let text = try await client.streamChat(messages, temperature: self.llmConfig.settings.temperature) { delta in
+                self.appendAssistantDelta(delta, to: id)
+            }
+            speakReply?(text)
+            return text
+        } catch {
+            let fallback = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? error.localizedDescription : draft
+            appendAssistantDelta(fallback, to: id)
+            speakReply?(fallback)
+            return fallback
+        }
+    }
+
+    private func sendViaBridge(_ content: String, speakReply: ((String) -> Void)?) async -> Bool {
+        guard let settings = bridgeSettings, settings.isUsable else { return false }
+        do {
+            let token = try keychain.bridgeToken()
+            let messages: [LLMMessage]
+            if history.last?.role == "user", history.last?.content == content {
+                messages = history
+            } else {
+                messages = history + [LLMMessage(role: "user", content: content)]
+            }
+            let reply = try await bridge.chatAgent(settings: settings, token: token, messages: messages)
+            appendAssistant(reply, speak: speakReply)
+            history.append(LLMMessage(role: "assistant", content: reply))
+            return true
+        } catch {
+            BridgeDiagnostics.record("jarvis bridge fallback failed=\(error.localizedDescription)")
+            return false
+        }
     }
 
     private func openExternal(_ url: URL) async {

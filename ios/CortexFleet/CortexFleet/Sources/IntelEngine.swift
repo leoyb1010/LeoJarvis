@@ -88,6 +88,15 @@ final class IntelEngine: ObservableObject {
         try? context.save()
         lastScan = Date()
         UserDefaults.standard.set(lastScan, forKey: "intel.lastScan")
+        let enabledSources = ((try? context.fetch(FetchDescriptor<FeedSource>())) ?? []).filter(\.enabled)
+        let failedSources = enabledSources.filter { ($0.lastError ?? "").isEmpty == false }
+        if newItems.isEmpty, !failedSources.isEmpty {
+            lastError = "扫描完成，但 \(failedSources.count)/\(enabledSources.count) 个 RSS 源失败。请到「设置 → 信源状态」查看错误。"
+        } else if newItems.isEmpty {
+            lastError = "扫描完成，没有发现新的情报。"
+        } else {
+            lastError = nil
+        }
         pruneOld()
     }
 

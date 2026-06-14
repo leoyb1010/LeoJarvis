@@ -6,6 +6,7 @@ import SwiftData
 // ═══════════════════════════════════════════════════════════════════
 struct BriefingView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var store: FleetStore
 
     @Query(sort: [SortDescriptor(\IntelItem.collectedAt, order: .reverse)])
     private var items: [IntelItem]
@@ -19,19 +20,30 @@ struct BriefingView: View {
     private var business: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "business" } }
     private var life: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "life" } }
     private var github: [IntelItem] { recent.filter { $0.kind == "github_repo" } }
+    private var mail: [MobileBriefingItem] { store.mobileBriefing.mailItems }
 
     var body: some View {
         ZStack {
             HUDBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: Brand.stack) {
+                    if let progress = env.intel.progressText {
+                        MessageBanner(text: progress, level: .good)
+                    }
+                    if let error = env.intel.lastError {
+                        MessageBanner(text: error, level: .warn)
+                    }
+                    if let bridgeError = store.sectionError("sources") ?? store.sectionError("briefing") {
+                        MessageBanner(text: "Bridge 信源：\(bridgeError)", level: .warn)
+                    }
                     statsRow
-                    if recent.isEmpty {
+                    if recent.isEmpty && mail.isEmpty {
                         EmptyHint(text: "暂无简报。下拉刷新或在总览页扫描信源。", systemImage: "newspaper")
                             .padding(.top, 28)
                     } else {
                         section("业务资讯", .news, Brand.accent, business, "briefing.business", expanded: true)
                         section("GitHub 项目", .github, IntelKind.github.tint, github, "briefing.github", expanded: true)
+                        mailSection
                         section("生活资讯", .life, IntelKind.life.tint, life, "briefing.life", expanded: false)
                     }
                 }
@@ -41,13 +53,13 @@ struct BriefingView: View {
         .navigationTitle("简报")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await env.intel.scan() } } label: {
-                    if env.intel.isScanning { ArcRing(progress: 0.3, size: 20) }
+                Button { Task { await refreshAllSources() } } label: {
+                    if env.intel.isScanning || store.isLoadingJarvis { ArcRing(progress: 0.3, size: 20) }
                     else { Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent) }
-                }.disabled(env.intel.isScanning)
+                }.disabled(env.intel.isScanning || store.isLoadingJarvis)
             }
         }
-        .refreshable { await env.intel.scan() }
+        .refreshable { await refreshAllSources() }
         .sheet(item: $detail) { IntelDetailView(item: $0) }
     }
 
@@ -70,6 +82,7 @@ struct BriefingView: View {
         HStack(spacing: 10) {
             stat("资讯", business.count + life.count, "newspaper", Brand.accent)
             stat("GitHub", github.count, "chevron.left.forwardslash.chevron.right", IntelKind.github.tint)
+            stat("邮件", mail.count, "envelope", Brand.vital)
             stat("高优先", recent.filter { $0.priority == "高优先" }.count, "flame", Brand.gold)
         }
     }
@@ -83,6 +96,62 @@ struct BriefingView: View {
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
         .hudSurface(corner: Brand.tileCorner, stroke: tint.opacity(0.3), brackets: false)
+    }
+
+    private var mailSection: some View {
+        CollapsibleSection(title: "邮件监控", systemImage: "envelope", count: mail.count, accent: Brand.vital,
+                           defaultExpanded: true, storageKey: "briefing.mail") {
+            if mail.isEmpty {
+                EmptyHint(text: "暂无进入观察区的邮件。请确认 Mac mini Bridge 已启用 Apple Mail/IMAP/Gmail，并下拉刷新。")
+            } else {
+                ForEach(mail) { item in
+                    MailBriefingCard(item: item)
+                }
+            }
+        }
+    }
+
+    private func refreshAllSources() async {
+        await env.intel.scan()
+        if store.bridgeSettings.isUsable, store.bridgeTokenIsSaved() {
+            await store.refreshSourcesFromBridge()
+        }
+    }
+}
+
+private struct MailBriefingCard: View {
+    let item: MobileBriefingItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(item.source ?? "Mail", systemImage: "envelope.fill")
+                    .font(.hudMono(10, .semibold))
+                    .foregroundStyle(Brand.vital)
+                Spacer()
+                Text(item.priority ?? "邮件")
+                    .font(.hudMono(10, .bold))
+                    .foregroundStyle(Brand.gold)
+            }
+            Text(item.title)
+                .font(.headline)
+                .foregroundStyle(Brand.hudText)
+                .lineLimit(3)
+                .textSelection(.enabled)
+            Text(item.summaryText)
+                .font(.subheadline)
+                .foregroundStyle(Brand.hudText.opacity(0.72))
+                .lineLimit(6)
+                .textSelection(.enabled)
+            if let next = item.nextStep, !next.isEmpty {
+                Text(next)
+                    .font(.caption)
+                    .foregroundStyle(Brand.accent.opacity(0.85))
+                    .lineLimit(2)
+            }
+        }
+        .padding(12)
+        .hudSurface(corner: Brand.tileCorner, stroke: Brand.vital.opacity(0.28), brackets: false)
     }
 }
 

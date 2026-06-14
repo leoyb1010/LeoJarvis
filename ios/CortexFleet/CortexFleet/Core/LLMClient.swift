@@ -79,6 +79,69 @@ struct LLMClient {
         }
     }
 
+    func streamChat(
+        _ messages: [LLMMessage],
+        temperature: Double = 0.3,
+        maxTokens: Int? = nil,
+        timeout: TimeInterval = 60,
+        onDelta: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        guard !apiKey.isEmpty else { throw LLMError.notConfigured }
+        guard let url = URL(string: baseURL + "/chat/completions") else { throw LLMError.invalidURL }
+
+        var body: [String: Any] = [
+            "model": model,
+            "messages": messages.map { ["role": $0.role, "content": $0.content] },
+            "temperature": temperature,
+            "stream": true,
+        ]
+        if let maxTokens { body["max_tokens"] = maxTokens }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw LLMError.transport("没有收到 HTTP 响应")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw LLMError.http(http.statusCode, HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+            }
+
+            var accumulated = ""
+            for try await line in bytes.lines {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.hasPrefix("data:") else { continue }
+                let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+                if payload == "[DONE]" { break }
+                guard let data = payload.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let choices = obj["choices"] as? [[String: Any]],
+                      let first = choices.first else { continue }
+
+                let delta = ((first["delta"] as? [String: Any])?["content"] as? String)
+                    ?? ((first["message"] as? [String: Any])?["content"] as? String)
+                    ?? ""
+                guard !delta.isEmpty else { continue }
+                accumulated += delta
+                await onDelta(delta)
+            }
+            let text = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { throw LLMError.emptyResponse }
+            return text
+        } catch let error as LLMError {
+            throw error
+        } catch {
+            throw LLMError.transport(error.localizedDescription)
+        }
+    }
+
     /// Convenience: single-turn prompt with an optional system instruction.
     func complete(system: String? = nil, user: String, temperature: Double = 0.3) async throws -> String {
         var messages: [LLMMessage] = []

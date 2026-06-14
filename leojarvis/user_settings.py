@@ -37,7 +37,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "system": {"show_status_bar": True, "show_raw_details": False, "refresh_seconds": 15},
     "email": {"enabled": False, "accounts": [], "apple_mail_fallback": True, "apple_mail_limit": 20, "apple_mail_unread_only": False},
-    "gmail": {"enabled": False, "user": "", "app_password": "", "host": "imap.gmail.com", "port": 993, "mailbox": "INBOX"},
+    "gmail": {"enabled": False, "user": "", "app_password": "", "host": "imap.gmail.com", "port": 993, "mailbox": "INBOX", "search": "UNSEEN", "limit": 20},
     "rss": {"sources": []},
     "x_monitor": {
         "enabled": True,

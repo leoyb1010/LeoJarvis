@@ -47,6 +47,7 @@ struct JarvisChatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var llmConfig: LLMConfigStore
+    @EnvironmentObject private var store: FleetStore
 
     @StateObject private var voice = JarvisVoice()
     @StateObject private var assistant: AssistantHolder = AssistantHolder()
@@ -59,8 +60,8 @@ struct JarvisChatSheet: View {
             ZStack {
                 HUDBackground()
                 VStack(spacing: 0) {
-                    if !llmConfig.hasKey {
-                        MessageBanner(text: "Jarvis 需要 AI 接口才能对话，请先在「设置 → AI 录入接口」配置。", level: .warn)
+                    if !llmConfig.hasKey && !store.bridgeTokenIsSaved() {
+                        MessageBanner(text: "Jarvis 需要 AI 接口或 Mac mini Bridge fallback。请在设置里配置其中一个。", level: .warn)
                             .padding(.horizontal)
                     }
                     transcript
@@ -76,7 +77,10 @@ struct JarvisChatSheet: View {
                         .toggleStyle(.button).tint(Brand.accent)
                 }
             }
-            .onAppear { assistant.configure(context: context, llmConfig: llmConfig) }
+            .onAppear { assistant.configure(context: context, llmConfig: llmConfig, bridgeSettings: store.bridgeSettings) }
+            .onChange(of: store.bridgeSettings) { _, next in
+                assistant.engine?.updateBridgeSettings(next)
+            }
         }
         .tint(Brand.accent)
     }
@@ -212,7 +216,8 @@ struct JarvisChatSheet: View {
 @MainActor
 final class AssistantHolder: ObservableObject {
     @Published var engine: JarvisAssistant?
-    func configure(context: ModelContext, llmConfig: LLMConfigStore) {
-        if engine == nil { engine = JarvisAssistant(context: context, llmConfig: llmConfig) }
+    func configure(context: ModelContext, llmConfig: LLMConfigStore, bridgeSettings: BridgeSettings) {
+        if engine == nil { engine = JarvisAssistant(context: context, llmConfig: llmConfig, bridgeSettings: bridgeSettings) }
+        else { engine?.updateBridgeSettings(bridgeSettings) }
     }
 }

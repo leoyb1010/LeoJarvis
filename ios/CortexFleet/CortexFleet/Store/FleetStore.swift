@@ -12,10 +12,13 @@ final class FleetStore: ObservableObject {
     @Published private(set) var mobileNotes: [MobileNote] = []
     @Published private(set) var mobileNoteStats = MobileNoteStats.empty
     @Published private(set) var mobileBriefing = MobileBriefingPayload()
+    @Published private(set) var mobileGmailConfig = MobileGmailConfig()
+    @Published private(set) var mobileMailStatus = MobileMailStatus()
     @Published private(set) var sectionErrors: [String: String] = [:]
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
     @Published private(set) var isRefreshing = false
     @Published private(set) var isLoadingJarvis = false
+    @Published private(set) var isSavingMailConfig = false
     @Published var noticeMessage: String?
     @Published var errorMessage: String?
 
@@ -351,7 +354,7 @@ final class FleetStore: ObservableObject {
         }
     }
 
-    func refreshMobileBriefing() async {
+    func refreshMobileBriefing(refresh: Bool = false) async {
         guard bridgeSettings.isUsable else {
             setSectionError("briefing", FleetError.invalidBridgeURL.localizedDescription)
             return
@@ -359,10 +362,89 @@ final class FleetStore: ObservableObject {
         do {
             LocalNetworkPermissionProbe.trigger()
             let token = try keychain.bridgeToken()
-            mobileBriefing = try await mobileBridge.loadBriefing(settings: bridgeSettings, token: token)
+            mobileBriefing = try await mobileBridge.loadBriefing(settings: bridgeSettings, token: token, refresh: refresh)
             clearSectionError("briefing")
         } catch {
             setSectionError("briefing", error.localizedDescription)
+        }
+    }
+
+    func refreshSourcesFromBridge() async {
+        guard bridgeSettings.isUsable else {
+            setSectionError("sources", FleetError.invalidBridgeURL.localizedDescription)
+            return
+        }
+        isLoadingJarvis = true
+        defer { isLoadingJarvis = false }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let refreshed = try await mobileBridge.refreshSources(settings: bridgeSettings, token: token)
+            mobileBriefing = refreshed.briefing
+            if refreshed.refreshing == true {
+                noticeMessage = "信源刷新已开始，稍后会自动同步新结果。"
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    await self?.refreshMobileBriefing(refresh: true)
+                }
+            } else {
+                noticeMessage = "信源已刷新。"
+            }
+            clearSectionError("sources")
+            clearSectionError("briefing")
+            if let error = refreshed.error, !error.isEmpty {
+                setSectionError("sources", error)
+            }
+        } catch {
+            setSectionError("sources", error.localizedDescription)
+        }
+    }
+
+    func loadMobileMailConfig() async {
+        guard bridgeSettings.isUsable else {
+            setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
+            return
+        }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let payload = try await mobileBridge.loadMailConfig(settings: bridgeSettings, token: token)
+            mobileGmailConfig = payload.gmail
+            mobileMailStatus = payload.email
+            clearSectionError("mail")
+        } catch {
+            setSectionError("mail", error.localizedDescription)
+        }
+    }
+
+    func saveMobileGmailConfig(_ config: MobileGmailConfig, appPassword: String) async -> MobileGmailTestResult? {
+        guard bridgeSettings.isUsable else {
+            setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
+            return nil
+        }
+        isSavingMailConfig = true
+        defer { isSavingMailConfig = false }
+        do {
+            LocalNetworkPermissionProbe.trigger()
+            let token = try keychain.bridgeToken()
+            let response = try await mobileBridge.saveGmailConfig(
+                settings: bridgeSettings,
+                token: token,
+                config: config,
+                appPassword: appPassword
+            )
+            mobileGmailConfig = response.gmail
+            if response.test.ok {
+                clearSectionError("mail")
+                noticeMessage = response.test.message
+                await refreshSourcesFromBridge()
+            } else {
+                setSectionError("mail", response.test.message)
+            }
+            return response.test
+        } catch {
+            setSectionError("mail", error.localizedDescription)
+            return nil
         }
     }
 

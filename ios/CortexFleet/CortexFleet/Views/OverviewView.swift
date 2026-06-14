@@ -41,13 +41,14 @@ struct OverviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await env.intel.scan() } } label: {
+                Button { Task { await refreshIntel() } } label: {
                     if env.intel.isScanning { ProgressView().tint(Brand.accent) }
                     else { Image(systemName: "arrow.clockwise") }
                 }.disabled(env.intel.isScanning)
             }
         }
-        .task { if items.isEmpty && llmConfig.hasKey { await env.intel.scan() } }
+        .refreshable { await refreshIntel() }
+        .task { if items.isEmpty { await refreshIntel() } }
         .sheet(item: $detail) { ArticleDetailView(item: $0).environmentObject(env) }
     }
 
@@ -73,10 +74,16 @@ struct OverviewView: View {
                     label: "\(Int(store.localSnapshot.health.rounded()))")
             VStack(alignment: .leading, spacing: 8) {
                 Text("晨间简报").font(.hudMono(10)).foregroundStyle(Brand.gold)
-                Text("今晨为你保留 \(items.count) 条情报，\(hotCount) 条值得关注。")
+                Text("今晨为你保留 \(items.count) 条情报，\(hotCount) 条值得关注，邮件 \(store.mobileBriefing.mailItems.count) 封。")
                     .font(.subheadline).foregroundStyle(Brand.hudText).fixedSize(horizontal: false, vertical: true)
                 if let last = env.intel.lastScan {
                     Text("上次扫描 · \(RelativeTime.string(last))").font(.hudMono(9)).foregroundStyle(Brand.hudText.opacity(0.5))
+                }
+                if let error = env.intel.lastError {
+                    Text(error).font(.hudMono(9)).foregroundStyle(Brand.gold.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+                }
+                if let bridgeError = store.sectionError("sources") {
+                    Text("Bridge 信源：\(bridgeError)").font(.hudMono(9)).foregroundStyle(Color.red.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
@@ -106,6 +113,8 @@ struct OverviewView: View {
 
         if env.intel.isScanning && topItems.isEmpty {
             ForEach(0..<4, id: \.self) { _ in NewsCardSkeleton() }
+        } else if let progress = env.intel.progressText {
+            MessageBanner(text: progress, level: .good)
         } else if topItems.isEmpty {
             EmptyHint(text: "下拉刷新或点右上角扫描获取情报。", systemImage: "antenna.radiowaves.left.and.right").padding(.top, 30)
         } else {
@@ -118,6 +127,13 @@ struct OverviewView: View {
                 .buttonStyle(.plain)
                 .contextMenu { cardMenu(item) }
             }
+        }
+    }
+
+    private func refreshIntel() async {
+        await env.intel.scan()
+        if store.bridgeSettings.isUsable, store.bridgeTokenIsSaved() {
+            await store.refreshSourcesFromBridge()
         }
     }
 

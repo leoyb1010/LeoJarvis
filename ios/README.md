@@ -25,7 +25,13 @@ Bridge 提供的移动 API：
 - `/mobile/jarvis/overview`
 - `/mobile/jarvis/notes`
 - `/mobile/jarvis/briefing/today`
+- `/mobile/jarvis/sources/refresh`
+- `/mobile/jarvis/mail/config`
+- `/mobile/jarvis/mail/gmail`
+- `/mobile/jarvis/agent/chat`
 - `/mobile/bridge/probe`
+
+邮件监控走 Mac mini Bridge：后端读取已授权的 Apple Mail / IMAP / Gmail 采集结果，再同步到 iOS「简报」和「信源」页；Gmail 可直接在 iOS 设置里配置 Gmail 地址和 App Password，iOS App 不直接读取系统 Mail 沙盒。
 
 ## 运行
 

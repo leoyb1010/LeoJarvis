@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var isBridgeSheetPresented = false
     @State private var isSharedPasswordSheetPresented = false
     @State private var isLLMSheetPresented = false
+    @State private var isGmailSheetPresented = false
     @State private var isSourcesSheetPresented = false
     @State private var importer: BridgeImporter?
     @State private var importMessage: String?
@@ -30,6 +31,12 @@ struct SettingsView: View {
                     statusRow(title: "信源状态", systemImage: "antenna.radiowaves.left.and.right",
                               value: "\(feeds.filter(\.enabled).count) 个源 · \(interests.count) 关注项",
                               detail: lastScanText, tint: .blue)
+                }
+                Button { isGmailSheetPresented = true } label: {
+                    statusRow(title: "Gmail 监控", systemImage: "envelope.badge",
+                              value: gmailValueText,
+                              detail: store.mobileGmailConfig.enabled ? "已启用" : "未启用",
+                              tint: store.mobileGmailConfig.enabled ? .green : .orange)
                 }
             } header: { Text("信源") }
 
@@ -93,11 +100,19 @@ struct SettingsView: View {
         .sheet(isPresented: $isBridgeSheetPresented) { NavigationStack { BridgeSettingsEditor() } }
         .sheet(isPresented: $isSharedPasswordSheetPresented) { NavigationStack { SharedPasswordView() } }
         .sheet(isPresented: $isLLMSheetPresented) { NavigationStack { LLMSettingsEditor() } }
+        .sheet(isPresented: $isGmailSheetPresented) { NavigationStack { GmailSettingsView() } }
+        .task { await store.loadMobileMailConfig() }
     }
 
     private var lastScanText: String {
         if let last = env.intel.lastScan { return "上次扫描 \(last.formatted(.dateTime.month().day().hour().minute()))" }
         return "尚未扫描"
+    }
+
+    private var gmailValueText: String {
+        let gmail = store.mobileGmailConfig
+        if gmail.user.isEmpty { return "未配置 Gmail 账号" }
+        return "\(gmail.user) · \(gmail.host):\(gmail.port)"
     }
 
     private func statusRow(title: String, systemImage: String, value: String, detail: String, tint: Color) -> some View {
@@ -203,6 +218,7 @@ private struct LLMSettingsEditor: View {
 
 private struct SourcesManagerView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var store: FleetStore
     @Query(sort: \FeedSource.name) private var feeds: [FeedSource]
     @Query(sort: \ProfileInterest.term) private var interests: [ProfileInterest]
     @State private var newFeedName = ""
@@ -211,6 +227,41 @@ private struct SourcesManagerView: View {
 
     var body: some View {
         List {
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "envelope.badge")
+                        .foregroundStyle(Brand.vital)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Mail 监控")
+                        Text("来自 Mac mini Bridge 的 Apple Mail / IMAP / Gmail 采集")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("\(store.mobileBriefing.mailItems.count) 封")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Brand.vital)
+                }
+                if let error = store.sectionError("sources") {
+                    Text(error).font(.caption2).foregroundStyle(.red)
+                }
+                if let error = store.sectionError("mail") {
+                    Text(error).font(.caption2).foregroundStyle(.red)
+                }
+                NavigationLink { GmailSettingsView() } label: {
+                    Label(store.mobileGmailConfig.enabled ? "管理 Gmail 监控" : "配置 Gmail 监控", systemImage: "envelope.badge")
+                }
+                Button {
+                    Task { await store.refreshSourcesFromBridge() }
+                } label: {
+                    Label(store.isLoadingJarvis ? "刷新中…" : "刷新 Mail 与后端信源", systemImage: "arrow.clockwise")
+                }
+                .disabled(store.isLoadingJarvis || !store.bridgeSettings.isUsable || !store.bridgeTokenIsSaved())
+            } header: { Text("Mail") } footer: {
+                Text("iOS 无法直接读取系统 Mail 沙盒数据；LeoJarvis 通过 Mac mini Bridge 读取已授权的 Apple Mail/IMAP/Gmail，再同步到手机简报。")
+            }
+
             Section {
                 NavigationLink { RSSHubRoutesView() } label: {
                     Label("RSSHub 一键订阅（微博/知乎/B站…）", systemImage: "antenna.radiowaves.left.and.right")
@@ -264,6 +315,7 @@ private struct SourcesManagerView: View {
         }
         .hudFormBackground()
         .navigationTitle("信源状态")
+        .task { await store.loadMobileMailConfig() }
     }
 }
 
@@ -362,6 +414,114 @@ private struct FeedDiscoverView: View {
     private func discover() async {
         loading = true; defer { loading = false }
         results = await FeedDiscovery.discover(from: pageURL)
+    }
+}
+
+// MARK: - Gmail
+
+private struct GmailSettingsView: View {
+    @EnvironmentObject private var store: FleetStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = MobileGmailConfig()
+    @State private var appPassword = ""
+    @State private var testMessage: String?
+
+    private var canSave: Bool {
+        if !draft.enabled { return true }
+        let hasAccount = !draft.user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasPassword = draft.hasPassword || !appPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasAccount && hasPassword && store.bridgeSettings.isUsable && store.bridgeTokenIsSaved()
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("启用 Gmail 监控", isOn: $draft.enabled)
+                TextField("Gmail 地址", text: $draft.user)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                    .plainEntryField()
+                SecureField(draft.hasPassword ? "App Password 已保存，留空不改" : "Gmail App Password", text: $appPassword)
+                    .textInputAutocapitalization(.never)
+                    .plainEntryField()
+            } footer: {
+                Text("Gmail 需要开启 IMAP，并使用 Google 账号的 App Password；普通登录密码通常无法通过 IMAP。")
+            }
+
+            Section {
+                TextField("IMAP Host", text: $draft.host)
+                    .textInputAutocapitalization(.never)
+                    .urlEntryField()
+                Stepper("端口 \(draft.port)", value: $draft.port, in: 1...65535)
+                TextField("邮箱目录", text: $draft.mailbox)
+                    .textInputAutocapitalization(.never)
+                    .plainEntryField()
+                TextField("搜索条件", text: $draft.search)
+                    .textInputAutocapitalization(.characters)
+                    .plainEntryField()
+                Stepper("每次最多 \(draft.limit) 封", value: $draft.limit, in: 1...80)
+            } header: {
+                Text("IMAP")
+            } footer: {
+                Text("默认读取 INBOX 中 UNSEEN 邮件，只抓取标题、发件人和 Message-ID，不下载正文。")
+            }
+
+            if let error = store.sectionError("mail") {
+                Section {
+                    MessageBanner(text: error, level: .warn)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
+
+            if let testMessage {
+                Section {
+                    MessageBanner(text: testMessage, level: testMessage.contains("成功") ? .good : .warn)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    Label(store.isSavingMailConfig ? "保存并测试中…" : "保存并测试 Gmail", systemImage: "checkmark.seal")
+                }
+                .disabled(store.isSavingMailConfig || !canSave)
+
+                Button {
+                    Task { await store.refreshSourcesFromBridge() }
+                } label: {
+                    Label(store.isLoadingJarvis ? "刷新中…" : "刷新 Mail 简报", systemImage: "arrow.clockwise")
+                }
+                .disabled(store.isLoadingJarvis || !store.bridgeSettings.isUsable || !store.bridgeTokenIsSaved())
+            }
+        }
+        .hudFormBackground()
+        .navigationTitle("Gmail 监控")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        await store.loadMobileMailConfig()
+        draft = store.mobileGmailConfig
+    }
+
+    private func save() async {
+        var next = draft
+        next.user = next.user.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.host = next.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "imap.gmail.com" : next.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.mailbox = next.mailbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "INBOX" : next.mailbox.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.search = next.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "UNSEEN" : next.search.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let result = await store.saveMobileGmailConfig(next, appPassword: appPassword) {
+            testMessage = result.message
+            draft = store.mobileGmailConfig
+            appPassword = ""
+        }
     }
 }
 

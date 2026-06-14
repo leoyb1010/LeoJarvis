@@ -25,14 +25,41 @@ def _decode(value) -> str:
     return "".join(out)
 
 
+def _gmail_account(cfg: dict | None = None) -> dict | None:
+    cfg = cfg or gmail_config()
+    if not cfg.get("enabled"):
+        return None
+    user = str(cfg.get("user") or "").strip()
+    password = str(cfg.get("app_password") or cfg.get("password") or "").strip()
+    if not user or not password:
+        return None
+    return {
+        "provider": "gmail",
+        "name": cfg.get("name") or "Gmail",
+        "host": cfg.get("host") or "imap.gmail.com",
+        "port": int(cfg.get("port") or 993),
+        "user": user,
+        "password": password,
+        "mailbox": cfg.get("mailbox") or "INBOX",
+        "search": cfg.get("search") or "UNSEEN",
+        "limit": int(cfg.get("limit") or 20),
+        "enabled": True,
+    }
+
+
 def _email_accounts() -> list[dict]:
-    """Support both legacy sources.toml and settings-page multi accounts."""
+    """Support legacy sources.toml, settings-page IMAP accounts, and Gmail."""
     accounts: list[dict] = []
-    ui_email = user_settings.load().get("email", {})
+    settings = user_settings.load()
+    ui_email = settings.get("email", {})
     if ui_email.get("enabled", False):
         for row in ui_email.get("accounts", []):
             if isinstance(row, dict) and row.get("enabled", True):
                 accounts.append(row)
+
+    gmail = _gmail_account(settings.get("gmail", {}) or {})
+    if gmail:
+        accounts.append(gmail)
 
     legacy = sources().get("email", {})
     if legacy.get("enabled"):
@@ -132,6 +159,33 @@ def gmail_unread_count() -> int | None:
                 pass
 
 
+def gmail_connection_status(cfg: dict | None = None) -> dict:
+    """Validate Gmail IMAP without downloading bodies."""
+    account = _gmail_account(cfg)
+    if not account:
+        return {"ok": False, "unread": None, "message": "Gmail 未启用或缺少账号 / App Password。"}
+    box = None
+    try:
+        box = imaplib.IMAP4_SSL(str(account["host"]), int(account["port"]), timeout=10)
+        box.login(str(account["user"]), str(account["password"]))
+        typ, _ = box.select(str(account["mailbox"]), readonly=True)
+        if typ != "OK":
+            return {"ok": False, "unread": None, "message": f"无法打开邮箱 {account['mailbox']}。"}
+        typ, data = box.search(None, str(account["search"]))
+        if typ != "OK":
+            return {"ok": False, "unread": None, "message": f"搜索条件失败：{account['search']}。"}
+        unread = len([x for x in data[0].split() if x])
+        return {"ok": True, "unread": unread, "message": f"Gmail 连接成功，匹配 {unread} 封。"}
+    except Exception as exc:
+        return {"ok": False, "unread": None, "message": f"Gmail 连接失败：{exc}"}
+    finally:
+        if box is not None:
+            try:
+                box.logout()
+            except Exception:
+                pass
+
+
 def _apple_mail_items(limit: int = 20, unread_only: bool = False) -> list[RawItem]:
     path = _apple_mail_db()
     if not path:
@@ -196,7 +250,7 @@ class EmailCollector(Collector):
                 continue
             host = account.get("host") or account.get("imap_host")
             user = account.get("user") or account.get("username")
-            password = account.get("password")
+            password = account.get("password") or account.get("app_password")
             if not host or not user or not password:
                 continue
             mailbox = imaplib.IMAP4_SSL(str(host), int(account.get("port") or 993), timeout=8)
@@ -218,7 +272,13 @@ class EmailCollector(Collector):
                         kind="email",
                         title=subject,
                         content=f"From: {sender}",
-                        meta={"from": sender, "account": account_name, "message_id": msg_id},
+                        meta={
+                            "from": sender,
+                            "account": account_name,
+                            "message_id": msg_id,
+                            "provider": account.get("provider") or "imap",
+                            "dedup_key": f"email:{account_name}:{msg_id}",
+                        },
                     ))
             finally:
                 try:

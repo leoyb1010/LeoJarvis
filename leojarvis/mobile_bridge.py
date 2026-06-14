@@ -7,6 +7,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -524,6 +525,15 @@ def _mobile_overview() -> dict[str, Any]:
 
 app = FastAPI(title="LeoJarvis Mobile Bridge", version="0.1.0")
 
+_MOBILE_REFRESH_LOCK = threading.Lock()
+_MOBILE_REFRESH_STATE: dict[str, Any] = {
+    "running": False,
+    "started_at": 0,
+    "finished_at": 0,
+    "stats": {},
+    "error": "",
+}
+
 
 class MobileNoteIn(BaseModel):
     title: str = ""
@@ -548,10 +558,79 @@ class MobileAttachmentImportIn(BaseModel):
     text_content: str = ""
 
 
+class MobileAgentMessageIn(BaseModel):
+    role: str = Field(pattern="^(user|assistant|system)$")
+    content: str = ""
+
+
+class MobileAgentChatIn(BaseModel):
+    messages: list[MobileAgentMessageIn] = Field(default_factory=list)
+
+
+class MobileGmailConfigIn(BaseModel):
+    enabled: bool = True
+    user: str = ""
+    app_password: str = ""
+    host: str = "imap.gmail.com"
+    port: int = Field(default=993, ge=1, le=65535)
+    mailbox: str = "INBOX"
+    search: str = "UNSEEN"
+    limit: int = Field(default=20, ge=1, le=80)
+
+
 class DeviceOpsPreviewIn(BaseModel):
     action: str
     target_id: str = "local"
     path: str = ""
+
+
+def _sanitized_gmail_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = cfg or (user_settings.load().get("gmail", {}) or {})
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "user": str(cfg.get("user") or ""),
+        "host": str(cfg.get("host") or "imap.gmail.com"),
+        "port": int(cfg.get("port") or 993),
+        "mailbox": str(cfg.get("mailbox") or "INBOX"),
+        "search": str(cfg.get("search") or "UNSEEN"),
+        "limit": int(cfg.get("limit") or 20),
+        "has_password": bool(cfg.get("app_password") or cfg.get("password")),
+    }
+
+
+def _mobile_refresh_worker() -> None:
+    try:
+        from .scheduler import _run_ingest_cycle_sync
+
+        stats, _notifications = _run_ingest_cycle_sync()
+        with _MOBILE_REFRESH_LOCK:
+            _MOBILE_REFRESH_STATE.update({
+                "running": False,
+                "finished_at": int(time.time()),
+                "stats": stats,
+                "error": "",
+            })
+    except Exception as exc:
+        with _MOBILE_REFRESH_LOCK:
+            _MOBILE_REFRESH_STATE.update({
+                "running": False,
+                "finished_at": int(time.time()),
+                "error": str(exc),
+            })
+
+
+def _start_mobile_refresh_if_needed() -> dict[str, Any]:
+    with _MOBILE_REFRESH_LOCK:
+        if _MOBILE_REFRESH_STATE.get("running"):
+            return dict(_MOBILE_REFRESH_STATE)
+        _MOBILE_REFRESH_STATE.update({
+            "running": True,
+            "started_at": int(time.time()),
+            "error": "",
+        })
+        state = dict(_MOBILE_REFRESH_STATE)
+    threading.Thread(target=_mobile_refresh_worker, daemon=True, name="mobile-source-refresh").start()
+    return state
 
 
 @app.get("/mobile/bridge/health")
@@ -584,6 +663,79 @@ def config(authorization: str | None = Header(default=None)) -> dict[str, Any]:
 def jarvis_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_token(authorization)
     return {"ok": True, "overview": _mobile_overview(), "bridge": health()}
+
+
+@app.post("/mobile/jarvis/agent/chat")
+def jarvis_agent_chat(req: MobileAgentChatIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .agent.loop import run_agent
+
+    messages = [row.model_dump() for row in req.messages if row.content.strip()]
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages required")
+    return {"ok": True, **run_agent(messages)}
+
+
+@app.post("/mobile/jarvis/sources/refresh")
+def jarvis_sources_refresh(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .briefing.builder import build_today
+
+    state = _start_mobile_refresh_if_needed()
+    return {
+        "ok": True,
+        "refreshing": bool(state.get("running")),
+        "started_at": state.get("started_at") or 0,
+        "finished_at": state.get("finished_at") or 0,
+        "stats": state.get("stats") or {},
+        "error": state.get("error") or "",
+        "briefing": build_today(compact=True, limit=24, force=True),
+    }
+
+
+@app.get("/mobile/jarvis/mail/config")
+def jarvis_mail_config(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .ingest.email_ingest import _email_accounts
+
+    settings = user_settings.load()
+    email_cfg = settings.get("email", {}) or {}
+    return {
+        "ok": True,
+        "gmail": _sanitized_gmail_config(settings.get("gmail", {}) or {}),
+        "email": {
+            "enabled": bool(email_cfg.get("enabled")),
+            "apple_mail_fallback": bool(email_cfg.get("apple_mail_fallback", True)),
+            "apple_mail_unread_only": bool(email_cfg.get("apple_mail_unread_only", False)),
+            "account_count": len(_email_accounts()),
+        },
+    }
+
+
+@app.post("/mobile/jarvis/mail/gmail")
+def jarvis_mail_gmail(req: MobileGmailConfigIn, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(authorization)
+    from .ingest.email_ingest import gmail_connection_status
+
+    current = user_settings.load().get("gmail", {}) or {}
+    password = req.app_password.strip()
+    next_cfg = {
+        **current,
+        "enabled": req.enabled,
+        "user": req.user.strip(),
+        "host": req.host.strip() or "imap.gmail.com",
+        "port": int(req.port or 993),
+        "mailbox": req.mailbox.strip() or "INBOX",
+        "search": req.search.strip() or "UNSEEN",
+        "limit": int(req.limit or 20),
+    }
+    if password:
+        next_cfg["app_password"] = password
+    elif "app_password" not in next_cfg:
+        next_cfg["app_password"] = ""
+    saved = user_settings.patch({"gmail": next_cfg}).get("gmail", {}) or next_cfg
+    test = gmail_connection_status(saved) if saved.get("enabled") else {"ok": True, "unread": None, "message": "Gmail 监控已关闭。"}
+    return {"ok": True, "gmail": _sanitized_gmail_config(saved), "test": test}
 
 
 @app.get("/mobile/jarvis/notes")

@@ -938,15 +938,83 @@ struct MobileBridgeClient {
         return MobileNoteDetailPayload(note: payload.note, attachments: payload.attachments)
     }
 
-    func loadBriefing(settings: BridgeSettings, token: String) async throws -> MobileBriefingPayload {
+    func loadBriefing(settings: BridgeSettings, token: String, refresh: Bool = false) async throws -> MobileBriefingPayload {
         let payload: JarvisBriefingResponse = try await send(
             settings: settings,
             token: token,
-            path: "/mobile/jarvis/briefing/today?compact=1&limit=24",
+            path: "/mobile/jarvis/briefing/today?compact=1&limit=24\(refresh ? "&refresh=1" : "")",
             method: "GET",
             timeout: 18
         )
         return payload.briefing
+    }
+
+    func refreshSources(settings: BridgeSettings, token: String) async throws -> MobileSourcesRefreshResponse {
+        try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/sources/refresh",
+            method: "POST",
+            timeout: 45
+        )
+    }
+
+    func loadMailConfig(settings: BridgeSettings, token: String) async throws -> MobileMailConfigPayload {
+        let payload: MobileMailConfigResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/mail/config",
+            method: "GET",
+            timeout: 12
+        )
+        return MobileMailConfigPayload(gmail: payload.gmail, email: payload.email)
+    }
+
+    func saveGmailConfig(
+        settings: BridgeSettings,
+        token: String,
+        config: MobileGmailConfig,
+        appPassword: String
+    ) async throws -> MobileGmailSaveResponse {
+        var body: [String: Any] = [
+            "enabled": config.enabled,
+            "user": config.user,
+            "host": config.host,
+            "port": config.port,
+            "mailbox": config.mailbox,
+            "search": config.search,
+            "limit": config.limit,
+        ]
+        if !appPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["app_password"] = appPassword
+        }
+        return try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/mail/gmail",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 24
+        )
+    }
+
+    func chatAgent(
+        settings: BridgeSettings,
+        token: String,
+        messages: [LLMMessage]
+    ) async throws -> String {
+        let body: [String: Any] = [
+            "messages": messages.map { ["role": $0.role, "content": $0.content] }
+        ]
+        let payload: JarvisAgentChatResponse = try await send(
+            settings: settings,
+            token: token,
+            path: "/mobile/jarvis/agent/chat",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            timeout: 45
+        )
+        return payload.reply
     }
 
     func loadBriefingItem(settings: BridgeSettings, token: String, eventID: String) async throws -> MobileBriefingItem {
@@ -1167,6 +1235,26 @@ private struct JarvisOverviewResponse: Decodable {
 
 private struct JarvisBriefingResponse: Decodable {
     let briefing: MobileBriefingPayload
+}
+
+struct MobileSourcesRefreshResponse: Decodable, Equatable {
+    let briefing: MobileBriefingPayload
+    let refreshing: Bool?
+    let error: String?
+}
+
+private struct MobileMailConfigResponse: Decodable {
+    let gmail: MobileGmailConfig
+    let email: MobileMailStatus
+}
+
+struct MobileGmailSaveResponse: Decodable, Equatable {
+    let gmail: MobileGmailConfig
+    let test: MobileGmailTestResult
+}
+
+private struct JarvisAgentChatResponse: Decodable {
+    let reply: String
 }
 
 private struct JarvisBriefingItemResponse: Decodable {
