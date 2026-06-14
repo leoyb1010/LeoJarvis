@@ -1,27 +1,136 @@
 import SwiftUI
 
+// ═══════════════════════════════════════════════════════════════════
+//  DesignKit.swift  ·  ARC REACTOR HUD 换肤版
+//  公开 API（Brand / jarvisCard / SectionHeader / CollapsibleSection /
+//  IntelKind / IntelPriority / IntelCard / NewsCard / RelativeTime /
+//  CoverImage / NewsCardSkeleton / EmptyHint）全部保持不变，
+//  仅替换视觉实现 —— 整个 App 一次性换肤，其余文件无需改动。
+// ═══════════════════════════════════════════════════════════════════
+
 // MARK: - Design tokens
 
 enum Brand {
-    static let corner: CGFloat = 16
-    static let tileCorner: CGFloat = 12
+    static let corner: CGFloat = 14
+    static let tileCorner: CGFloat = 10
     static let cardPadding: CGFloat = 16
     static let stack: CGFloat = 14
 
-    static let accent = Color.blue
-    static let hairline = Color.blue.opacity(0.16)
+    // ARC REACTOR 配色
+    static let accent = Color(red: 0.216, green: 0.878, blue: 1.0)   // #37E0FF 青
+    static let gold   = Color(red: 1.0,   green: 0.776, blue: 0.345) // #FFC658 金
+    static let vital  = Color(red: 0.373, green: 1.0,   blue: 0.729) // #5FFFBA 生命绿
+    static let void   = Color(red: 0.016, green: 0.031, blue: 0.059) // #04080F 底
+    static let panel  = Color(red: 0.078, green: 0.18,  blue: 0.267) // 面板高光
+    static let hudText = Color(red: 0.84, green: 0.93,  blue: 0.98)
+
+    static let hairline = accent.opacity(0.18)
 }
 
+extension Font {
+    /// 等宽字体 —— 数据 / 标签 / 遥测（SF Mono，无需打包字体）
+    static func hudMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .monospaced)
+    }
+    /// 圆角字体 —— 大号显示 / 数值（接近 Rajdhani 的科技感）
+    static func hudDisplay(_ size: CGFloat, _ weight: Font.Weight = .bold) -> Font {
+        .system(size: size, weight: weight, design: .rounded)
+    }
+}
+
+// MARK: - HUD 基础构件
+
+/// 卡片四角准星
+struct ArcCorners: View {
+    var color: Color = Brand.accent
+    var len: CGFloat = 9
+    var lineWidth: CGFloat = 1.2
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            Path { p in
+                p.move(to: .init(x: 0, y: len)); p.addLine(to: .init(x: 0, y: 0)); p.addLine(to: .init(x: len, y: 0))
+                p.move(to: .init(x: w - len, y: 0)); p.addLine(to: .init(x: w, y: 0)); p.addLine(to: .init(x: w, y: len))
+                p.move(to: .init(x: w, y: h - len)); p.addLine(to: .init(x: w, y: h)); p.addLine(to: .init(x: w - len, y: h))
+                p.move(to: .init(x: len, y: h)); p.addLine(to: .init(x: 0, y: h)); p.addLine(to: .init(x: 0, y: h - len))
+            }
+            .stroke(color, lineWidth: lineWidth)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// 背景网格（用于全局 HUD 底）
+struct HUDGrid: Shape {
+    var spacing: CGFloat = 34
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        var x: CGFloat = 0
+        while x <= rect.width { p.move(to: .init(x: x, y: 0)); p.addLine(to: .init(x: x, y: rect.height)); x += spacing }
+        var y: CGFloat = 0
+        while y <= rect.height { p.move(to: .init(x: 0, y: y)); p.addLine(to: .init(x: rect.width, y: y)); y += spacing }
+        return p
+    }
+}
+
+/// 全局 HUD 背景：能量底色 + 淡网格
+struct HUDBackground: View {
+    var body: some View {
+        ZStack {
+            RadialGradient(colors: [Color(red: 0.05, green: 0.135, blue: 0.21), Brand.void],
+                           center: .top, startRadius: 0, endRadius: 760)
+            HUDGrid().stroke(Brand.accent.opacity(0.06), lineWidth: 1)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+/// 旋转能量核心环 —— 可复用于健康分 / 头像 / 加载
+struct ArcRing: View {
+    var progress: Double          // 0...1
+    var size: CGFloat = 64
+    var color: Color = Brand.accent
+    var label: String? = nil
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(color.opacity(0.16), style: .init(lineWidth: 1.4, dash: [2, 4]))
+            Circle()
+                .trim(from: 0, to: max(0.02, min(1, progress)))
+                .stroke(color, style: .init(lineWidth: 2.4, lineCap: .round))
+                .shadow(color: color.opacity(0.7), radius: 5)
+                .rotationEffect(.degrees(-90))
+            Circle().fill(color.opacity(0.18)).frame(width: size * 0.42, height: size * 0.42).blur(radius: 4)
+            if let label {
+                Text(label).font(.hudDisplay(size * 0.26, .bold)).foregroundStyle(Brand.hudText)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+// MARK: - HUD 表面
+
 extension View {
-    /// Standard card surface used across every redesigned screen.
-    func jarvisCard(stroke: Color = Brand.hairline, corner: CGFloat = Brand.corner) -> some View {
+    /// HUD 面板表面：暗色玻璃渐变 + 青色描边 + 四角准星
+    func hudSurface(corner: CGFloat = Brand.corner, stroke: Color = Brand.hairline, brackets: Bool = true) -> some View {
         self
-            .padding(Brand.cardPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .background(
+                LinearGradient(colors: [Brand.panel.opacity(0.5), Brand.void.opacity(0.42)],
+                               startPoint: .top, endPoint: .bottom),
+                in: RoundedRectangle(cornerRadius: corner, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
             )
+            .overlay { if brackets { ArcCorners(color: Brand.accent.opacity(0.7)).padding(5) } }
+    }
+
+    /// 标准卡片（兼容旧 API）
+    func jarvisCard(stroke: Color = Brand.hairline, corner: CGFloat = Brand.corner) -> some View {
+        self.padding(Brand.cardPadding).hudSurface(corner: corner, stroke: stroke)
     }
 }
 
@@ -34,10 +143,7 @@ struct SectionHeader: View {
     var trailing: AnyView?
 
     init(title: String, subtitle: String? = nil, systemImage: String? = nil, trailing: AnyView? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.trailing = trailing
+        self.title = title; self.subtitle = subtitle; self.systemImage = systemImage; self.trailing = trailing
     }
 
     var body: some View {
@@ -45,15 +151,12 @@ struct SectionHeader: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Brand.accent)
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.hudDisplay(19, .bold)).foregroundStyle(Brand.hudText)
                 if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(subtitle).font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.75))
                 }
             }
             Spacer(minLength: 0)
@@ -65,9 +168,6 @@ struct SectionHeader: View {
 
 // MARK: - CollapsibleSection
 
-/// A titled, collapsible drawer. Expansion state is remembered per `storageKey`
-/// via `@AppStorage`, so a section the user closed stays closed across launches.
-/// This is the core component that replaces the old "wall of text" layout.
 struct CollapsibleSection<Content: View>: View {
     let title: String
     var systemImage: String
@@ -79,21 +179,11 @@ struct CollapsibleSection<Content: View>: View {
 
     @AppStorage private var expanded: Bool
 
-    init(
-        title: String,
-        systemImage: String = "square.stack.3d.up",
-        count: Int? = nil,
-        accent: Color = Brand.accent,
-        defaultExpanded: Bool = true,
-        storageKey: String,
-        @ViewBuilder content: @escaping () -> Content
-    ) {
-        self.title = title
-        self.systemImage = systemImage
-        self.count = count
-        self.accent = accent
-        self.defaultExpanded = defaultExpanded
-        self.storageKey = storageKey
+    init(title: String, systemImage: String = "square.stack.3d.up", count: Int? = nil,
+         accent: Color = Brand.accent, defaultExpanded: Bool = true, storageKey: String,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.title = title; self.systemImage = systemImage; self.count = count
+        self.accent = accent; self.defaultExpanded = defaultExpanded; self.storageKey = storageKey
         self.content = content
         _expanded = AppStorage(wrappedValue: defaultExpanded, "collapse.\(storageKey)")
     }
@@ -104,94 +194,63 @@ struct CollapsibleSection<Content: View>: View {
                 withAnimation(.snappy(duration: 0.22)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: systemImage)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 22)
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    Image(systemName: systemImage).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(accent).frame(width: 22)
+                    Text(title).font(.hudDisplay(17, .semibold)).foregroundStyle(Brand.hudText)
                     if let count {
-                        Text("\(count)")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(accent)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
+                        Text("\(count)").font(.hudMono(11, .bold)).foregroundStyle(accent)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
                             .background(accent.opacity(0.14), in: Capsule())
+                            .overlay(Capsule().stroke(accent.opacity(0.4), lineWidth: 0.8))
                     }
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                        .foregroundStyle(accent.opacity(0.7))
                         .rotationEffect(.degrees(expanded ? 0 : -90))
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 14)
+                .padding(.vertical, 12).padding(.horizontal, 14)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    content()
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                VStack(alignment: .leading, spacing: 10) { content() }
+                    .padding(.horizontal, 14).padding(.bottom, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Brand.corner, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Brand.corner, style: .continuous)
-                .stroke(accent.opacity(0.16), lineWidth: 1)
-        )
+        .hudSurface(corner: Brand.corner, stroke: accent.opacity(0.18))
     }
 }
 
-// MARK: - IntelKind (typed intelligence categories)
+// MARK: - IntelKind / IntelPriority
 
-/// Visual identity for each intelligence item type, so the briefing/overview
-/// reads as categorized cards instead of an undifferentiated text dump.
 enum IntelKind: String {
-    case news
-    case github
-    case x
-    case mail
-    case life
-
+    case news, github, x, mail, life
     var label: String {
         switch self {
-        case .news: return "资讯"
-        case .github: return "GitHub"
-        case .x: return "社媒"
-        case .mail: return "邮件"
-        case .life: return "生活"
+        case .news: return "资讯"; case .github: return "GitHub"; case .x: return "社媒"
+        case .mail: return "邮件"; case .life: return "生活"
         }
     }
-
     var symbol: String {
         switch self {
-        case .news: return "newspaper"
-        case .github: return "chevron.left.forwardslash.chevron.right"
-        case .x: return "at"
-        case .mail: return "envelope"
-        case .life: return "leaf"
+        case .news: return "newspaper"; case .github: return "chevron.left.forwardslash.chevron.right"
+        case .x: return "at"; case .mail: return "envelope"; case .life: return "leaf"
         }
     }
-
     var tint: Color {
         switch self {
-        case .news: return .blue
-        case .github: return .purple
-        case .x: return .teal
-        case .mail: return .orange
-        case .life: return .green
+        case .news: return Brand.accent
+        case .github: return Color(red: 0.72, green: 0.55, blue: 1.0)   // 霓虹紫
+        case .x: return Brand.vital
+        case .mail: return Brand.gold
+        case .life: return Color(red: 0.45, green: 0.95, blue: 0.6)
         }
     }
 }
 
 extension IntelItem {
-    /// Visual category for the item, derived from its `kind`/`domain`.
     var intelKind: IntelKind {
         switch kind {
         case "github_repo": return .github
@@ -204,23 +263,12 @@ extension IntelItem {
 
 enum IntelPriority {
     case high, medium, watch
-
     var label: String {
-        switch self {
-        case .high: return "高优先"
-        case .medium: return "中优先"
-        case .watch: return "观察"
-        }
+        switch self { case .high: return "高优先"; case .medium: return "中优先"; case .watch: return "观察" }
     }
-
     var tint: Color {
-        switch self {
-        case .high: return .red
-        case .medium: return .orange
-        case .watch: return .secondary
-        }
+        switch self { case .high: return Brand.gold; case .medium: return Brand.accent; case .watch: return Brand.hudText.opacity(0.5) }
     }
-
     init(scoreText: String?) {
         switch scoreText {
         case "高优先": self = .high
@@ -232,9 +280,6 @@ enum IntelPriority {
 
 // MARK: - IntelCard
 
-/// A single intelligence/briefing item, color- and icon-coded by type with a
-/// clear visual hierarchy: type chip + priority, bold title, one-line summary,
-/// optional tags. Replaces the cramped text rows in the old UI.
 struct IntelCard: View {
     let kind: IntelKind
     let title: String
@@ -247,47 +292,30 @@ struct IntelCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Label(kind.label, systemImage: kind.symbol)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(kind.tint)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
+                    .font(.hudMono(10, .semibold)).foregroundStyle(kind.tint)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(kind.tint.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(kind.tint.opacity(0.4), lineWidth: 0.7))
                 if let priority {
-                    Text(priority.label)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(priority.tint)
+                    Text(priority.label).font(.hudMono(10, .bold)).foregroundStyle(priority.tint)
+                    if priority.label == "高优先" {
+                        Circle().fill(Brand.gold).frame(width: 5, height: 5).shadow(color: Brand.gold, radius: 3)
+                    }
                 }
                 Spacer(minLength: 0)
-                if let meta {
-                    Text(meta)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+                if let meta { Text(meta).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45)).lineLimit(1) }
             }
-
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Brand.hudText).lineLimit(2)
             if let summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                Text(summary).font(.caption).foregroundStyle(Brand.hudText.opacity(0.6)).lineLimit(3)
             }
-
             if !tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(tags.prefix(6), id: \.self) { tag in
-                            Text(tag)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(.background.opacity(0.6), in: Capsule())
+                            Text(tag).font(.hudMono(10)).foregroundStyle(Brand.accent.opacity(0.8))
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Brand.accent.opacity(0.08), in: Capsule())
                         }
                     }
                 }
@@ -295,11 +323,7 @@ struct IntelCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous)
-                .stroke(kind.tint.opacity(0.18), lineWidth: 1)
-        )
+        .hudSurface(corner: Brand.tileCorner, stroke: kind.tint.opacity(0.3))
     }
 }
 
@@ -317,49 +341,39 @@ enum RelativeTime {
     }
 }
 
-// MARK: - Cover image (AsyncImage with skeleton + graceful fallback)
+// MARK: - Cover image
 
 struct CoverImage: View {
     let url: String?
     var height: CGFloat = 180
-    var corner: CGFloat = 12
+    var corner: CGFloat = 10
 
     var body: some View {
         Group {
             if let url, let u = URL(string: url) {
                 AsyncImage(url: u, transaction: .init(animation: .easeOut(duration: 0.25))) { phase in
                     switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    case .failure:
-                        placeholder
-                    case .empty:
-                        ZStack { placeholder; ProgressView() }
-                    @unknown default:
-                        placeholder
+                    case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure: placeholder
+                    case .empty: ZStack { placeholder; ProgressView().tint(Brand.accent) }
+                    @unknown default: placeholder
                     }
                 }
-            } else {
-                placeholder
-            }
+            } else { placeholder }
         }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .frame(height: height).frame(maxWidth: .infinity).clipped()
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).stroke(Brand.accent.opacity(0.18), lineWidth: 1))
     }
 
     private var placeholder: some View {
-        LinearGradient(colors: [.gray.opacity(0.16), .gray.opacity(0.06)],
-                       startPoint: .topLeading, endPoint: .bottomTrailing)
-            .overlay(Image(systemName: "photo").font(.title).foregroundStyle(.tertiary))
+        LinearGradient(colors: [Brand.panel.opacity(0.6), Brand.void], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(Image(systemName: "photo").font(.title).foregroundStyle(Brand.accent.opacity(0.35)))
     }
 }
 
-// MARK: - News cards (magazine-style feed)
+// MARK: - NewsCard
 
-/// A news article card. Adapts layout to whether a cover image exists:
-/// large hero card with cover, or compact text-forward card without.
 struct NewsCard: View {
     let channel: Channel
     let title: String
@@ -375,57 +389,56 @@ struct NewsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let coverURL, !coverURL.isEmpty {
-                CoverImage(url: coverURL, height: large ? 200 : 150)
+                CoverImage(url: coverURL, height: large ? 200 : 150, corner: Brand.corner)
+                    .padding(.bottom, 2)
             }
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Label(channel.title, systemImage: channel.symbol)
-                        .font(.caption2.weight(.semibold)).foregroundStyle(channel.tint)
+                        .font(.hudMono(10, .semibold)).foregroundStyle(channel.tint)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(channel.tint.opacity(0.12), in: Capsule())
+                        .overlay(Capsule().stroke(channel.tint.opacity(0.4), lineWidth: 0.7))
                     if let priority, priority.label == "高优先" {
-                        Text("热").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                        Text("热").font(.hudMono(10, .bold)).foregroundStyle(Brand.void)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.red, in: Capsule())
+                            .background(Brand.gold, in: Capsule())
                     }
                     Spacer(minLength: 0)
-                    if isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
+                    if isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(Brand.gold) }
                 }
                 Text(title)
-                    .font(large ? .headline : .subheadline.weight(.semibold))
-                    .foregroundStyle(isRead ? .secondary : .primary)
+                    .font(large ? .hudDisplay(20, .bold) : .subheadline.weight(.semibold))
+                    .foregroundStyle(isRead ? Brand.hudText.opacity(0.5) : Brand.hudText)
                     .lineLimit(large ? 3 : 2)
                 if let summary, !summary.isEmpty {
-                    Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(large ? 3 : 2)
+                    Text(summary).font(.caption).foregroundStyle(Brand.hudText.opacity(0.6)).lineLimit(large ? 3 : 2)
                 }
                 HStack(spacing: 6) {
-                    Text(source).font(.caption2).foregroundStyle(.tertiary)
-                    if let date { Text("·").font(.caption2).foregroundStyle(.tertiary)
-                        Text(RelativeTime.string(date)).font(.caption2).foregroundStyle(.tertiary) }
+                    Text(source).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
+                    if let date {
+                        Text("·").font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.3))
+                        Text(RelativeTime.string(date)).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
+                    }
                 }
             }
             .padding(coverURL?.isEmpty == false ? 12 : 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.opacity(0.85), in: RoundedRectangle(cornerRadius: Brand.corner, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Brand.corner, style: .continuous)
-                .stroke(channel.tint.opacity(0.14), lineWidth: 1)
-        )
+        .hudSurface(corner: Brand.corner, stroke: channel.tint.opacity(0.28))
     }
 }
 
-/// Skeleton placeholder row for the loading state.
 struct NewsCardSkeleton: View {
     @State private var shimmer = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: 12).fill(.gray.opacity(0.15)).frame(height: 140)
-            RoundedRectangle(cornerRadius: 4).fill(.gray.opacity(0.15)).frame(height: 14).frame(maxWidth: .infinity)
-            RoundedRectangle(cornerRadius: 4).fill(.gray.opacity(0.12)).frame(height: 10).frame(maxWidth: 200)
+            RoundedRectangle(cornerRadius: 10).fill(Brand.accent.opacity(0.1)).frame(height: 140)
+            RoundedRectangle(cornerRadius: 4).fill(Brand.accent.opacity(0.1)).frame(height: 14).frame(maxWidth: .infinity)
+            RoundedRectangle(cornerRadius: 4).fill(Brand.accent.opacity(0.07)).frame(height: 10).frame(maxWidth: 200)
         }
         .padding(12)
-        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: Brand.corner))
+        .hudSurface(corner: Brand.corner, brackets: false)
         .opacity(shimmer ? 0.5 : 1)
         .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { shimmer = true } }
     }
@@ -436,12 +449,9 @@ struct NewsCardSkeleton: View {
 struct EmptyHint: View {
     let text: String
     var systemImage: String = "tray"
-
     var body: some View {
         Label(text, systemImage: systemImage)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 14)
+            .font(.hudMono(12)).foregroundStyle(Brand.hudText.opacity(0.55))
+            .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 14)
     }
 }

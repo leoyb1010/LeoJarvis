@@ -1,32 +1,38 @@
 import SwiftUI
 import SwiftData
 
-/// Global floating "Jarvis" button, mounted over the whole app. Tapping opens the
-/// full-capability assistant chat sheet.
+// ═══════════════════════════════════════════════════════════════════
+//  JarvisFloatingButton.swift  ·  ARC REACTOR HUD 换肤版
+//  发光能量 J 球 + HUD 化对话气泡。功能逻辑保持不变。
+// ═══════════════════════════════════════════════════════════════════
+
 struct JarvisFloatingButton: View {
     @State private var open = false
+    @State private var pulse = false
 
     var body: some View {
         Button { open = true } label: {
             ZStack {
+                Circle().fill(Brand.accent.opacity(0.28)).frame(width: 78, height: 78).blur(radius: 12)
                 Circle()
-                    .fill(LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 58, height: 58)
-                    .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
-                Image(systemName: "sparkles")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .fill(RadialGradient(colors: [.white, Brand.accent, Color(red: 0.1, green: 0.66, blue: 0.84)],
+                                         center: .init(x: 0.4, y: 0.34), startRadius: 1, endRadius: 32))
+                    .frame(width: 54, height: 54)
+                Circle().stroke(Brand.accent.opacity(0.55), lineWidth: 1.5).frame(width: 58, height: 58)
+                Text("J").font(.hudDisplay(22, .bold)).foregroundStyle(Brand.void)
             }
+            .scaleEffect(pulse ? 1.05 : 1.0)
+            .shadow(color: Brand.accent.opacity(0.7), radius: 14)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("打开 Jarvis 助手")
         .padding(.trailing, 18)
         .padding(.bottom, 64)
         .sheet(isPresented: $open) { JarvisChatSheet() }
+        .onAppear { withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { pulse = true } }
     }
 }
 
-/// View modifier that overlays the Jarvis button on any root content.
 struct JarvisOverlay: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay(alignment: .bottomTrailing) { JarvisFloatingButton() }
@@ -37,8 +43,6 @@ extension View {
     func jarvisFloatingButton() -> some View { modifier(JarvisOverlay()) }
 }
 
-/// The assistant conversation sheet: chat bubbles (markdown), tool results,
-/// confirm cards, suggestions, voice input, and read-aloud.
 struct JarvisChatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -52,39 +56,42 @@ struct JarvisChatSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !llmConfig.hasKey {
-                    MessageBanner(text: "Jarvis 需要 AI 接口才能对话，请先在「设置 → AI 录入接口」配置。", level: .warn)
-                        .padding(.horizontal)
+            ZStack {
+                HUDBackground()
+                VStack(spacing: 0) {
+                    if !llmConfig.hasKey {
+                        MessageBanner(text: "Jarvis 需要 AI 接口才能对话，请先在「设置 → AI 录入接口」配置。", level: .warn)
+                            .padding(.horizontal)
+                    }
+                    transcript
+                    composer
                 }
-                transcript
-                composer
             }
-            .navigationTitle("Jarvis")
+            .navigationTitle("J.A.R.V.I.S")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.tint(Brand.accent) }
                 ToolbarItem(placement: .primaryAction) {
                     Toggle(isOn: $speakReplies) { Image(systemName: speakReplies ? "speaker.wave.2.fill" : "speaker.slash") }
-                        .toggleStyle(.button)
+                        .toggleStyle(.button).tint(Brand.accent)
                 }
             }
             .onAppear { assistant.configure(context: context, llmConfig: llmConfig) }
         }
+        .tint(Brand.accent)
     }
 
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if assistant.engine?.turns.isEmpty ?? true {
-                        suggestionsView
-                    }
-                    ForEach(assistant.engine?.turns ?? []) { turn in
-                        turnView(turn).id(turn.id)
-                    }
+                    if assistant.engine?.turns.isEmpty ?? true { suggestionsView }
+                    ForEach(assistant.engine?.turns ?? []) { turn in turnView(turn).id(turn.id) }
                     if assistant.engine?.busy ?? false {
-                        HStack { ProgressView(); Text("思考中…").font(.caption).foregroundStyle(.secondary) }
+                        HStack(spacing: 8) {
+                            ArcRing(progress: 0.3, size: 18, color: Brand.accent)
+                            Text("思考中…").font(.hudMono(11)).foregroundStyle(Brand.hudText.opacity(0.6))
+                        }
                     }
                 }
                 .padding()
@@ -99,13 +106,18 @@ struct JarvisChatSheet: View {
     private func turnView(_ turn: JarvisTurn) -> some View {
         switch turn.kind {
         case .user:
-            HStack { Spacer(); Text(turn.text).padding(10)
-                .background(Brand.accent, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
+            HStack {
+                Spacer()
+                Text(turn.text).font(.callout).padding(10)
+                    .background(Brand.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Brand.accent.opacity(0.5), lineWidth: 1))
+                    .foregroundStyle(Brand.hudText)
+            }
         case .assistant:
             markdownBubble(turn.text, tint: false)
         case .toolResult:
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "wrench.and.screwdriver.fill").font(.caption).foregroundStyle(.green)
+                Image(systemName: "wrench.and.screwdriver.fill").font(.caption).foregroundStyle(Brand.vital)
                 markdownBubble(turn.text, tint: true)
             }
         case .pending:
@@ -117,38 +129,41 @@ struct JarvisChatSheet: View {
         let attributed = (try? AttributedString(markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
         return HStack {
-            Text(attributed)
-                .padding(10)
-                .background(tint ? Color.green.opacity(0.1) : Color(.secondarySystemBackground),
-                            in: RoundedRectangle(cornerRadius: 14))
+            Text(attributed).foregroundStyle(Brand.hudText).padding(10)
+                .hudSurface(corner: 14, stroke: tint ? Brand.vital.opacity(0.35) : Brand.hairline, brackets: false)
             Spacer()
         }
     }
 
     private func confirmCard(_ p: PendingAction) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("待确认：\(p.tool)", systemImage: "exclamationmark.shield").font(.subheadline.weight(.semibold))
-            Text(p.reason).font(.caption).foregroundStyle(.secondary)
-            Text(argsPreview(p.args)).font(.caption2.monospaced()).foregroundStyle(.secondary)
+            Label("待确认：\(p.tool)", systemImage: "exclamationmark.shield")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(Brand.gold)
+            Text(p.reason).font(.caption).foregroundStyle(Brand.hudText.opacity(0.7))
+            Text(argsPreview(p.args)).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
             HStack {
                 Button("批准执行") { Task { await assistant.engine?.confirm(p, approve: true) } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(Brand.accent)
                 Button("拒绝", role: .destructive) { Task { await assistant.engine?.confirm(p, approve: false) } }
                     .buttonStyle(.bordered)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .hudSurface(corner: 14, stroke: Brand.gold.opacity(0.4))
     }
 
     private var suggestionsView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("试试对 Jarvis 说：").font(.caption).foregroundStyle(.secondary)
+            Text("// 试试对 Jarvis 说").font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.75))
             ForEach(JarvisAssistant.suggestions, id: \.self) { s in
                 Button { send(s) } label: {
-                    Text(s).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    HStack {
+                        Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Brand.accent)
+                        Text(s).font(.callout).foregroundStyle(Brand.hudText)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10).hudSurface(corner: 10, brackets: false)
                 }.buttonStyle(.plain)
             }
         }
@@ -156,29 +171,27 @@ struct JarvisChatSheet: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            Button {
-                Task { await toggleVoice() }
-            } label: {
+            Button { Task { await toggleVoice() } } label: {
                 Image(systemName: voice.isRecording ? "mic.fill" : "mic")
-                    .foregroundStyle(voice.isRecording ? .red : .secondary)
+                    .foregroundStyle(voice.isRecording ? Color.red : Brand.accent)
             }
             TextField("和 Jarvis 说点什么…", text: $input, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain).foregroundStyle(Brand.hudText)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .hudSurface(corner: 12, brackets: false)
                 .lineLimit(1...4)
                 .onChange(of: voice.transcript) { _, new in if voice.isRecording { input = new } }
-            Button { send(input) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+            Button { send(input) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2).foregroundStyle(Brand.accent) }
                 .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty || (assistant.engine?.busy ?? false))
         }
         .padding()
-        .background(.bar)
+        .background(Brand.void.opacity(0.6))
     }
 
     private func send(_ text: String) {
         let toSend = text
         input = ""
-        Task {
-            await assistant.engine?.send(toSend, speakReply: speakReplies ? { voice.speak($0) } : nil)
-        }
+        Task { await assistant.engine?.send(toSend, speakReply: speakReplies ? { voice.speak($0) } : nil) }
     }
 
     private func toggleVoice() async {
@@ -196,7 +209,6 @@ struct JarvisChatSheet: View {
     }
 }
 
-/// Holds the assistant engine, created once the model context is available.
 @MainActor
 final class AssistantHolder: ObservableObject {
     @Published var engine: JarvisAssistant?
