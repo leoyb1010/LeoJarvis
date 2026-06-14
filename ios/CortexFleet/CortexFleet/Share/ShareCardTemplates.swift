@@ -47,20 +47,28 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
 }
 
 enum ShareTheme: String, CaseIterable, Identifiable {
-    case light, dark, gradient
+    case arc, dark, light, gradient
     var id: String { rawValue }
-    var label: String { self == .light ? "浅色" : self == .dark ? "深色" : "渐变" }
+    var label: String {
+        switch self { case .arc: return "ARC"; case .dark: return "深色"; case .light: return "浅色"; case .gradient: return "渐变" }
+    }
 
     var bg: AnyShapeStyle {
         switch self {
+        case .arc: return AnyShapeStyle(RadialGradient(colors: [Brand.panel, Brand.void], center: .top, startRadius: 0, endRadius: 700))
         case .light: return AnyShapeStyle(Color(white: 0.98))
         case .dark: return AnyShapeStyle(Color(white: 0.10))
         case .gradient: return AnyShapeStyle(LinearGradient(colors: [.blue, .indigo, .purple],
                                                             startPoint: .topLeading, endPoint: .bottomTrailing))
         }
     }
-    var fg: Color { self == .light ? .black : .white }
-    var secondary: Color { (self == .light ? Color.black : Color.white).opacity(0.6) }
+    var isArc: Bool { self == .arc }
+    var accent: Color { self == .arc ? Brand.accent : .white }
+    var fg: Color { self == .light ? .black : (self == .arc ? Brand.hudText : .white) }
+    var secondary: Color {
+        if self == .arc { return Brand.accent.opacity(0.7) }
+        return (self == .light ? Color.black : Color.white).opacity(0.6)
+    }
 }
 
 enum ShareSize: String, CaseIterable, Identifiable {
@@ -91,6 +99,9 @@ struct ShareCard: View {
     var body: some View {
         ZStack {
             Rectangle().fill(theme.bg)
+            if theme.isArc {
+                HUDGrid(spacing: 30).stroke(Brand.accent.opacity(0.07), lineWidth: 1)
+            }
             VStack(alignment: .leading, spacing: 18) {
                 header
                 Spacer(minLength: 0)
@@ -99,6 +110,7 @@ struct ShareCard: View {
                 footer
             }
             .padding(36)
+            if theme.isArc { ArcCorners(color: Brand.accent.opacity(0.6), len: 18, lineWidth: 2).padding(14) }
         }
         .frame(width: size.points.width, height: size.points.height)
     }
@@ -106,10 +118,10 @@ struct ShareCard: View {
     @ViewBuilder private var header: some View {
         HStack {
             Image(systemName: "sparkles")
-                .font(.title2).foregroundStyle(theme.fg)
-            Text("Jarvis 今日精选").font(.headline).foregroundStyle(theme.fg)
+                .font(.title2).foregroundStyle(theme.accent)
+            Text("J.A.R.V.I.S 今日精选").font(theme.isArc ? .hudDisplay(18, .bold) : .headline).foregroundStyle(theme.fg)
             Spacer()
-            Text(dateText).font(.subheadline).foregroundStyle(theme.secondary)
+            Text(dateText).font(theme.isArc ? .hudMono(13) : .subheadline).foregroundStyle(theme.secondary)
         }
     }
 

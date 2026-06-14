@@ -17,52 +17,56 @@ struct ArticleDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let cover = item.coverURL, !cover.isEmpty {
-                        CoverImage(url: cover, height: 210, corner: Brand.corner)
-                    }
-                    HStack(spacing: 6) {
-                        let ch = Channel(rawValue: item.channel) ?? .tech
-                        Label(ch.title, systemImage: ch.symbol)
-                            .font(.caption.weight(.semibold)).foregroundStyle(ch.tint)
-                        Spacer()
-                        Text(item.sourceName).font(.caption2).foregroundStyle(.tertiary)
-                        Text(RelativeTime.string(item.publishedAt ?? item.collectedAt))
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
+            ZStack {
+                HUDBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if let cover = item.coverURL, !cover.isEmpty {
+                            CoverImage(url: cover, height: 210, corner: Brand.corner)
+                        }
+                        HStack(spacing: 6) {
+                            let ch = Channel(rawValue: item.channel) ?? .tech
+                            Label(ch.title, systemImage: ch.symbol)
+                                .font(.hudMono(11, .semibold)).foregroundStyle(ch.tint)
+                            Spacer()
+                            Text(item.sourceName).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
+                            Text(RelativeTime.string(item.publishedAt ?? item.collectedAt))
+                                .font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.45))
+                        }
 
-                    Text(item.displayTitle).font(.title3.weight(.bold))
-                    if item.title != item.displayTitle {
-                        Text(item.title).font(.footnote).foregroundStyle(.secondary)  // keep original (中英都留)
+                        Text(item.displayTitle).font(.hudDisplay(23, .bold)).foregroundStyle(Brand.hudText)
+                        if item.title != item.displayTitle {
+                            Text(item.title).font(.footnote).foregroundStyle(Brand.hudText.opacity(0.5))  // keep original (中英都留)
+                        }
+
+                        if localizing { HStack(spacing: 8) { ArcRing(progress: 0.3, size: 16); Text("AI 中文化中…").font(.hudMono(11)).foregroundStyle(Brand.accent.opacity(0.7)) } }
+                        if let zh = item.summaryZH, !zh.isEmpty {
+                            sectionCard("AI 中文摘要", zh, "character.bubble")
+                        } else if let summary = item.summary, !summary.isEmpty {
+                            Text(summary).font(.body).foregroundStyle(Brand.hudText.opacity(0.78))
+                        }
+
+                        enrich("为什么重要", item.whyImportant, "exclamationmark.circle")
+                        enrich("和我有什么关系", item.relation, "person.crop.circle")
+                        enrich("下一步建议", item.nextStep, "arrow.forward.circle")
+
+                        actionBar
                     }
-
-                    if localizing { HStack { ProgressView(); Text("AI 中文化中…").font(.caption).foregroundStyle(.secondary) } }
-                    if let zh = item.summaryZH, !zh.isEmpty {
-                        sectionCard("AI 中文摘要", zh, "character.bubble")
-                    } else if let summary = item.summary, !summary.isEmpty {
-                        Text(summary).font(.body)
-                    }
-
-                    enrich("为什么重要", item.whyImportant, "exclamationmark.circle")
-                    enrich("和我有什么关系", item.relation, "person.crop.circle")
-                    enrich("下一步建议", item.nextStep, "arrow.forward.circle")
-
-                    actionBar
+                    .padding(16)
                 }
-                .padding(16)
             }
             .navigationTitle("详情").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.tint(Brand.accent) }
             }
             .overlay(alignment: .bottom) {
-                if let toast { Text(toast).font(.caption).padding(10)
-                    .background(.regularMaterial, in: Capsule()).padding(.bottom, 20).transition(.opacity) }
+                if let toast { Text(toast).font(.hudMono(11)).foregroundStyle(Brand.hudText).padding(10)
+                    .hudSurface(corner: 20, brackets: false).padding(.bottom, 20).transition(.opacity) }
             }
             .task { await localizeIfNeeded() }
             .sheet(isPresented: $showShare) { ShareCardSheet(payload: .article(item)) }
         }
+        .tint(Brand.accent)
     }
 
     private var actionBar: some View {
@@ -88,11 +92,11 @@ struct ArticleDetailView: View {
     private func actionButton(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: icon).font(.headline)
-                Text(title).font(.caption2)
+                Image(systemName: icon).font(.headline).foregroundStyle(Brand.accent)
+                Text(title).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.7))
             }
             .frame(maxWidth: .infinity).padding(.vertical, 10)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .hudSurface(corner: 10, brackets: false)
         }
         .buttonStyle(.plain)
     }
@@ -100,9 +104,9 @@ struct ArticleDetailView: View {
     @ViewBuilder
     private func sectionCard(_ title: String, _ body: String, _ icon: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon).font(.caption.weight(.semibold)).foregroundStyle(.tint)
+            Label(title, systemImage: icon).font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
             Text((try? AttributedString(markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(body))
-                .font(.callout)
+                .font(.callout).foregroundStyle(Brand.hudText.opacity(0.85))
         }
         .frame(maxWidth: .infinity, alignment: .leading).jarvisCard(corner: Brand.tileCorner)
     }

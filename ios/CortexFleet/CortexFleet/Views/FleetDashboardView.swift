@@ -2,9 +2,9 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// Device page (第四页). iPhone-first: the local device is the hero card with a
-/// trend chart; SSH hosts are a collapsible, manually-probed section (no more
-/// 30s auto-refresh). All remote "capability" cards are gone — iOS is self-contained.
+// ═══════════════════════════════════════════════════════════════════
+//  FleetDashboardView.swift · 设备 — HUD 主题对齐（布局/逻辑不变）
+// ═══════════════════════════════════════════════════════════════════
 struct FleetDashboardView: View {
     @EnvironmentObject private var store: FleetStore
     @Environment(\.modelContext) private var context
@@ -25,7 +25,7 @@ struct FleetDashboardView: View {
                     title: "SSH 主机",
                     systemImage: "server.rack",
                     count: store.hosts.count,
-                    accent: .indigo,
+                    accent: Brand.accent,
                     defaultExpanded: false,
                     storageKey: "device.sshHosts"
                 ) {
@@ -40,23 +40,18 @@ struct FleetDashboardView: View {
             }
             .padding(16)
         }
+        .scrollContentBackground(.hidden)
         .navigationTitle("设备")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { store.refreshLocal(); recordSample() } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise").foregroundStyle(Brand.accent)
                 }
                 .accessibilityLabel("刷新本机")
             }
         }
-        .refreshable {
-            store.refreshLocal()
-            recordSample()
-        }
-        .task {
-            store.refreshLocal()
-            recordSample()
-        }
+        .refreshable { store.refreshLocal(); recordSample() }
+        .task { store.refreshLocal(); recordSample() }
     }
 
     @ViewBuilder
@@ -66,13 +61,11 @@ struct FleetDashboardView: View {
         } else {
             HStack {
                 Text("\(store.remoteOnlineCount)/\(store.hosts.count) 在线")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.hudMono(11)).foregroundStyle(Brand.vital)
                 Spacer()
-                Button {
-                    Task { await store.refreshAll() }
-                } label: {
+                Button { Task { await store.refreshAll() } } label: {
                     Label(store.isRefreshing ? "探测中…" : "探测全部", systemImage: "bolt.horizontal.circle")
-                        .font(.caption.weight(.semibold))
+                        .font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
                 }
                 .disabled(store.isRefreshing)
             }
@@ -87,11 +80,8 @@ struct FleetDashboardView: View {
         }
     }
 
-    private var recentSamples: [DeviceSample] {
-        Array(samples.suffix(48))
-    }
+    private var recentSamples: [DeviceSample] { Array(samples.suffix(48)) }
 
-    /// Record a lightweight metric sample (throttled to ~once per 10 min) for the trend chart.
     private func recordSample() {
         let snap = store.localSnapshot
         if let last = samples.last, Date().timeIntervalSince(last.timestamp) < 600 { return }
@@ -102,7 +92,6 @@ struct FleetDashboardView: View {
             thermal: snap.thermalState
         )
         context.insert(sample)
-        // Keep only the most recent ~200 samples.
         if samples.count > 200 {
             for old in samples.prefix(samples.count - 200) { context.delete(old) }
         }
@@ -119,23 +108,17 @@ private struct DeviceTrendCard: View {
             Chart {
                 ForEach(samples) { s in
                     if let battery = s.batteryPercent {
-                        LineMark(
-                            x: .value("时间", s.timestamp),
-                            y: .value("电量", battery)
-                        )
-                        .foregroundStyle(by: .value("指标", "电量%"))
-                        .interpolationMethod(.catmullRom)
+                        LineMark(x: .value("时间", s.timestamp), y: .value("电量", battery))
+                            .foregroundStyle(by: .value("指标", "电量%"))
+                            .interpolationMethod(.catmullRom)
                     }
-                    LineMark(
-                        x: .value("时间", s.timestamp),
-                        y: .value("存储", s.storageUsedPercent)
-                    )
-                    .foregroundStyle(by: .value("指标", "存储占用%"))
-                    .interpolationMethod(.catmullRom)
+                    LineMark(x: .value("时间", s.timestamp), y: .value("存储", s.storageUsedPercent))
+                        .foregroundStyle(by: .value("指标", "存储占用%"))
+                        .interpolationMethod(.catmullRom)
                 }
             }
             .chartYScale(domain: 0...100)
-            .chartForegroundStyleScale(["电量%": Color.green, "存储占用%": Color.orange])
+            .chartForegroundStyleScale(["电量%": Brand.vital, "存储占用%": Brand.gold])
             .frame(height: 160)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -87,6 +87,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .hudFormBackground()
         .navigationTitle("设置")
         .sheet(item: $editor) { state in NavigationStack { AddSSHDeviceView(draft: state.draft) } }
         .sheet(isPresented: $isBridgeSheetPresented) { NavigationStack { BridgeSettingsEditor() } }
@@ -161,6 +162,7 @@ private struct LLMSettingsEditor: View {
                 if let testResult { Text(testResult).font(.caption).foregroundStyle(.secondary) }
             }
         }
+        .hudFormBackground()
         .navigationTitle("AI 录入接口")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
@@ -260,6 +262,7 @@ private struct SourcesManagerView: View {
                 }
             }
         }
+        .hudFormBackground()
         .navigationTitle("信源状态")
     }
 }
@@ -288,6 +291,7 @@ private struct RSSHubRoutesView: View {
                 }
             }
         }
+        .hudFormBackground()
         .navigationTitle("RSSHub 订阅")
         .onAppear { instance = RSSHubClient.instanceBase }
     }
@@ -351,6 +355,7 @@ private struct FeedDiscoverView: View {
                 }
             }
         }
+        .hudFormBackground()
         .navigationTitle("发现订阅源")
     }
 
@@ -393,6 +398,7 @@ private struct BridgeSettingsEditor: View {
                 }.disabled(saving || !settings.isUsable)
             }
         }
+        .hudFormBackground()
         .navigationTitle("Bridge")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
@@ -454,6 +460,7 @@ private struct SharedPasswordView: View {
                     .disabled(password.isEmpty)
             }
         }
+        .hudFormBackground()
         .navigationTitle("共用密码")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

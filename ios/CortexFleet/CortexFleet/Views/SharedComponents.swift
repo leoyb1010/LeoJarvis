@@ -1,7 +1,9 @@
 import SwiftUI
 
-// Shared building blocks used across the device, detail, settings and overview
-// screens. (Previously these lived in FleetDashboardView.swift.)
+// ═══════════════════════════════════════════════════════════════════
+//  SharedComponents.swift  ·  ARC REACTOR HUD 换肤版
+//  MetricTile / MessageBanner / RiskLine / LocalDeviceCard —— API 不变。
+// ═══════════════════════════════════════════════════════════════════
 
 struct MetricTile: View {
     let title: String
@@ -12,27 +14,21 @@ struct MetricTile: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: systemImage)
-                .foregroundStyle(.tint)
+                .foregroundStyle(Brand.accent)
                 .frame(width: 22)
+                .shadow(color: Brand.accent.opacity(0.5), radius: 3)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                Text(title).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
+                Text(value).font(.hudDisplay(16, .semibold)).foregroundStyle(Brand.hudText)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Text(detail).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.5))
+                    .lineLimit(1).minimumScaleFactor(0.75)
             }
             Spacer(minLength: 0)
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 70)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
+        .hudSurface(corner: Brand.tileCorner, brackets: false)
     }
 }
 
@@ -47,6 +43,7 @@ struct MessageBanner: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(level.color.opacity(0.12), in: RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous).stroke(level.color.opacity(0.4), lineWidth: 1))
     }
 }
 
@@ -56,21 +53,16 @@ struct RiskLine: View {
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(risk.title)
-                    .font(.caption.weight(.semibold))
-                Text(risk.advice)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text(risk.title).font(.caption.weight(.semibold)).foregroundStyle(Brand.hudText)
+                Text(risk.advice).font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
             }
         } icon: {
-            Image(systemName: risk.level.symbol)
-                .foregroundStyle(risk.level.color)
+            Image(systemName: risk.level.symbol).foregroundStyle(risk.level.color)
         }
     }
 }
 
-/// Local iPhone/iPad hero card with expandable detail. Now surfaces the extra
-/// open APIs (network, brightness, dark mode, available memory).
+/// 本机设备卡片 —— 用能量核心环展示健康分。
 struct LocalDeviceCard: View {
     let snapshot: LocalDeviceSnapshot
     @State private var isExpanded = false
@@ -85,32 +77,22 @@ struct LocalDeviceCard: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("本机", systemImage: "iphone")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(snapshot.name)
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.primary)
+                            .font(.hudMono(11, .semibold)).foregroundStyle(Brand.accent)
+                        Text(snapshot.name).font(.hudDisplay(22, .bold)).foregroundStyle(Brand.hudText)
                         Text("\(snapshot.interfaceIdiom) · \(snapshot.modelIdentifier)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(Brand.hudText.opacity(0.6))
                         Text("\(snapshot.systemVersion) · build \(snapshot.osBuild)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.4))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("\(Int(snapshot.health.rounded()))")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
-                            .foregroundStyle(tone.color)
+                    VStack(spacing: 4) {
+                        ArcRing(progress: snapshot.health / 100, size: 62, color: tone.color,
+                                label: "\(Int(snapshot.health.rounded()))")
                         HStack(spacing: 4) {
-                            Text("本机健康")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Text("本机健康").font(.hudMono(10)).foregroundStyle(Brand.hudText.opacity(0.55))
                             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
+                                .font(.caption.weight(.bold)).foregroundStyle(Brand.accent.opacity(0.7))
                         }
                     }
                 }
@@ -147,42 +129,28 @@ struct LocalDeviceCard: View {
                     MetricTile(title: "地区", value: snapshot.localeIdentifier, detail: snapshot.timeZoneIdentifier, systemImage: "globe.asia.australia")
                     MetricTile(title: "刷新率", value: "\(snapshot.maxFramesPerSecond)Hz", detail: "\(format(snapshot.screenScale))x", systemImage: "speedometer")
                 }
-
-                ForEach(snapshot.risks.prefix(3)) { risk in
-                    RiskLine(risk: risk)
-                }
+                ForEach(snapshot.risks.prefix(3)) { risk in RiskLine(risk: risk) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Brand.cardPadding)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Brand.corner, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Brand.corner, style: .continuous)
-                .stroke(tone.color.opacity(0.25), lineWidth: 1)
-        )
+        .hudSurface(corner: Brand.corner, stroke: tone.color.opacity(0.3))
     }
 
     private var batteryText: String {
         guard let value = snapshot.batteryPercent else { return "-" }
         return "\(Int(value.rounded()))%"
     }
-
     private var availableMemoryText: String {
         guard let value = snapshot.availableMemoryGB else { return "-" }
         return "\(format(value))G"
     }
-
-    private var screenDetail: String {
-        "\(snapshot.maxFramesPerSecond)Hz · \(format(snapshot.screenScale))x"
-    }
-
+    private var screenDetail: String { "\(snapshot.maxFramesPerSecond)Hz · \(format(snapshot.screenScale))x" }
     private var uptimeText: String {
         if snapshot.uptimeHours < 24 { return "\(format(snapshot.uptimeHours))h" }
         return "\(format(snapshot.uptimeHours / 24))d"
     }
-
     private func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
-
     private func format(_ value: Double) -> String {
         value == value.rounded() ? "\(Int(value))" : String(format: "%.1f", value)
     }

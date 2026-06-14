@@ -33,7 +33,7 @@ struct ShareCardSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var template: ShareTemplate = .news
-    @State private var theme: ShareTheme = .gradient
+    @State private var theme: ShareTheme = .arc
     @State private var size: ShareSize = .portrait
     @State private var signature = UserDefaults.standard.string(forKey: "share.signature") ?? "LeoJarvis"
     @State private var showQR = true
