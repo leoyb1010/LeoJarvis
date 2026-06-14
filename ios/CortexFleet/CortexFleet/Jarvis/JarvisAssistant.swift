@@ -71,7 +71,7 @@ final class JarvisAssistant: ObservableObject {
 
         guard let client = llmConfig.makeClient() else {
             if await sendViaBridge(content, speakReply: speakReply) { return }
-            appendAssistant(LLMError.notConfigured.localizedDescription + "\n\n也没有可用的 Mac mini Bridge fallback。", speak: speakReply)
+            await handleLocalFallback(content, speakReply: speakReply)
             return
         }
 
@@ -83,7 +83,7 @@ final class JarvisAssistant: ObservableObject {
             do { raw = try await client.chat(convo, temperature: 0.2) }
             catch {
                 if await sendViaBridge(content, speakReply: speakReply) { return }
-                appendAssistant("出错了：\(error.localizedDescription)", speak: speakReply)
+                await handleLocalFallback(content, speakReply: speakReply)
                 return
             }
 
@@ -169,6 +169,7 @@ final class JarvisAssistant: ObservableObject {
 
     private func appendAssistantDelta(_ delta: String, to id: UUID) {
         guard let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        objectWillChange.send()
         turns[index].text += delta
     }
 
@@ -217,6 +218,35 @@ final class JarvisAssistant: ObservableObject {
             BridgeDiagnostics.record("jarvis bridge fallback failed=\(error.localizedDescription)")
             return false
         }
+    }
+
+    private func handleLocalFallback(_ content: String, speakReply: ((String) -> Void)?) async {
+        let lower = content.lowercased()
+        if lower.contains("记") || lower.contains("note") || lower.contains("笔记") {
+            let cleaned = content
+                .replacingOccurrences(of: "记一条笔记：", with: "")
+                .replacingOccurrences(of: "记一条笔记:", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = await tools.invoke("write_note", args: ["content": cleaned.isEmpty ? content : cleaned])
+            appendAssistant(result.message, speak: speakReply)
+            history.append(LLMMessage(role: "assistant", content: result.message))
+            return
+        }
+        if lower.contains("查") || lower.contains("搜索") || lower.contains("search") {
+            let result = await tools.invoke("search_notes", args: ["query": content])
+            appendAssistant(result.message, speak: speakReply)
+            history.append(LLMMessage(role: "assistant", content: result.message))
+            return
+        }
+        if lower.contains("情报") || lower.contains("资讯") || lower.contains("新闻") || lower.contains("source") {
+            let result = await tools.invoke("ask_intel", args: ["query": content])
+            appendAssistant(result.message, speak: speakReply)
+            history.append(LLMMessage(role: "assistant", content: result.message))
+            return
+        }
+        let reply = "我已经收到：\(content)\n\n当前没有可用的 AI 接口，但本机能力可用：你可以让我「记一条笔记」、搜索笔记，或问「今天有什么重点情报」。"
+        appendAssistant(reply, speak: speakReply)
+        history.append(LLMMessage(role: "assistant", content: reply))
     }
 
     private func openExternal(_ url: URL) async {

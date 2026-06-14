@@ -14,8 +14,12 @@ struct NotebookView: View {
     @State private var newNotebook = false
     @State private var quickNote = false
     @State private var openNotebook: Notebook?
+    @State private var quickCapture = ""
+    @State private var capturing = false
+    @State private var captureMessage: String?
 
     private var store: NotebookStore { NotebookStore(context: context, llmConfig: llmConfig) }
+    private var noteStore: NoteStore { NoteStore(context: context, llmConfig: llmConfig) }
     private var looseNotes: [Note] { allNotes.filter { $0.notebookID == nil && !$0.archived } }
 
     var body: some View {
@@ -23,6 +27,8 @@ struct NotebookView: View {
             VStack(alignment: .leading, spacing: Brand.stack) {
                 SectionHeader(title: "Notebook", subtitle: "把资料 · 笔记 · 对话集中到一个主题", systemImage: "books.vertical",
                               trailing: AnyView(Button { newNotebook = true } label: { Image(systemName: "plus.circle.fill").foregroundStyle(Brand.accent) }))
+
+                smartCaptureCard
 
                 if notebooks.isEmpty {
                     EmptyHint(text: "新建一个 Notebook，加入网址/资讯/文本，AI 帮你整理与问答。", systemImage: "books.vertical")
@@ -61,6 +67,42 @@ struct NotebookView: View {
         .navigationDestination(item: $openNotebook) { nb in NotebookDetailView(notebook: nb) }
     }
 
+    private var smartCaptureCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("智能速记", systemImage: "sparkles")
+                    .font(.hudMono(11, .semibold))
+                    .foregroundStyle(Brand.accent)
+                Spacer()
+                if capturing { ArcRing(progress: 0.3, size: 16, color: Brand.accent) }
+            }
+            TextField("直接输入想记下的内容，Jarvis 会整理成笔记…", text: $quickCapture, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(2...5)
+                .foregroundStyle(Brand.hudText)
+                .padding(10)
+                .hudSurface(corner: 12, brackets: false)
+            HStack {
+                if let captureMessage {
+                    Text(captureMessage)
+                        .font(.hudMono(10))
+                        .foregroundStyle(Brand.vital)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    Task { await saveSmartCapture() }
+                } label: {
+                    Label(capturing ? "整理中" : "记下", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Brand.accent)
+                .disabled(capturing || quickCapture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .jarvisCard(corner: Brand.tileCorner)
+    }
+
     private func notebookCard(_ nb: Notebook) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(nb.emoji).font(.largeTitle)
@@ -87,6 +129,24 @@ struct NotebookView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard(corner: Brand.tileCorner)
+    }
+
+    private func saveSmartCapture() async {
+        let text = quickCapture.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        capturing = true
+        captureMessage = nil
+        defer { capturing = false }
+        do {
+            let draft = try await noteStore.draft(prompt: text)
+            let note = noteStore.create(title: draft.title, content: draft.content, tags: draft.tags, source: "smart-capture")
+            quickCapture = ""
+            captureMessage = "已保存：\(note.displayTitle)"
+        } catch {
+            let note = noteStore.create(title: NoteStore.makeExcerpt(text, limit: 24), content: text, tags: [], source: "smart-capture")
+            quickCapture = ""
+            captureMessage = "已保存：\(note.displayTitle)"
+        }
     }
 }
 

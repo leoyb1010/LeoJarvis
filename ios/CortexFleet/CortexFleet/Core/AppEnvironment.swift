@@ -7,6 +7,8 @@ import SwiftData
 @MainActor
 final class AppEnvironment: ObservableObject {
     static let appGroup = "group.com.leo.cortexfleet"
+    private static let feedCatalogVersion = 2
+    private static let feedCatalogVersionKey = "intel.feedCatalogVersion"
 
     let container: ModelContainer
     let llmConfig: LLMConfigStore
@@ -62,15 +64,38 @@ final class AppEnvironment: ObservableObject {
     }
 
     private static func seedFeeds(context: ModelContext) {
-        let existing = (try? context.fetch(FetchDescriptor<FeedSource>()))?.count ?? 0
-        guard existing == 0 else { return }
+        let defaults = UserDefaults.standard
+        let currentVersion = defaults.integer(forKey: feedCatalogVersionKey)
+        let existingFeeds = (try? context.fetch(FetchDescriptor<FeedSource>())) ?? []
+        guard existingFeeds.isEmpty || currentVersion < feedCatalogVersion else { return }
+
+        var byName = Dictionary(uniqueKeysWithValues: existingFeeds.map { ($0.name, $0) })
+        let seedNames = Set(SeedCatalog.feeds.map(\.name))
         for seed in SeedCatalog.feeds {
-            context.insert(FeedSource(
-                name: seed.name, url: seed.url, domain: seed.domain,
-                category: seed.category, channel: seed.channel.rawValue, origin: "seed",
-                enabled: true, limit: seed.limit
-            ))
+            if let existing = byName[seed.name] {
+                existing.url = seed.url
+                existing.domain = seed.domain
+                existing.category = seed.category
+                existing.channel = seed.channel.rawValue
+                existing.origin = existing.origin.isEmpty ? "seed" : existing.origin
+                existing.limit = seed.limit
+                existing.enabled = true
+                existing.lastError = nil
+            } else {
+                let feed = FeedSource(
+                    name: seed.name, url: seed.url, domain: seed.domain,
+                    category: seed.category, channel: seed.channel.rawValue, origin: "seed",
+                    enabled: true, limit: seed.limit
+                )
+                context.insert(feed)
+                byName[seed.name] = feed
+            }
         }
+        for feed in existingFeeds where feed.origin == "seed" && !seedNames.contains(feed.name) {
+            feed.enabled = false
+            feed.lastError = "已被新的内置信源目录替换。"
+        }
+        defaults.set(feedCatalogVersion, forKey: feedCatalogVersionKey)
     }
 
     private static func seedInterests(context: ModelContext) {

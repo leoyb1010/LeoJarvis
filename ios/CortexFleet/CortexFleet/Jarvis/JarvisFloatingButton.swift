@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 // ═══════════════════════════════════════════════════════════════════
 //  JarvisFloatingButton.swift  ·  ARC REACTOR HUD 换肤版
@@ -13,21 +14,23 @@ struct JarvisFloatingButton: View {
     var body: some View {
         Button { open = true } label: {
             ZStack {
-                Circle().fill(Brand.accent.opacity(0.28)).frame(width: 78, height: 78).blur(radius: 12)
+                Circle().fill(Brand.accent.opacity(0.22)).frame(width: 56, height: 56).blur(radius: 9)
                 Circle()
                     .fill(RadialGradient(colors: [.white, Brand.accent, Color(red: 0.1, green: 0.66, blue: 0.84)],
-                                         center: .init(x: 0.4, y: 0.34), startRadius: 1, endRadius: 32))
-                    .frame(width: 54, height: 54)
-                Circle().stroke(Brand.accent.opacity(0.55), lineWidth: 1.5).frame(width: 58, height: 58)
-                Text("J").font(.hudDisplay(22, .bold)).foregroundStyle(Brand.void)
+                                         center: .init(x: 0.4, y: 0.34), startRadius: 1, endRadius: 24))
+                    .frame(width: 42, height: 42)
+                Circle().stroke(Brand.accent.opacity(0.55), lineWidth: 1.2).frame(width: 46, height: 46)
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Brand.void)
             }
             .scaleEffect(pulse ? 1.05 : 1.0)
-            .shadow(color: Brand.accent.opacity(0.7), radius: 14)
+            .shadow(color: Brand.accent.opacity(0.55), radius: 10)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("打开 Jarvis 助手")
-        .padding(.trailing, 18)
-        .padding(.bottom, 64)
+        .padding(.trailing, 14)
+        .padding(.bottom, 58)
         .sheet(isPresented: $open) { JarvisChatSheet() }
         .onAppear { withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { pulse = true } }
     }
@@ -216,8 +219,17 @@ struct JarvisChatSheet: View {
 @MainActor
 final class AssistantHolder: ObservableObject {
     @Published var engine: JarvisAssistant?
+    private var cancellable: AnyCancellable?
+
     func configure(context: ModelContext, llmConfig: LLMConfigStore, bridgeSettings: BridgeSettings) {
-        if engine == nil { engine = JarvisAssistant(context: context, llmConfig: llmConfig, bridgeSettings: bridgeSettings) }
-        else { engine?.updateBridgeSettings(bridgeSettings) }
+        if engine == nil {
+            let next = JarvisAssistant(context: context, llmConfig: llmConfig, bridgeSettings: bridgeSettings)
+            cancellable = next.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            engine = next
+        } else {
+            engine?.updateBridgeSettings(bridgeSettings)
+        }
     }
 }

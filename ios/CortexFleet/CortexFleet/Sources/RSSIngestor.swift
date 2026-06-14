@@ -10,6 +10,16 @@ struct RawFeedItem {
     var rawContent: String = ""   // full content/encoded HTML, for cover extraction
 }
 
+struct RSSFeedSpec: Sendable {
+    let id: String
+    let name: String
+    let url: String
+    let domain: String
+    let category: String
+    let channel: String
+    let limit: Int
+}
+
 /// Extracts a cover image URL from a feed item: media:content/enclosure attrs
 /// captured during parsing, else the first <img src> in the content HTML.
 enum CoverExtractor {
@@ -40,6 +50,18 @@ enum CoverExtractor {
 /// No third-party dependency. Ported from the backend `ingest/rss.py`.
 struct RSSIngestor {
     func fetch(_ source: FeedSource, timeout: TimeInterval = 15) async throws -> [RawFeedItem] {
+        try await fetch(RSSFeedSpec(
+            id: source.id,
+            name: source.name,
+            url: source.url,
+            domain: source.domain,
+            category: source.category,
+            channel: source.channel,
+            limit: source.limit
+        ), timeout: timeout)
+    }
+
+    func fetch(_ source: RSSFeedSpec, timeout: TimeInterval = 15) async throws -> [RawFeedItem] {
         guard let url = URL(string: source.url) else { return [] }
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout

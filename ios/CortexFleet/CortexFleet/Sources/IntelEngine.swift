@@ -105,20 +105,34 @@ final class IntelEngine: ObservableObject {
 
     private func scanRSS(judge: Judge) async -> [IntelItem] {
         let sources = ((try? context.fetch(FetchDescriptor<FeedSource>())) ?? []).filter(\.enabled)
+        let sourceByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+        let specs = sources.map {
+            RSSFeedSpec(
+                id: $0.id,
+                name: $0.name,
+                url: $0.url,
+                domain: $0.domain,
+                category: $0.category,
+                channel: $0.channel,
+                limit: $0.limit
+            )
+        }
         let ingestor = RSSIngestor()
         let existingKeys = existingDedupeKeys()
         var created: [IntelItem] = []
 
-        await withTaskGroup(of: (FeedSource, [RawFeedItem], String?).self) { group in
-            for source in sources {
+        await withTaskGroup(of: (RSSFeedSpec, [RawFeedItem], String?).self) { group in
+            for source in specs {
                 group.addTask {
                     do { return (source, try await ingestor.fetch(source), nil) }
                     catch { return (source, [], error.localizedDescription) }
                 }
             }
             for await (source, items, err) in group {
-                source.lastFetched = Date()
-                source.lastError = err
+                if let model = sourceByID[source.id] {
+                    model.lastFetched = Date()
+                    model.lastError = err
+                }
                 for raw in items {
                     let key = Self.dedupeKey(raw.title)
                     guard !existingKeys.contains(key), !created.contains(where: { $0.dedupeKey == key }) else { continue }
