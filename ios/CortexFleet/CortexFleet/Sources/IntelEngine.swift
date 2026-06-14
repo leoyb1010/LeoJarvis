@@ -63,7 +63,7 @@ final class IntelEngine: ObservableObject {
 
     // MARK: - Public scan
 
-    func scan(includeRSS: Bool = true, includeGitHub: Bool = true) async {
+    func scan(includeRSS: Bool = true, includeGitHub: Bool = true, includeMail: Bool = true) async {
         guard !isScanning else { return }
         isScanning = true
         lastError = nil
@@ -84,7 +84,13 @@ final class IntelEngine: ObservableObject {
             if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 GitHub 雷达…", found: newItems.count) }
             newItems += await scanGitHub(judge: judge)
         }
+        if includeMail {
+            progressText = "扫描 Gmail 邮件…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 Gmail 邮件…", found: newItems.count) }
+            newItems += await scanMail(judge: judge)
+        }
         if #available(iOS 16.1, *) { await ScanActivityController.shared.finish(found: newItems.count) }
+        let pipelineError = lastError
 
         // Optional LLM localization/enrichment for the top items (bounded for cost).
         if llmConfig.settings.allowTranslation || llmConfig.settings.allowBriefingLLM,
@@ -98,10 +104,12 @@ final class IntelEngine: ObservableObject {
         UserDefaults.standard.set(lastScan, forKey: "intel.lastScan")
         let enabledSources = ((try? context.fetch(FetchDescriptor<FeedSource>())) ?? []).filter(\.enabled)
         let failedSources = enabledSources.filter { ($0.lastError ?? "").isEmpty == false }
-        if newItems.isEmpty, !failedSources.isEmpty {
+        if newItems.isEmpty, let pipelineError, !pipelineError.isEmpty {
+            lastError = pipelineError
+        } else if newItems.isEmpty, !failedSources.isEmpty {
             lastError = "扫描完成，但 \(failedSources.count)/\(enabledSources.count) 个 RSS 源失败。请到「设置 → 信源状态」查看错误。"
         } else if newItems.isEmpty {
-            lastError = "扫描完成，过去 24 小时没有新的 RSS / GitHub 情报。"
+            lastError = "扫描完成，过去 24 小时没有新的 RSS / GitHub / Gmail 情报。"
         } else {
             lastError = nil
         }
@@ -191,6 +199,79 @@ final class IntelEngine: ObservableObject {
             }
         }
         return visibleItems
+    }
+
+    // MARK: - Gmail
+
+    private func scanMail(judge: Judge) async -> [IntelItem] {
+        let config = GmailConfigStore.load(keychain: keychain)
+        guard config.enabled else { return [] }
+        guard let password = try? keychain.gmailPassword(), !password.isEmpty else {
+            lastError = "Gmail 未配置 App Password。"
+            return []
+        }
+
+        do {
+            let messages = try await GmailIMAPClient().fetchUnread(config: config, password: password)
+            var existingByKey = existingItemsByDedupeKey()
+            var visibleItems: [IntelItem] = []
+            var visibleKeys = Set<String>()
+            let freshCutoff = IntelItem.freshCutoff()
+            for message in messages {
+                let key = Self.dedupeKey("email:" + (message.messageID?.isEmpty == false ? message.messageID! : message.uid))
+                let summary = [
+                    "发件人：\(message.sender)",
+                    message.date.map { "邮件时间：\($0.formatted(.dateTime.month().day().hour().minute()))" },
+                    "状态：Gmail IMAP 未读邮件，只读取邮件头部。"
+                ].compactMap { $0 }.joined(separator: "\n")
+                let verdict = judge.evaluate(title: message.subject, summary: summary, extraSignal: 0.18)
+                if let existing = existingByKey[key] {
+                    existing.title = message.subject
+                    existing.summary = summary
+                    existing.sourceName = "Gmail"
+                    existing.tags = ["Gmail", "邮件"]
+                    existing.score = max(existing.score, verdict.score)
+                    existing.triage = verdict.triage == "ignore" ? "digest" : verdict.triage
+                    existing.priority = Judge.priority(score: max(existing.score, 0.52), triage: existing.triage)
+                    existing.publishedAt = message.date
+                    existing.collectedAt = Date()
+                    existing.sourceError = nil
+                    if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(existing)
+                        visibleKeys.insert(key)
+                    }
+                    continue
+                }
+                let item = IntelItem(
+                    kind: "email",
+                    domain: "business",
+                    sourceName: "Gmail",
+                    title: message.subject,
+                    summary: summary,
+                    url: nil,
+                    tags: ["Gmail", "邮件"],
+                    score: max(verdict.score, 0.52),
+                    triage: verdict.triage == "ignore" ? "digest" : verdict.triage,
+                    priority: Judge.priority(score: max(verdict.score, 0.52), triage: verdict.triage),
+                    whyImportant: "这是 Gmail 未读邮件，已进入 Jarvis 本机邮件观察区。",
+                    relation: "邮件来自 \(message.sender)，可在 Gmail 中继续处理。",
+                    nextStep: "打开 Gmail 查看正文，或把邮件主题转成记事和待办。",
+                    channel: "mail",
+                    publishedAt: message.date,
+                    dedupeKey: key
+                )
+                context.insert(item)
+                existingByKey[key] = item
+                if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                    visibleItems.append(item)
+                    visibleKeys.insert(key)
+                }
+            }
+            return visibleItems
+        } catch {
+            lastError = "Gmail 扫描失败：\(error.localizedDescription)"
+            return []
+        }
     }
 
     // MARK: - GitHub

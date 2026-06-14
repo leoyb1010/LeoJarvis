@@ -25,7 +25,7 @@ struct BriefingView: View {
     private var business: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "business" } }
     private var life: [IntelItem] { recent.filter { $0.kind == "rss" && $0.domain == "life" } }
     private var github: [IntelItem] { recent.filter { $0.kind == "github_repo" } }
-    private var mail: [MobileBriefingItem] { store.mobileBriefing.mailItems }
+    private var mail: [IntelItem] { recent.filter { $0.kind == "email" } }
 
     var body: some View {
         ZStack {
@@ -40,7 +40,7 @@ struct BriefingView: View {
                     }
                     statsRow
                     if recent.isEmpty && mail.isEmpty {
-                        EmptyHint(text: "过去 24 小时暂无新简报。下拉刷新会直接在 iPhone 本机扫描 RSS / GitHub 信源。", systemImage: "newspaper")
+                        EmptyHint(text: "过去 24 小时暂无新简报。下拉刷新会直接在 iPhone 本机扫描 RSS / GitHub / Gmail 信源。", systemImage: "newspaper")
                             .padding(.top, 28)
                     } else {
                         section("业务资讯", .news, Brand.accent, business, "briefing.business", expanded: true)
@@ -108,7 +108,10 @@ struct BriefingView: View {
                 EmptyHint(text: "暂无进入观察区的邮件。")
             } else {
                 ForEach(mail) { item in
-                    MailBriefingCard(item: item)
+                    Button { detail = item } label: {
+                        MailBriefingCard(item: item)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -120,29 +123,31 @@ struct BriefingView: View {
 }
 
 private struct MailBriefingCard: View {
-    let item: MobileBriefingItem
+    let item: IntelItem
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(item.source ?? "Mail", systemImage: "envelope.fill")
+                Label(item.sourceName, systemImage: "envelope.fill")
                     .font(.hudMono(10, .semibold))
                     .foregroundStyle(Brand.vital)
                 Spacer()
-                Text(item.priority ?? "邮件")
+                Text(item.priority)
                     .font(.hudMono(10, .bold))
                     .foregroundStyle(Brand.gold)
             }
-            Text(item.title)
+            Text(item.displayTitle)
                 .font(.headline)
                 .foregroundStyle(Brand.hudText)
                 .lineLimit(3)
                 .textSelection(.enabled)
-            Text(item.summaryText)
-                .font(.subheadline)
-                .foregroundStyle(Brand.hudText.opacity(0.72))
-                .lineLimit(6)
-                .textSelection(.enabled)
+            if let summary = item.displaySummary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(Brand.hudText.opacity(0.72))
+                    .lineLimit(6)
+                    .textSelection(.enabled)
+            }
             if let next = item.nextStep, !next.isEmpty {
                 Text(next)
                     .font(.caption)

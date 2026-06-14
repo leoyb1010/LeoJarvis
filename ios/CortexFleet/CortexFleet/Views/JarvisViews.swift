@@ -147,7 +147,7 @@ struct MobileBriefingView: View {
                     CompactHomeMetric(title: "资讯", value: "\(store.mobileBriefing.newsItems.count)", detail: "RSS/网页/生活", symbol: "newspaper")
                     CompactHomeMetric(title: "GitHub", value: "\(store.mobileBriefing.githubItems.count)", detail: "项目雷达", symbol: "chevron.left.forwardslash.chevron.right")
                     CompactHomeMetric(title: "X", value: "\(store.mobileBriefing.xItems.count)", detail: "社媒监控", symbol: "at")
-                    CompactHomeMetric(title: "邮件", value: "\(store.mobileBriefing.mailItems.count)", detail: "Apple Mail", symbol: "envelope")
+                    CompactHomeMetric(title: "邮件", value: "\(store.mobileBriefing.mailItems.count)", detail: "Gmail IMAP", symbol: "envelope")
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -163,7 +163,7 @@ struct MobileBriefingView: View {
 
             Section("今日重点") {
                 if items.isEmpty {
-                    ContentUnavailableView("暂无简报", systemImage: "newspaper", description: Text("刷新后会从 Mac mini Bridge 同步今日情报简报。"))
+                    ContentUnavailableView("暂无简报", systemImage: "newspaper", description: Text("刷新后会由 iPhone 本机扫描 RSS / GitHub / Gmail。"))
                 } else {
                     ForEach(items) { item in
                         NavigationLink {

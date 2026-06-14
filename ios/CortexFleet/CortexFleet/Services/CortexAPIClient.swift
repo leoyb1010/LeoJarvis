@@ -106,6 +106,8 @@ final class KeychainVault {
     private let llmAccount = "llm-openai-compatible-key"
     private let githubService = "com.leo.cortexfleet.github-token"
     private let githubAccount = "github-radar-token"
+    private let gmailService = "com.leo.cortexfleet.gmail"
+    private let gmailAccount = "gmail-app-password"
 
     func savePassword(_ password: String, for hostID: String) throws {
         let data = Data(password.utf8)
@@ -189,7 +191,33 @@ final class KeychainVault {
         try? readSecret(service: githubService, account: githubAccount)
     }
 
+    // MARK: - Gmail App Password
+
+    func saveGmailPassword(_ password: String) throws {
+        try saveSecret(Self.compactSecret(password), service: gmailService, account: gmailAccount)
+    }
+
+    func gmailPassword() throws -> String {
+        try readSecret(service: gmailService, account: gmailAccount)
+    }
+
+    func hasGmailPassword() -> Bool {
+        (try? gmailPassword().isEmpty == false) ?? false
+    }
+
+    func deleteGmailPassword() {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: gmailService,
+            kSecAttrAccount as String: gmailAccount,
+        ] as CFDictionary)
+    }
+
     // MARK: - Generic secret helpers
+
+    static func compactSecret(_ value: String) -> String {
+        value.filter { !$0.isWhitespace }
+    }
 
     private func saveSecret(_ value: String, service: String, account: String) throws {
         let data = Data(value.utf8)
@@ -206,7 +234,7 @@ final class KeychainVault {
     }
 
     private func readSecret(service: String, account: String) throws -> String {
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -237,6 +265,373 @@ final class KeychainVault {
             kSecAttrAccount as String: bridgeAccount
         ]
     }
+}
+
+enum GmailConfigStore {
+    static let key = "cortexFleet.gmailSettings.v1"
+
+    static func load(defaults: UserDefaults = .standard, keychain: KeychainVault) -> MobileGmailConfig {
+        guard let data = defaults.data(forKey: key),
+              var config = try? JSONDecoder().decode(MobileGmailConfig.self, from: data) else {
+            return MobileGmailConfig(hasPassword: keychain.hasGmailPassword())
+        }
+        config.hasPassword = keychain.hasGmailPassword()
+        return config
+    }
+
+    static func save(_ config: MobileGmailConfig, defaults: UserDefaults = .standard, keychain: KeychainVault) throws {
+        var stored = config
+        stored.hasPassword = keychain.hasGmailPassword()
+        let data = try JSONEncoder().encode(stored)
+        defaults.set(data, forKey: key)
+    }
+}
+
+struct GmailMessage: Equatable, Sendable {
+    let uid: String
+    let subject: String
+    let sender: String
+    let date: Date?
+    let messageID: String?
+}
+
+struct GmailMailboxSnapshot: Equatable, Sendable {
+    let unreadCount: Int
+    let mailboxCount: Int?
+    let checkedAt: Date
+}
+
+struct GmailIMAPClient {
+    func test(config: MobileGmailConfig, password: String) async -> MobileGmailTestResult {
+        do {
+            let snapshot = try await mailboxSnapshot(config: config, password: password)
+            return MobileGmailTestResult(ok: true, unread: snapshot.unreadCount, message: "Gmail 连接成功，未读 \(snapshot.unreadCount) 封，收件箱 \(snapshot.mailboxCount.map(String.init) ?? "--") 封。")
+        } catch {
+            return MobileGmailTestResult(ok: false, unread: nil, message: "Gmail 连接失败：\(error.localizedDescription)")
+        }
+    }
+
+    func unreadCount(config: MobileGmailConfig, password: String) async throws -> Int {
+        try await mailboxSnapshot(config: config, password: password).unreadCount
+    }
+
+    func mailboxSnapshot(config: MobileGmailConfig, password: String) async throws -> GmailMailboxSnapshot {
+        let session = IMAPSession(host: config.host, port: config.port)
+        try await session.connect()
+        defer { session.close() }
+        try await session.login(user: config.user, password: password)
+        let mailboxCount = try await session.selectMailbox(config.mailbox)
+        let uids = try await session.search(config.search)
+        try? await session.logout()
+        return GmailMailboxSnapshot(unreadCount: uids.count, mailboxCount: mailboxCount, checkedAt: Date())
+    }
+
+    func fetchUnread(config: MobileGmailConfig, password: String) async throws -> [GmailMessage] {
+        let session = IMAPSession(host: config.host, port: config.port)
+        try await session.connect()
+        defer { session.close() }
+        try await session.login(user: config.user, password: password)
+        _ = try await session.selectMailbox(config.mailbox)
+        let uids = try await session.search(config.search)
+        let targetUIDs = Array(uids.suffix(max(1, config.limit)).reversed())
+        var messages: [GmailMessage] = []
+        for uid in targetUIDs {
+            if let message = try await session.fetchHeader(uid: uid) {
+                messages.append(message)
+            }
+        }
+        try? await session.logout()
+        return messages
+    }
+}
+
+private final class ContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(_ continuation: CheckedContinuation<Void, Error>, with result: Result<Void, Error>) {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return
+        }
+        didResume = true
+        lock.unlock()
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
+private final class IMAPSession {
+    private let host: String
+    private let port: Int
+    private let queue = DispatchQueue(label: "com.leo.cortexfleet.imap")
+    private var connection: NWConnection?
+    private var buffer = ""
+    private var tagCounter = 0
+
+    init(host: String, port: Int) {
+        self.host = host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "imap.gmail.com" : host.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.port = port
+    }
+
+    func connect() async throws {
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(max(1, min(65535, port)))) else {
+            throw NSError(domain: "GmailIMAP", code: -10, userInfo: [NSLocalizedDescriptionKey: "IMAP 端口无效。"])
+        }
+        let params = NWParameters.tls
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: params)
+        connection = conn
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = ContinuationGate()
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    gate.resume(continuation, with: .success(()))
+                case .failed(let error), .waiting(let error):
+                    gate.resume(continuation, with: .failure(error))
+                default:
+                    break
+                }
+            }
+            conn.start(queue: queue)
+        }
+        _ = try await readLine()
+    }
+
+    func login(user: String, password: String) async throws {
+        let cleanPassword = KeychainVault.compactSecret(password)
+        guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !cleanPassword.isEmpty else {
+            throw NSError(domain: "GmailIMAP", code: -11, userInfo: [NSLocalizedDescriptionKey: "缺少 Gmail 地址或 App Password。"])
+        }
+        _ = try await command("LOGIN \(quote(user.trimmingCharacters(in: .whitespacesAndNewlines))) \(quote(cleanPassword))")
+    }
+
+    func selectMailbox(_ mailbox: String) async throws -> Int? {
+        let box = mailbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "INBOX" : mailbox.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = try await command("SELECT \(quote(box))")
+        return Self.parseExists(lines)
+    }
+
+    func search(_ criteria: String) async throws -> [String] {
+        let query = criteria.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "UNSEEN" : criteria.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = try await command("UID SEARCH \(query)")
+        guard let row = lines.first(where: { $0.uppercased().hasPrefix("* SEARCH") }) else { return [] }
+        return row
+            .replacingOccurrences(of: "* SEARCH", with: "", options: [.caseInsensitive])
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+    }
+
+    func fetchHeader(uid: String) async throws -> GmailMessage? {
+        let lines = try await command("UID FETCH \(uid) (BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])")
+        var headerLines: [String] = []
+        var capturing = false
+        for line in lines {
+            if line.hasPrefix("*") && line.uppercased().contains("FETCH") {
+                capturing = true
+                continue
+            }
+            if line == ")" {
+                capturing = false
+                continue
+            }
+            if capturing, !line.isEmpty, !line.hasPrefix(")") {
+                headerLines.append(line)
+            }
+        }
+        let headers = Self.parseHeaders(headerLines.joined(separator: "\n"))
+        let subject = decodeEncodedWords(headers["subject"] ?? "(无主题)")
+        let sender = decodeEncodedWords(headers["from"] ?? "未知发件人")
+        let messageID = headers["message-id"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return GmailMessage(uid: uid, subject: subject, sender: sender, date: parseDate(headers["date"]), messageID: messageID)
+    }
+
+    func logout() async throws {
+        _ = try await command("LOGOUT")
+    }
+
+    func close() {
+        connection?.cancel()
+        connection = nil
+    }
+
+    private func command(_ value: String) async throws -> [String] {
+        tagCounter += 1
+        let tag = String(format: "A%03d", tagCounter)
+        try await send("\(tag) \(value)\r\n")
+        var lines: [String] = []
+        while true {
+            let line = try await readLine()
+            lines.append(line)
+            if line.hasPrefix("\(tag) ") {
+                let upper = line.uppercased()
+                if upper.contains(" OK") {
+                    return lines
+                }
+                throw NSError(domain: "GmailIMAP", code: -12, userInfo: [NSLocalizedDescriptionKey: line])
+            }
+        }
+    }
+
+    private func send(_ text: String) async throws {
+        guard let connection else {
+            throw NSError(domain: "GmailIMAP", code: -13, userInfo: [NSLocalizedDescriptionKey: "IMAP 连接未建立。"])
+        }
+        let data = Data(text.utf8)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            })
+        }
+    }
+
+    private func readLine() async throws -> String {
+        while true {
+            if let range = buffer.range(of: "\r\n") {
+                let line = String(buffer[..<range.lowerBound])
+                buffer.removeSubrange(buffer.startIndex..<range.upperBound)
+                return line
+            }
+            let chunk = try await receiveChunk()
+            buffer += chunk
+        }
+    }
+
+    private func receiveChunk() async throws -> String {
+        guard let connection else {
+            throw NSError(domain: "GmailIMAP", code: -14, userInfo: [NSLocalizedDescriptionKey: "IMAP 连接已关闭。"])
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, isComplete, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let data, !data.isEmpty {
+                    continuation.resume(returning: String(decoding: data, as: UTF8.self))
+                    return
+                }
+                if isComplete {
+                    continuation.resume(throwing: NSError(domain: "GmailIMAP", code: -15, userInfo: [NSLocalizedDescriptionKey: "IMAP 服务器关闭了连接。"]))
+                    return
+                }
+                continuation.resume(returning: "")
+            }
+        }
+    }
+
+    private func quote(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    private static func parseHeaders(_ raw: String) -> [String: String] {
+        var headers: [String: String] = [:]
+        var currentKey: String?
+        for line in raw.components(separatedBy: .newlines) {
+            if line.hasPrefix(" ") || line.hasPrefix("\t"), let key = currentKey {
+                headers[key, default: ""] += " " + line.trimmingCharacters(in: .whitespacesAndNewlines)
+                continue
+            }
+            guard let idx = line.firstIndex(of: ":") else { continue }
+            let key = line[..<idx].lowercased()
+            let value = line[line.index(after: idx)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[String(key)] = value
+            currentKey = String(key)
+        }
+        return headers
+    }
+
+    private static func parseExists(_ lines: [String]) -> Int? {
+        for line in lines {
+            let parts = line.split(whereSeparator: \.isWhitespace)
+            guard parts.count >= 3, parts[0] == "*", parts[2].uppercased() == "EXISTS" else { continue }
+            return Int(parts[1])
+        }
+        return nil
+    }
+}
+
+private func parseDate(_ value: String?) -> Date? {
+    guard var text = value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+    text = text.replacingOccurrences(of: "\\s*\\([^\\)]*\\)\\s*$", with: "", options: .regularExpression)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.isLenient = true
+    for pattern in [
+        "EEE, d MMM yyyy HH:mm:ss Z",
+        "EEE, dd MMM yyyy HH:mm:ss Z",
+        "d MMM yyyy HH:mm:ss Z",
+        "dd MMM yyyy HH:mm:ss Z",
+        "EEE, d MMM yyyy HH:mm Z",
+        "d MMM yyyy HH:mm Z",
+    ] {
+        formatter.dateFormat = pattern
+        if let date = formatter.date(from: text) { return date }
+    }
+    return nil
+}
+
+private func decodeEncodedWords(_ value: String) -> String {
+    let pattern = "=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?="
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
+    let ns = value as NSString
+    let mutable = NSMutableString(string: value)
+    let matches = regex.matches(in: value, range: NSRange(location: 0, length: ns.length))
+    for match in matches.reversed() {
+        let charset = ns.substring(with: match.range(at: 1)).lowercased()
+        let encoding = ns.substring(with: match.range(at: 2)).lowercased()
+        let body = ns.substring(with: match.range(at: 3))
+        let decodedData: Data?
+        if encoding == "b" {
+            decodedData = Data(base64Encoded: body)
+        } else {
+            decodedData = decodeQuotedPrintableWord(body)
+        }
+        guard let data = decodedData else { continue }
+        let stringEncoding: String.Encoding
+        if charset.contains("gb") {
+            stringEncoding = .utf8
+        } else if charset.contains("iso-8859-1") || charset.contains("latin") {
+            stringEncoding = .isoLatin1
+        } else {
+            stringEncoding = .utf8
+        }
+        let replacement = String(data: data, encoding: stringEncoding)
+            ?? String(decoding: data, as: UTF8.self)
+        mutable.replaceCharacters(in: match.range, with: replacement)
+    }
+    return (mutable as String)
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func decodeQuotedPrintableWord(_ value: String) -> Data {
+    var bytes: [UInt8] = []
+    let chars = Array(value.replacingOccurrences(of: "_", with: " "))
+    var index = 0
+    while index < chars.count {
+        if chars[index] == "=", index + 2 < chars.count {
+            let hex = String(chars[(index + 1)...(index + 2)])
+            if let byte = UInt8(hex, radix: 16) {
+                bytes.append(byte)
+                index += 3
+                continue
+            }
+        }
+        bytes.append(contentsOf: String(chars[index]).utf8)
+        index += 1
+    }
+    return Data(bytes)
 }
 
 struct LocalDeviceProbe {
@@ -976,6 +1371,7 @@ struct MobileBridgeClient {
         config: MobileGmailConfig,
         appPassword: String
     ) async throws -> MobileGmailSaveResponse {
+        let normalizedPassword = appPassword.filter { !$0.isWhitespace }
         var body: [String: Any] = [
             "enabled": config.enabled,
             "user": config.user,
@@ -985,8 +1381,8 @@ struct MobileBridgeClient {
             "search": config.search,
             "limit": config.limit,
         ]
-        if !appPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            body["app_password"] = appPassword
+        if !normalizedPassword.isEmpty {
+            body["app_password"] = normalizedPassword
         }
         return try await send(
             settings: settings,

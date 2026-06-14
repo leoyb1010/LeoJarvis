@@ -157,7 +157,7 @@ final class IntelItem {
     /// date when the feed provides one; GitHub uses `pushedAt`; local-only
     /// fallback uses first collection time. Do not mutate this just because a
     /// scan saw the same old item again.
-    var contentDate: Date { publishedAt ?? collectedAt }
+    var contentDate: Date { kind == "email" ? collectedAt : (publishedAt ?? collectedAt) }
 
     static func freshCutoff(now: Date = Date()) -> Date {
         now.addingTimeInterval(-24 * 60 * 60)

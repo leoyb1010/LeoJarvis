@@ -1023,6 +1023,22 @@ struct MobileMailConfigPayload: Decodable, Equatable {
     let email: MobileMailStatus
 }
 
+struct MobileGmailRuntimeStatus: Equatable {
+    var unreadCount: Int?
+    var inboxCount: Int?
+    var lastChecked: Date?
+    var message: String
+    var reachable: Bool
+
+    init(unreadCount: Int? = nil, inboxCount: Int? = nil, lastChecked: Date? = nil, message: String = "尚未扫描", reachable: Bool = false) {
+        self.unreadCount = unreadCount
+        self.inboxCount = inboxCount
+        self.lastChecked = lastChecked
+        self.message = message
+        self.reachable = reachable
+    }
+}
+
 struct MobileGmailTestResult: Decodable, Equatable {
     let ok: Bool
     let unread: Int?

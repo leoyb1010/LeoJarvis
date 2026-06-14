@@ -27,7 +27,10 @@ struct CortexFleetApp: App {
                 .modelContainer(env.container)
                 .tint(Brand.accent)
                 .preferredColorScheme(.dark)
-                .onOpenURL { url in store.applyBridgeConfigurationURL(url) }
+                .onOpenURL { url in
+                    store.applyBridgeConfigurationURL(url)
+                    store.applyGmailConfigurationURL(url)
+                }
                 .task { BackgroundRefresh.shared.register(env: env) }
         }
         .onChange(of: scenePhase) { _, phase in

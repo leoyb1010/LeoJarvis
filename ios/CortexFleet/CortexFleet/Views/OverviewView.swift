@@ -31,6 +31,10 @@ struct OverviewView: View {
             .map { $0 }
     }
     private var hotCount: Int { items.filter { $0.priority == "高优先" }.count }
+    private var recentMailItems: [IntelItem] {
+        let cutoff = IntelItem.freshCutoff()
+        return items.filter { $0.kind == "email" && $0.contentDate >= cutoff }
+    }
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
         switch h { case 0..<5: return "夜深了"; case 5..<11: return "早上好"; case 11..<14: return "中午好"; case 14..<18: return "下午好"; default: return "晚上好" }
@@ -167,48 +171,67 @@ struct OverviewView: View {
     }
 
     private var gmailStatusStrip: some View {
-        HStack(spacing: 10) {
-            Image(systemName: store.mobileGmailConfig.enabled ? "envelope.badge.fill" : "envelope.badge")
-                .foregroundStyle(store.mobileGmailConfig.enabled ? Brand.vital : Brand.gold)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(gmailTitle)
-                    .font(.hudMono(11, .semibold))
-                    .foregroundStyle(Brand.hudText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                Text(gmailDetail)
-                    .font(.hudMono(10))
-                    .foregroundStyle(Brand.hudText.opacity(0.55))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: store.mobileGmailConfig.enabled ? "envelope.badge.fill" : "envelope.badge")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(store.mobileGmailRuntime.reachable ? Brand.vital : Brand.gold)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Gmail 邮件监控")
+                        .font(.hudMono(11, .semibold))
+                        .foregroundStyle(Brand.hudText)
+                    Text(gmailAccountText)
+                        .font(.hudMono(9))
+                        .foregroundStyle(Brand.hudText.opacity(0.52))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+                Text(gmailStatusBadge)
+                    .font(.hudMono(9, .bold))
+                    .foregroundStyle(store.mobileGmailRuntime.reachable ? Brand.vital : Brand.gold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background((store.mobileGmailRuntime.reachable ? Brand.vital : Brand.gold).opacity(0.1), in: Capsule())
             }
-            Spacer(minLength: 0)
-            Text("扫描间隔 60 分钟")
-                .font(.hudMono(10, .semibold))
-                .foregroundStyle(Brand.accent.opacity(0.85))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Brand.accent.opacity(0.1), in: Capsule())
+            HStack(spacing: 8) {
+                MailMetric(title: "未读", value: gmailUnreadText, accent: Brand.vital)
+                MailMetric(title: "收件箱", value: gmailInboxText, accent: Brand.accent)
+                MailMetric(title: "最近扫描", value: gmailLastCheckedText, accent: Brand.gold)
+            }
         }
         .padding(12)
         .hudSurface(corner: Brand.tileCorner, stroke: (store.mobileGmailConfig.enabled ? Brand.vital : Brand.gold).opacity(0.25), brackets: false)
     }
 
-    private var gmailTitle: String {
+    private var gmailAccountText: String {
         let gmail = store.mobileGmailConfig
-        if gmail.enabled, !gmail.user.isEmpty { return "Gmail 已配置 · \(gmail.user)" }
-        if store.mobileMailStatus.enabled { return "邮件监控已启用" }
-        return "Gmail 未启用"
+        if gmail.enabled, !gmail.user.isEmpty { return gmail.user }
+        return "未配置账号"
     }
 
-    private var gmailDetail: String {
-        let gmail = store.mobileGmailConfig
-        if gmail.enabled {
-            return "\(gmail.host):\(gmail.port) · \(gmail.mailbox) · \(gmail.search) · 最多 \(gmail.limit) 封"
-        }
-        if let error = store.sectionError("mail") { return error }
-        return "设置中可配置 Gmail App Password / IMAP"
+    private var gmailStatusBadge: String {
+        if store.mobileGmailRuntime.reachable { return "已连接" }
+        if store.sectionError("mail") != nil { return "异常" }
+        return store.mobileGmailConfig.enabled ? "待扫描" : "未启用"
+    }
+
+    private var gmailUnreadText: String {
+        if let count = store.mobileGmailRuntime.unreadCount { return "\(count)" }
+        if !recentMailItems.isEmpty { return "\(recentMailItems.count)" }
+        return store.mobileGmailConfig.enabled ? "--" : "0"
+    }
+
+    private var gmailInboxText: String {
+        if let count = store.mobileGmailRuntime.inboxCount { return "\(count)" }
+        return store.mobileGmailConfig.enabled ? "--" : "0"
+    }
+
+    private var gmailLastCheckedText: String {
+        if let date = store.mobileGmailRuntime.lastChecked { return RelativeTime.string(date) }
+        if let last = env.intel.lastScan, store.mobileGmailConfig.enabled { return RelativeTime.string(last) }
+        return "未扫描"
     }
 
     @ViewBuilder private var feed: some View {
@@ -239,6 +262,7 @@ struct OverviewView: View {
 
     private func refreshOverview(forceIntel: Bool) async {
         await store.refreshNetworkLatency()
+        await store.refreshMobileGmailStatus()
         if forceIntel || shouldAutoRefresh {
             await env.intel.scan()
         }
@@ -249,6 +273,7 @@ struct OverviewView: View {
         store.pulseScan()
         await store.refreshAll()
         await env.intel.scan()
+        await store.refreshMobileGmailStatus()
         try? await Task.sleep(for: .milliseconds(700))
         isSyncingAll = false
     }
@@ -333,6 +358,31 @@ private struct OverviewStatusTile: View {
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .hudSurface(corner: Brand.tileCorner, brackets: false)
         .contentShape(RoundedRectangle(cornerRadius: Brand.tileCorner, style: .continuous))
+    }
+}
+
+private struct MailMetric: View {
+    let title: String
+    let value: String
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.hudMono(8.5, .semibold))
+                .foregroundStyle(Brand.hudText.opacity(0.5))
+                .lineLimit(1)
+            Text(value)
+                .font(.hudDisplay(15, .bold))
+                .foregroundStyle(Brand.hudText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(accent.opacity(0.16), lineWidth: 0.8))
     }
 }
 

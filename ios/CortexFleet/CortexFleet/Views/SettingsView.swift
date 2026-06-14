@@ -219,11 +219,19 @@ private struct LLMSettingsEditor: View {
 private struct SourcesManagerView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var store: FleetStore
+    @EnvironmentObject private var env: AppEnvironment
     @Query(sort: \FeedSource.name) private var feeds: [FeedSource]
     @Query(sort: \ProfileInterest.term) private var interests: [ProfileInterest]
+    @Query(sort: [SortDescriptor(\IntelItem.collectedAt, order: .reverse)])
+    private var intelItems: [IntelItem]
     @State private var newFeedName = ""
     @State private var newFeedURL = ""
     @State private var newInterest = ""
+
+    private var mailCount: Int {
+        let cutoff = IntelItem.freshCutoff()
+        return intelItems.filter { $0.kind == "email" && $0.contentDate >= cutoff }.count
+    }
 
     var body: some View {
         List {
@@ -234,12 +242,12 @@ private struct SourcesManagerView: View {
                         .frame(width: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Mail 监控")
-                        Text("来自 Mac mini Bridge 的 Apple Mail / IMAP / Gmail 采集")
+                        Text("iPhone 本机通过 Gmail IMAP 采集，密码仅保存在本机 Keychain")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("\(store.mobileBriefing.mailItems.count) 封")
+                    Text("\(mailCount) 封")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Brand.vital)
                 }
@@ -253,13 +261,13 @@ private struct SourcesManagerView: View {
                     Label(store.mobileGmailConfig.enabled ? "管理 Gmail 监控" : "配置 Gmail 监控", systemImage: "envelope.badge")
                 }
                 Button {
-                    Task { await store.refreshSourcesFromBridge() }
+                    Task { await env.intel.scan(includeRSS: false, includeGitHub: false, includeMail: true) }
                 } label: {
-                    Label(store.isLoadingJarvis ? "刷新中…" : "刷新 Mail 与后端信源", systemImage: "arrow.clockwise")
+                    Label(env.intel.isScanning ? "刷新中…" : "刷新 Gmail 邮件", systemImage: "arrow.clockwise")
                 }
-                .disabled(store.isLoadingJarvis || !store.bridgeSettings.isUsable || !store.bridgeTokenIsSaved())
+                .disabled(env.intel.isScanning || !store.mobileGmailConfig.enabled)
             } header: { Text("Mail") } footer: {
-                Text("iOS 无法直接读取系统 Mail 沙盒数据；LeoJarvis 通过 Mac mini Bridge 读取已授权的 Apple Mail/IMAP/Gmail，再同步到手机简报。")
+                Text("iOS 无法直接读取系统 Mail App 沙盒数据；LeoJarvis 会作为独立 IMAP 客户端连接 Gmail，并把未读邮件头部写入本机简报。")
             }
 
             Section {
@@ -421,6 +429,7 @@ private struct FeedDiscoverView: View {
 
 private struct GmailSettingsView: View {
     @EnvironmentObject private var store: FleetStore
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var draft = MobileGmailConfig()
     @State private var appPassword = ""
@@ -430,7 +439,7 @@ private struct GmailSettingsView: View {
         if !draft.enabled { return true }
         let hasAccount = !draft.user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPassword = draft.hasPassword || !appPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasAccount && hasPassword && store.bridgeSettings.isUsable && store.bridgeTokenIsSaved()
+        return hasAccount && hasPassword
     }
 
     var body: some View {
@@ -445,7 +454,7 @@ private struct GmailSettingsView: View {
                     .textInputAutocapitalization(.never)
                     .plainEntryField()
             } footer: {
-                Text("Gmail 需要开启 IMAP，并使用 Google 账号的 App Password；普通登录密码通常无法通过 IMAP。")
+                Text("Gmail 需要开启 IMAP，并使用 Google 账号的 App Password；密码只保存在这台 iPhone 的 Keychain，不经过 Mac mini Bridge。")
             }
 
             Section {
@@ -491,11 +500,11 @@ private struct GmailSettingsView: View {
                 .disabled(store.isSavingMailConfig || !canSave)
 
                 Button {
-                    Task { await store.refreshSourcesFromBridge() }
+                    Task { await env.intel.scan(includeRSS: false, includeGitHub: false, includeMail: true) }
                 } label: {
-                    Label(store.isLoadingJarvis ? "刷新中…" : "刷新 Mail 简报", systemImage: "arrow.clockwise")
+                    Label(env.intel.isScanning ? "刷新中…" : "刷新 Gmail 简报", systemImage: "arrow.clockwise")
                 }
-                .disabled(store.isLoadingJarvis || !store.bridgeSettings.isUsable || !store.bridgeTokenIsSaved())
+                .disabled(env.intel.isScanning || !store.mobileGmailConfig.enabled)
             }
         }
         .hudFormBackground()
@@ -521,6 +530,9 @@ private struct GmailSettingsView: View {
             testMessage = result.message
             draft = store.mobileGmailConfig
             appPassword = ""
+            if result.ok {
+                await env.intel.scan(includeRSS: false, includeGitHub: false, includeMail: true)
+            }
         }
     }
 }

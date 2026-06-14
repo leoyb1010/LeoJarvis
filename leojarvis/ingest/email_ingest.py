@@ -25,12 +25,16 @@ def _decode(value) -> str:
     return "".join(out)
 
 
+def _compact_app_password(value) -> str:
+    return "".join(str(value or "").split())
+
+
 def _gmail_account(cfg: dict | None = None) -> dict | None:
     cfg = cfg or gmail_config()
     if not cfg.get("enabled"):
         return None
     user = str(cfg.get("user") or "").strip()
-    password = str(cfg.get("app_password") or cfg.get("password") or "").strip()
+    password = _compact_app_password(cfg.get("app_password") or cfg.get("password"))
     if not user or not password:
         return None
     return {
@@ -135,7 +139,7 @@ def gmail_unread_count() -> int | None:
     if not cfg.get("enabled"):
         return None
     user = cfg.get("user")
-    password = cfg.get("app_password") or cfg.get("password")
+    password = _compact_app_password(cfg.get("app_password") or cfg.get("password"))
     if not user or not password:
         return None
     host = cfg.get("host") or "imap.gmail.com"

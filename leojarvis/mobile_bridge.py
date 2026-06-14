@@ -584,6 +584,10 @@ class DeviceOpsPreviewIn(BaseModel):
     path: str = ""
 
 
+def _compact_secret(value: str) -> str:
+    return "".join(str(value or "").split())
+
+
 def _sanitized_gmail_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = cfg or (user_settings.load().get("gmail", {}) or {})
     return {
@@ -718,7 +722,7 @@ def jarvis_mail_gmail(req: MobileGmailConfigIn, authorization: str | None = Head
     from .ingest.email_ingest import gmail_connection_status
 
     current = user_settings.load().get("gmail", {}) or {}
-    password = req.app_password.strip()
+    password = _compact_secret(req.app_password)
     next_cfg = {
         **current,
         "enabled": req.enabled,

@@ -14,6 +14,7 @@ final class FleetStore: ObservableObject {
     @Published private(set) var mobileBriefing = MobileBriefingPayload()
     @Published private(set) var mobileGmailConfig = MobileGmailConfig()
     @Published private(set) var mobileMailStatus = MobileMailStatus()
+    @Published private(set) var mobileGmailRuntime = MobileGmailRuntimeStatus()
     @Published private(set) var networkLatency = NetworkLatencySnapshot.empty
     @Published private(set) var sectionErrors: [String: String] = [:]
     @Published private(set) var activeBridgeName = "Mac mini Bridge"
@@ -27,6 +28,7 @@ final class FleetStore: ObservableObject {
     private let defaults: UserDefaults
     private let hostsKey = "cortexFleet.monitoredHosts.v1"
     private let bridgeSettingsKey = "cortexFleet.bridgeSettings.v1"
+    private let gmailSettingsKey = "cortexFleet.gmailSettings.v1"
     private let seedVersionKey = "cortexFleet.seedVersion"
     private let keychain: KeychainVault
     private let sshProbe: SSHProbeService
@@ -38,6 +40,8 @@ final class FleetStore: ObservableObject {
         self.keychain = vault
         self.sshProbe = SSHProbeService(keychain: vault)
         self.bridgeSettings = Self.loadBridgeSettings(from: defaults, key: bridgeSettingsKey)
+        self.mobileGmailConfig = Self.loadGmailConfig(from: defaults, key: gmailSettingsKey, keychain: vault)
+        self.mobileMailStatus = MobileMailStatus(enabled: self.mobileGmailConfig.enabled, appleMailFallback: false, appleMailUnreadOnly: false, accountCount: self.mobileGmailConfig.enabled ? 1 : 0)
         self.hosts = Self.loadHosts(from: defaults, key: hostsKey)
         self.hosts = Self.mergeSeededHosts(
             into: self.hosts,
@@ -226,6 +230,28 @@ final class FleetStore: ObservableObject {
         Task { await refreshAll() }
     }
 
+    func applyGmailConfigurationURL(_ url: URL) {
+        guard url.scheme == "leojarvis", ["gmail", "mail"].contains(url.host ?? ""),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return
+        }
+        let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let user = (values["user"] ?? values["email"] ?? "").removingPercentEncoding ?? ""
+        let password = (values["appPassword"] ?? values["app_password"] ?? values["password"] ?? "").removingPercentEncoding ?? ""
+        guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        var next = mobileGmailConfig
+        next.enabled = (values["enabled"] ?? "1") != "0"
+        next.user = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.host = (values["host"] ?? "imap.gmail.com").trimmingCharacters(in: .whitespacesAndNewlines)
+        next.port = Int(values["port"] ?? "") ?? 993
+        next.mailbox = (values["mailbox"] ?? "INBOX").trimmingCharacters(in: .whitespacesAndNewlines)
+        next.search = (values["search"] ?? "UNSEEN").trimmingCharacters(in: .whitespacesAndNewlines)
+        next.limit = Int(values["limit"] ?? "") ?? 20
+        Task { _ = await saveMobileGmailConfig(next, appPassword: password) }
+    }
+
     func bridgeTokenIsSaved() -> Bool {
         keychain.hasBridgeToken()
     }
@@ -260,6 +286,7 @@ final class FleetStore: ObservableObject {
         pulseScan()
         guard bridgeSettings.isUsable else {
             setSectionError("bridge", FleetError.invalidBridgeURL.localizedDescription)
+            await loadMobileMailConfig()
             return
         }
         if showLoading {
@@ -309,14 +336,7 @@ final class FleetStore: ObservableObject {
             } catch {
                 setSectionError("reach", error.localizedDescription)
             }
-            do {
-                let payload = try await mobileBridge.loadMailConfig(settings: bridgeSettings, token: token)
-                mobileGmailConfig = payload.gmail
-                mobileMailStatus = payload.email
-                clearSectionError("mail")
-            } catch {
-                setSectionError("mail", error.localizedDescription)
-            }
+            await loadMobileMailConfig()
             if sectionErrors.isEmpty {
                 errorMessage = nil
             }
@@ -429,48 +449,93 @@ final class FleetStore: ObservableObject {
 
     func loadMobileMailConfig() async {
         pulseScan()
-        guard bridgeSettings.isUsable else {
-            setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
+        mobileGmailConfig = Self.loadGmailConfig(from: defaults, key: gmailSettingsKey, keychain: keychain)
+        updateMobileMailStatus()
+        clearSectionError("mail")
+    }
+
+    func refreshMobileGmailStatus() async {
+        guard mobileGmailConfig.enabled else {
+            mobileGmailRuntime = MobileGmailRuntimeStatus(message: "Gmail 未启用", reachable: false)
+            return
+        }
+        guard mobileGmailConfig.hasPassword, let password = try? keychain.gmailPassword(), !password.isEmpty else {
+            mobileGmailRuntime = MobileGmailRuntimeStatus(message: "缺少 App Password", reachable: false)
+            setSectionError("mail", "缺少 Gmail App Password。")
             return
         }
         do {
-            LocalNetworkPermissionProbe.trigger()
-            let token = try keychain.bridgeToken()
-            let payload = try await mobileBridge.loadMailConfig(settings: bridgeSettings, token: token)
-            mobileGmailConfig = payload.gmail
-            mobileMailStatus = payload.email
+            let snapshot = try await GmailIMAPClient().mailboxSnapshot(config: mobileGmailConfig, password: password)
+            mobileGmailRuntime = MobileGmailRuntimeStatus(
+                unreadCount: snapshot.unreadCount,
+                inboxCount: snapshot.mailboxCount,
+                lastChecked: snapshot.checkedAt,
+                message: "Gmail 正常",
+                reachable: true
+            )
             clearSectionError("mail")
         } catch {
-            setSectionError("mail", error.localizedDescription)
+            mobileGmailRuntime = MobileGmailRuntimeStatus(
+                unreadCount: mobileGmailRuntime.unreadCount,
+                inboxCount: mobileGmailRuntime.inboxCount,
+                lastChecked: Date(),
+                message: error.localizedDescription,
+                reachable: false
+            )
+            setSectionError("mail", "Gmail 连接失败：\(error.localizedDescription)")
         }
     }
 
     func saveMobileGmailConfig(_ config: MobileGmailConfig, appPassword: String) async -> MobileGmailTestResult? {
         pulseScan()
-        guard bridgeSettings.isUsable else {
-            setSectionError("mail", FleetError.invalidBridgeURL.localizedDescription)
-            return nil
-        }
         isSavingMailConfig = true
         defer { isSavingMailConfig = false }
+        var next = sanitizedGmailConfig(config)
+        let compactPassword = KeychainVault.compactSecret(appPassword)
         do {
-            LocalNetworkPermissionProbe.trigger()
-            let token = try keychain.bridgeToken()
-            let response = try await mobileBridge.saveGmailConfig(
-                settings: bridgeSettings,
-                token: token,
-                config: config,
-                appPassword: appPassword
-            )
-            mobileGmailConfig = response.gmail
-            if response.test.ok {
-                clearSectionError("mail")
-                noticeMessage = response.test.message
-                await refreshSourcesFromBridge()
-            } else {
-                setSectionError("mail", response.test.message)
+            if !compactPassword.isEmpty {
+                try keychain.saveGmailPassword(compactPassword)
             }
-            return response.test
+            next.hasPassword = keychain.hasGmailPassword()
+            mobileGmailConfig = next
+            persistGmailConfig()
+            updateMobileMailStatus()
+
+            guard next.enabled else {
+                clearSectionError("mail")
+                mobileGmailRuntime = MobileGmailRuntimeStatus(message: "Gmail 未启用", reachable: false)
+                let result = MobileGmailTestResult(ok: true, unread: nil, message: "Gmail 监控已关闭。")
+                noticeMessage = result.message
+                return result
+            }
+
+            guard next.hasPassword, let password = try? keychain.gmailPassword(), !password.isEmpty else {
+                mobileGmailRuntime = MobileGmailRuntimeStatus(message: "缺少 App Password", reachable: false)
+                let result = MobileGmailTestResult(ok: false, unread: nil, message: "缺少 Gmail App Password。")
+                setSectionError("mail", result.message)
+                return result
+            }
+
+            let snapshot = try await GmailIMAPClient().mailboxSnapshot(config: next, password: password)
+            mobileGmailRuntime = MobileGmailRuntimeStatus(
+                unreadCount: snapshot.unreadCount,
+                inboxCount: snapshot.mailboxCount,
+                lastChecked: snapshot.checkedAt,
+                message: "Gmail 正常",
+                reachable: true
+            )
+            let result = MobileGmailTestResult(
+                ok: true,
+                unread: snapshot.unreadCount,
+                message: "Gmail 连接成功，未读 \(snapshot.unreadCount) 封，收件箱 \(snapshot.mailboxCount.map(String.init) ?? "--") 封。"
+            )
+            if result.ok {
+                clearSectionError("mail")
+                noticeMessage = result.message
+            } else {
+                setSectionError("mail", result.message)
+            }
+            return result
         } catch {
             setSectionError("mail", error.localizedDescription)
             return nil
@@ -715,6 +780,37 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    private func persistGmailConfig() {
+        do {
+            var config = mobileGmailConfig
+            config.hasPassword = keychain.hasGmailPassword()
+            let data = try JSONEncoder().encode(config)
+            defaults.set(data, forKey: gmailSettingsKey)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func updateMobileMailStatus() {
+        mobileMailStatus = MobileMailStatus(
+            enabled: mobileGmailConfig.enabled,
+            appleMailFallback: false,
+            appleMailUnreadOnly: false,
+            accountCount: mobileGmailConfig.enabled ? 1 : 0
+        )
+    }
+
+    private func sanitizedGmailConfig(_ config: MobileGmailConfig) -> MobileGmailConfig {
+        var next = config
+        next.user = next.user.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.host = next.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "imap.gmail.com" : next.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.port = max(1, min(65535, next.port))
+        next.mailbox = next.mailbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "INBOX" : next.mailbox.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.search = next.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "UNSEEN" : next.search.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.limit = max(1, min(80, next.limit))
+        return next
+    }
+
     private static func loadHosts(from defaults: UserDefaults, key: String) -> [MonitoredHost] {
         guard let data = defaults.data(forKey: key) else { return [] }
         return (try? JSONDecoder().decode([MonitoredHost].self, from: data)) ?? []
@@ -726,6 +822,15 @@ final class FleetStore: ObservableObject {
             return BridgeSettings()
         }
         return migratedBridgeSettings(settings)
+    }
+
+    private static func loadGmailConfig(from defaults: UserDefaults, key: String, keychain: KeychainVault) -> MobileGmailConfig {
+        guard let data = defaults.data(forKey: key),
+              var config = try? JSONDecoder().decode(MobileGmailConfig.self, from: data) else {
+            return MobileGmailConfig(hasPassword: keychain.hasGmailPassword())
+        }
+        config.hasPassword = keychain.hasGmailPassword()
+        return config
     }
 
     private static func migratedBridgeSettings(_ settings: BridgeSettings) -> BridgeSettings {

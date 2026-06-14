@@ -245,7 +245,7 @@ export function SettingsView() {
             <input placeholder="Gmail 地址" value={gmailDraft.user} onChange={(e) => setGmailDraft({ ...gmailDraft, user: e.target.value })} />
             <input placeholder="应用专用密码 App Password" type="password" value={gmailDraft.app_password} onChange={(e) => setGmailDraft({ ...gmailDraft, app_password: e.target.value })} />
             <button className="btn sm primary" disabled={!gmailDraft.user || !gmailDraft.app_password || saving} onClick={() => {
-              save({ gmail: { ...settings.gmail, enabled: true, user: gmailDraft.user.trim(), app_password: gmailDraft.app_password } });
+              save({ gmail: { ...settings.gmail, enabled: true, user: gmailDraft.user.trim(), app_password: gmailDraft.app_password.replace(/\s+/g, "") } });
               setGmailDraft({ user: gmailDraft.user, app_password: "" });
             }}>保存 Gmail</button>
           </div>
