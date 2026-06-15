@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import time
 import shutil
 import subprocess
@@ -18,6 +19,17 @@ from ..scheduler import run_ingest_cycle
 
 router = APIRouter()
 _LOCAL_TAILSCALE_CACHE: dict[str, object] = {"ts": 0.0, "ips": set()}
+
+
+def _public_settings(payload: dict) -> dict:
+    data = deepcopy(payload)
+    try:
+        from .. import mcp_gateway
+
+        data["mcp"] = mcp_gateway.public_settings(data.get("mcp", {}) or {})
+    except Exception:
+        pass
+    return data
 
 
 @router.get("/health")
@@ -97,14 +109,24 @@ class ReachSearchIn(BaseModel):
     limit: int = 10
 
 
+class MCPSettingsIn(BaseModel):
+    settings: dict = Field(default_factory=dict)
+
+
+class MCPSearchIn(BaseModel):
+    query: str
+    limit: int = 8
+    include_answer: bool = False
+
+
 @router.get("/settings")
 def get_settings() -> dict:
-    return user_settings.load()
+    return _public_settings(user_settings.load())
 
 
 @router.patch("/settings")
 def patch_settings(req: SettingsIn) -> dict:
-    return user_settings.patch(req.settings)
+    return _public_settings(user_settings.patch(req.settings))
 
 
 class OpmlImportIn(BaseModel):
@@ -776,6 +798,28 @@ def reach_github_search(req: ReachSearchIn) -> dict:
     from .. import reach
     try:
         return reach.github_search(req.query, limit=req.limit)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/mcp/status")
+def mcp_status() -> dict:
+    from .. import mcp_gateway
+    return mcp_gateway.status()
+
+
+@router.patch("/mcp/settings")
+def mcp_settings(req: MCPSettingsIn) -> dict:
+    from .. import mcp_gateway
+    saved = mcp_gateway.patch_settings(req.settings)
+    return {"ok": True, "mcp": mcp_gateway.public_settings(saved), "status": mcp_gateway.status()}
+
+
+@router.post("/mcp/search")
+def mcp_search(req: MCPSearchIn) -> dict:
+    from .. import mcp_gateway
+    try:
+        return mcp_gateway.search_web(req.query, limit=req.limit, include_answer=req.include_answer)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

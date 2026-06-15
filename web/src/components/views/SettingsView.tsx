@@ -5,13 +5,16 @@ import {
   disconnectRemoteLeoJarvis,
   getSettings,
   getSettingsDiagnostics,
+  getMcpStatus,
   getTuning,
   importOpml,
   listRemoteLeoJarvis,
+  patchMcpSettings,
   patchSettings,
   probeSshDevices,
   removeSshDevice,
   type LeoJarvisSettings,
+  type McpStatus,
   type RemoteLeoJarvisConnection,
   type RssSource,
   type Tuning,
@@ -33,6 +36,14 @@ const DEFAULT_SETTINGS: LeoJarvisSettings = {
   email: { enabled: false, accounts: [], apple_mail_fallback: true, apple_mail_limit: 20, apple_mail_unread_only: false },
   gmail: { enabled: false, user: "", app_password: "", host: "imap.gmail.com", port: 993, mailbox: "INBOX" },
   rss: { sources: [] },
+  mcp: {
+    enabled: true,
+    servers: {
+      tavily: { enabled: true, api_key: "" },
+      github_mcp: { enabled: true, api_key: "" },
+      amap_maps: { enabled: false, api_key: "" },
+    },
+  },
   x_monitor: {
     enabled: true,
     rsshub_base: "https://rsshub.app",
@@ -67,6 +78,7 @@ function normalizeSettings(input: Partial<LeoJarvisSettings> | null | undefined)
     email: { ...DEFAULT_SETTINGS.email, ...(input?.email || {}), accounts: input?.email?.accounts || [] },
     gmail: { ...DEFAULT_SETTINGS.gmail, ...(input?.gmail || {}) },
     rss: { ...DEFAULT_SETTINGS.rss, ...(input?.rss || {}), sources: input?.rss?.sources || [] },
+    mcp: { ...DEFAULT_SETTINGS.mcp, ...(input?.mcp || {}), servers: { ...DEFAULT_SETTINGS.mcp.servers, ...(input?.mcp?.servers || {}) } },
     x_monitor: { ...DEFAULT_SETTINGS.x_monitor, ...(input?.x_monitor || {}), users: input?.x_monitor?.users || DEFAULT_SETTINGS.x_monitor.users },
     remote_devices: input?.remote_devices || [],
     remote_cortex: input?.remote_cortex || [],
@@ -82,6 +94,7 @@ export function SettingsView() {
   const [settings, setSettings] = useState<LeoJarvisSettings | null>(null);
   const [diag, setDiag] = useState<any>(null);
   const [tuning, setTuning] = useState<Tuning | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -90,6 +103,7 @@ export function SettingsView() {
   const [rssDraft, setRssDraft] = useState<{ name: string; url: string; category: string }>({ name: "", url: "", category: "自定义" });
   const [opmlText, setOpmlText] = useState("");
   const [xUsers, setXUsers] = useState("");
+  const [mcpDraftKeys, setMcpDraftKeys] = useState<Record<string, string>>({});
   const [sshDraft, setSshDraft] = useState({ name: "", host: "", user: "", port: 22, proxy_command: "" });
   const [remoteDraft, setRemoteDraft] = useState({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787, proxy_command: "" });
   const [remoteLeoJarvis, setRemoteLeoJarvis] = useState<RemoteLeoJarvisConnection[]>([]);
@@ -104,6 +118,7 @@ export function SettingsView() {
       setGmailDraft({ user: res.gmail?.user || "", app_password: "" });
       getSettingsDiagnostics().then(setDiag).catch((err) => setDiag({ error: String(err) }));
       getTuning().then(setTuning).catch(() => {});
+      getMcpStatus().then(setMcpStatus).catch(() => {});
       listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
     } catch (err) {
       setError(String(err));
@@ -128,6 +143,7 @@ export function SettingsView() {
       const res = normalizeSettings(await patchSettings(next));
       setSettings(res);
       getSettingsDiagnostics().then(setDiag).catch((err) => setDiag({ error: String(err) }));
+      getMcpStatus().then(setMcpStatus).catch(() => {});
       listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
     } catch (err) {
       setError(String(err));
@@ -153,6 +169,23 @@ export function SettingsView() {
   const tv = (s: keyof Tuning, k: string, d: number) => Number((tuning?.[s] as any)?.[k] ?? d);
 
   function setRss(sources: RssSource[]) { save({ rss: { sources } }); }
+
+  async function saveMcpServer(id: string, patch: Record<string, any>) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await patchMcpSettings({ servers: { [id]: patch } });
+      setMcpStatus(res.status);
+      const next = normalizeSettings(await getSettings());
+      setSettings(next);
+      setNotice("MCP 设置已保存。需要 key 的能力会在补齐后自动变为可用。");
+      window.setTimeout(() => setNotice(""), 4000);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function addRemoteProduct() {
     if (!remoteDraft.host.trim()) return;
@@ -300,6 +333,66 @@ export function SettingsView() {
               await load();
             } catch (err) { setError(String(err)); } finally { setSaving(false); }
           }}>导入 OPML</button>
+        </section>
+
+        {/* MCP Gateway */}
+        <section className="card settings-card settings-wide">
+          <div className="panel-title">MCP Gateway（搜索 / 抓取 / 工具）</div>
+          <p className="settings-note">
+            Tavily、GitHub MCP 和高德地图统一从 Jarvis 后端调用。iPhone / Mac App 不直接嵌入第三方 key；补 key 后三端共用同一套能力。
+          </p>
+          <div className="reach-summary">
+            <div><b>{mcpStatus?.summary.ready ?? 0}</b><span>可用</span></div>
+            <div><b>{mcpStatus?.summary.needs_key ?? 0}</b><span>待补 key</span></div>
+            <div><b>{mcpStatus?.summary.disabled ?? 0}</b><span>已关闭</span></div>
+            <div><b>{mcpStatus?.summary.total ?? 0}</b><span>总能力</span></div>
+          </div>
+          <div className="settings-list mcp-list">
+            {(mcpStatus?.servers || []).map((server) => {
+              const localEnabled = settings.mcp?.servers?.[server.id]?.enabled ?? server.enabled;
+              const draftKey = mcpDraftKeys[server.id] || "";
+              return (
+                <div className="settings-row mcp-row" key={server.id}>
+                  <label className="toggle-pill compact">
+                    <input
+                      type="checkbox"
+                      checked={localEnabled !== false}
+                      onChange={(e) => saveMcpServer(server.id, { enabled: e.target.checked })}
+                    />
+                  </label>
+                  <div className="settings-row-main">
+                    <b>{server.name}</b>
+                    <span>{server.provider} · {server.capabilities.join(" / ")}</span>
+                    <small>{server.description}</small>
+                    <small>{server.message}</small>
+                  </div>
+                  <div className="mcp-keybox">
+                    <em className={`status-pill ${server.status}`}>{server.status === "ok" ? "可用" : server.status === "warn" ? "待配置" : "关闭"}</em>
+                    <input
+                      type="password"
+                      placeholder={server.key_configured ? `已配置：${server.key_source || "local"}` : server.auth_env.join(" / ")}
+                      value={draftKey}
+                      onChange={(e) => setMcpDraftKeys({ ...mcpDraftKeys, [server.id]: e.target.value })}
+                    />
+                    <button
+                      className="btn sm"
+                      disabled={!draftKey.trim() || saving}
+                      onClick={() => {
+                        saveMcpServer(server.id, { api_key: draftKey.trim(), enabled: true });
+                        setMcpDraftKeys({ ...mcpDraftKeys, [server.id]: "" });
+                      }}
+                    >
+                      保存 key
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {!mcpStatus ? <div className="empty">MCP 状态读取中。</div> : null}
+          </div>
+          <div className="diag-box">
+            Key 优先级：环境变量优先，其次本机设置。当前保留 <code>TAVILY_API_KEY</code>、<code>GITHUB_TOKEN</code>、<code>AMAP_MAPS_API_KEY</code>。
+          </div>
         </section>
 
         {/* X 监控 */}

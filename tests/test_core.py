@@ -476,3 +476,22 @@ def test_reach_catalog_keeps_agent_reach_source_breadth():
 
     assert expected.issubset(ids)
     assert len(reach.source_matrix()) >= 4
+
+
+def test_mcp_gateway_status_is_secret_safe(monkeypatch):
+    from leojarvis import mcp_gateway
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    status = mcp_gateway.status()
+
+    server_ids = {row["id"] for row in status["servers"]}
+    assert {"tavily", "github_mcp", "amap_maps"}.issubset(server_ids)
+    assert status["summary"]["total"] >= 3
+    assert "api_key" not in str(status)
+
+    reach_channels = {row["id"] for row in mcp_gateway.reach_channels()}
+    assert "tavily" in reach_channels
+
+    public = mcp_gateway.public_settings({"servers": {"tavily": {"enabled": True, "api_key": "dummy-secret"}}})
+    assert public["servers"]["tavily"]["api_key"] == ""
+    assert public["servers"]["tavily"]["key_configured"] is True

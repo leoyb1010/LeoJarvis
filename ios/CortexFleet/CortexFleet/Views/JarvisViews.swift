@@ -537,7 +537,7 @@ struct MobileCapabilitiesView: View {
                 }
             }
 
-            Section("16 个信息来源") {
+            Section("\(store.reachStatus.channels.count) 个信息来源") {
                 if store.reachStatus.channels.isEmpty {
                     Text("暂无 Reach 数据")
                         .foregroundStyle(.secondary)

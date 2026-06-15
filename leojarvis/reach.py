@@ -373,8 +373,13 @@ def source_matrix() -> list[dict[str, Any]]:
     """Agent-Reach-style source catalog used by the intelligence UI."""
     return [
         {
+            "group": "MCP / Agent 工具",
+            "channels": ["tavily", "github_mcp", "amap_maps", "exa_search"],
+            "use": "实时搜索、网页抓取、GitHub 研发上下文、地图位置和 Agent 工具调用，统一由 Jarvis MCP Gateway 控制。",
+        },
+        {
             "group": "核心低噪",
-            "channels": ["web", "github", "rss", "youtube", "exa_search", "wechat", "v2ex"],
+            "channels": ["web", "github", "rss", "youtube", "tavily", "exa_search", "wechat", "v2ex"],
             "use": "技术趋势、开源项目、长文、官方发布和可留证据的资料。",
         },
         {
@@ -416,6 +421,30 @@ def channel_status() -> dict[str, Any]:
             "read_examples": list(channel.read_examples),
             "search_examples": list(channel.search_examples),
         })
+    try:
+        from . import mcp_gateway
+
+        existing_ids = {row["id"] for row in rows}
+        for channel in mcp_gateway.reach_channels():
+            if channel["id"] not in existing_ids:
+                rows.append(channel)
+                existing_ids.add(channel["id"])
+    except Exception as exc:  # noqa: BLE001
+        rows.append({
+            "id": "mcp_gateway",
+            "name": "MCP Gateway",
+            "tier": 0,
+            "optional": False,
+            "setup_level": "状态异常",
+            "status": "warn",
+            "message": f"MCP Gateway 状态读取失败：{str(exc)[:140]}",
+            "path": "",
+            "backends": ["Jarvis MCP Gateway"],
+            "description": "统一管理 Tavily、GitHub、高德等 MCP/API 能力。",
+            "install_hint": "",
+            "read_examples": [],
+            "search_examples": [],
+        })
 
     ready = sum(1 for row in rows if row["status"] == "ok")
     partial = sum(1 for row in rows if row["status"] == "warn")
@@ -440,6 +469,12 @@ def read_url(url: str, limit: int = 12000) -> dict[str, Any]:
         raise ValueError("url required")
     if not clean.startswith(("http://", "https://")):
         clean = "https://" + clean
+    try:
+        from . import mcp_gateway
+
+        return mcp_gateway.extract_url(clean, limit=limit)
+    except Exception:
+        pass
     reader_url = "https://r.jina.ai/" + clean
     req = urllib.request.Request(
         reader_url,

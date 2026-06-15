@@ -4540,6 +4540,53 @@ textarea,
   color: var(--muted);
   font: 650 12px/1.2 var(--font-body);
 }
+.mcp-list {
+  gap: 10px;
+}
+.mcp-row {
+  align-items: stretch;
+}
+.settings-row-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.settings-row-main small {
+  color: var(--muted);
+  font: 500 12px/1.45 var(--font-body);
+}
+.mcp-keybox {
+  display: grid;
+  grid-template-columns: auto minmax(170px, 240px) auto;
+  gap: 8px;
+  align-items: center;
+}
+.mcp-keybox input {
+  min-width: 0;
+}
+.status-pill {
+  border-radius: 999px;
+  padding: 6px 9px;
+  font: 760 11px/1 var(--font-mono);
+  color: var(--meta);
+  background: var(--surface-warm);
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.status-pill.ok {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  border-color: color-mix(in srgb, var(--good) 28%, transparent);
+}
+.status-pill.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
+}
+.status-pill.off {
+  color: var(--muted);
+}
 .reach-source-map {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

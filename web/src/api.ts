@@ -223,6 +223,7 @@ export type LeoJarvisSettings = {
   gmail: { enabled: boolean; user: string; app_password: string; host?: string; port?: number; mailbox?: string };
   rss: { sources: RssSource[] };
   x_monitor: { enabled: boolean; rsshub_base: string; users: string[]; include_default_ai_tech?: boolean; limit?: number };
+  mcp: { enabled: boolean; servers: Record<string, { enabled?: boolean; api_key?: string }> };
   remote_devices: any[];
   remote_cortex: RemoteLeoJarvisConnection[];
   overrides?: Record<string, Record<string, any>>;
@@ -262,6 +263,52 @@ export async function importOpml(opml: string, opts: { category?: string; domain
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ opml, category: opts.category || "OPML导入", domain: opts.domain || "business", limit: opts.limit ?? 8 }),
   }), "导入 OPML");
+}
+
+export type McpServerStatus = {
+  id: string;
+  name: string;
+  provider: string;
+  tier: number;
+  optional: boolean;
+  enabled: boolean;
+  status: "ok" | "warn" | "off" | string;
+  message: string;
+  key_configured: boolean;
+  key_source?: string;
+  auth_env: string[];
+  capabilities: string[];
+  description: string;
+  install_hint: string;
+  docs_url: string;
+};
+
+export type McpStatus = {
+  ok: boolean;
+  generated_at: number;
+  summary: { ready: number; total: number; needs_key: number; disabled: number };
+  servers: McpServerStatus[];
+  policy?: Record<string, string>;
+};
+
+export async function getMcpStatus(): Promise<McpStatus> {
+  return readJson(await fetch(`${BASE}/mcp/status`), "读取 MCP 状态");
+}
+
+export async function patchMcpSettings(settings: Record<string, any>): Promise<{ ok: boolean; mcp: any; status: McpStatus }> {
+  return readJson(await fetch(`${BASE}/mcp/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings }),
+  }), "保存 MCP 设置");
+}
+
+export async function searchMcpWeb(query: string, limit = 8) {
+  return readJson<any>(await fetch(`${BASE}/mcp/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, limit, include_answer: false }),
+  }), "MCP 搜索");
 }
 
 export async function removeSshDevice(id: string) {
