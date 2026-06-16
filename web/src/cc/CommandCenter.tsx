@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { getCliAgents, getCliSessions, runCliAgent, stopCliSession, fmtAgo, type CliAgent, type CliSession } from "./live";
+
+const TAG: Record<string, [string, string]> = { claude: ["CC", "#ff7a45"], codex: ["CX", "#36d39a"], cursor: ["CU", "#4da3ff"], grok: ["GK", "#b69cff"], gemini: ["GM", "#ffb454"], opencode: ["OC", "#9aa6b2"] };
 
 // Cortex · 指挥台 — pixel-faithful React port of the design (Cortex 驾驶舱重设计.dc.html).
 // Pages: 驾驶舱 / 智能体 / 情报 / 设置台. Dark near-black + single amber cold-light accent.
@@ -53,11 +56,6 @@ export default function CommandCenter() {
   const [cmd, setCmd] = useState("");
   const [sync, setSync] = useState(true);
   const [scan, setScan] = useState(true);
-  const [feeds, setFeeds] = useState<Record<string, string>>({
-    cc: "$ claude refactor cockpit\n", cx: "$ codex test api.ts\n",
-    gm: "$ gemini summarize intel\n", ai: "$ aider fix leomoney\n等待重启确认…\n",
-  });
-  const [tok, setTok] = useState<Record<string, number>>({ cc: 18420, cx: 9310, gm: 4205, ai: 880 });
   const alive = useRef(true);
 
   useWave("cx-cpu", 5, alive);
@@ -66,34 +64,8 @@ export default function CommandCenter() {
   useEffect(() => {
     alive.current = true;
     const clock = setInterval(() => setNow(new Date()), 1000);
-    const scripts: Record<string, string[]> = {
-      cc: ["analyzing component tree…", "↳ 12 modules, 38 styled nodes", "rewriting cockpit grid → 3-col", "✓ layout variant v3 emitted", "diff: +142 -88 lines", "running prettier…", "✓ format clean"],
-      cx: ["loading api.ts spec", "generating 20 test cases", "▶ vitest run", "✓ 18 passed", "✗ 2 flaky (network mock)", "patching mocks…", "✓ 20/20 passed"],
-      gm: ["fetching intel feed (28)", "dedup → 21 unique", "scoring relevance…", "↳ 6 high-priority", "translating zh-CN…", "✓ briefing updated", "pushed to cockpit"],
-    };
-    const ptr: Record<string, number> = { cc: 0, cx: 0, gm: 0 };
-    const feed = setInterval(() => {
-      if (!alive.current) return;
-      setFeeds((prev) => {
-        const next = { ...prev };
-        for (const id of ["cc", "cx", "gm"]) {
-          const sc = scripts[id];
-          next[id] = (next[id] + sc[ptr[id] % sc.length] + "\n").slice(-460);
-          ptr[id]++;
-        }
-        return next;
-      });
-      setTok((prev) => {
-        const next = { ...prev };
-        for (const id of ["cc", "cx", "gm"]) next[id] += Math.floor(20 + Math.random() * 70);
-        return next;
-      });
-    }, 750);
-    return () => { alive.current = false; clearInterval(clock); clearInterval(feed); };
+    return () => { alive.current = false; clearInterval(clock); };
   }, []);
-
-  // auto-scroll terminals
-  useEffect(() => { document.querySelectorAll("[data-term]").forEach((el) => { (el as HTMLElement).scrollTop = el.scrollHeight; }); }, [feeds]);
 
   const pad = (n: number) => String(n).padStart(2, "0");
   const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
@@ -146,7 +118,7 @@ export default function CommandCenter() {
           <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 30, background: "linear-gradient(180deg,rgba(255,122,69,.045),transparent)", height: "30%", animation: "cxScan 8s linear infinite", opacity: scan ? 1 : 0 }} />
 
           {page === "cockpit" && <Cockpit goIntel={() => setPage("intel")} />}
-          {page === "agents" && <Agents sync={sync} toggleSync={() => setSync((v) => !v)} feeds={feeds} tok={tok} />}
+          {page === "agents" && <Agents sync={sync} toggleSync={() => setSync((v) => !v)} />}
           {page === "intel" && <Intel />}
           {page === "settings" && <Settings tab={tab} setTab={setTab} scan={scan} toggleScan={() => setScan((v) => !v)} />}
         </div>
@@ -272,64 +244,92 @@ function Cockpit({ goIntel }: { goIntel: () => void }) {
 }
 
 // ============ AGENTS ============
-function Agents({ sync, toggleSync, feeds, tok }: { sync: boolean; toggleSync: () => void; feeds: Record<string, string>; tok: Record<string, number> }) {
-  const A2 = (id: string, tag: string, tagFg: string, name: string, cmd: string, model: string, cpu: number, status: string) => {
-    const lamp = status === "running" ? "#36d39a" : status === "idle" ? "#6b7480" : "#ffb454";
-    return { id, tag, tagFg, name, cmd, model, cpuPct: cpu + "%", statusText: status === "running" ? "运行中" : status === "idle" ? "空闲" : "完成", lamp, tokens: (tok[id] || 0).toLocaleString(), feed: feeds[id] || "", cardBorder: status === "running" ? "#26313a" : "#1a2029", cardGlow: status === "running" ? "0 0 0 1px rgba(255,122,69,.05),0 8px 30px rgba(0,0,0,.3)" : "none" };
-  };
-  const agents = [A2("cc", "CC", "#ff7a45", "Claude Code", "refactor cockpit grid", "sonnet-4.5", 42, "running"), A2("cx", "CX", "#36d39a", "Codex CLI", "write tests for api.ts", "gpt-5", 28, "running"), A2("gm", "GM", "#4da3ff", "Gemini CLI", "summarize intel feed", "gemini-2", 17, "running"), A2("ai", "AI", "#b69cff", "Aider", "fix LeoMoney service", "local", 3, "idle")];
-  const totalTokens = Object.values(tok).reduce((a, b) => a + b, 0).toLocaleString();
-  const timeline = [
-    { t: "19:28:41", who: "Claude Code", tone: "#ff7a45", text: "生成驾驶舱网格重排方案 v3，等待选择" },
-    { t: "19:28:02", who: "Codex CLI", tone: "#36d39a", text: "api.ts 测试 18/20 通过，修补 mock 中" },
-    { t: "19:27:30", who: "Gemini CLI", tone: "#4da3ff", text: "情报摘要更新 6 条高优先，已推送驾驶舱" },
-    { t: "19:26:55", who: "Aider", tone: "#b69cff", text: "LeoMoney 重启已生成预览，等待确认" },
-    { t: "19:25:10", who: "Claude Code", tone: "#ff7a45", text: "读取 12 个组件依赖图与样式节点" },
-    { t: "19:24:02", who: "Gemini CLI", tone: "#4da3ff", text: "去重 28 → 21 条，相关性打分完成" },
-    { t: "19:22:18", who: "Codex CLI", tone: "#36d39a", text: "生成 20 个测试用例，开始执行 vitest" },
-  ];
+function Agents({ sync, toggleSync }: { sync: boolean; toggleSync: () => void }) {
+  const [agents, setAgents] = useState<CliAgent[]>([]);
+  const [sessions, setSessions] = useState<CliSession[]>([]);
+  const [sel, setSel] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    getCliAgents().then((d) => { setAgents(d.agents); const inst = d.agents.find((a) => a.installed); if (inst) setSel((s) => s || inst.name); }).catch(() => {});
+    const poll = () => getCliSessions().then((d) => setSessions(d.sessions)).catch(() => {});
+    poll();
+    const t = setInterval(poll, 1500);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => { document.querySelectorAll("[data-term]").forEach((el) => { (el as HTMLElement).scrollTop = el.scrollHeight; }); }, [sessions]);
+
+  const installed = agents.filter((a) => a.installed);
+  const running = sessions.filter((s) => s.status === "running");
+
+  async function run() {
+    if (!prompt.trim() || !sel || busy) return;
+    setBusy(true); setErr("");
+    try { const r = await runCliAgent(sel, prompt.trim(), "~"); if (!r.ok) setErr(r.error || "启动失败"); else { setPrompt(""); getCliSessions().then((d) => setSessions(d.sessions)).catch(() => {}); } }
+    catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  }
+  async function stop(id: string) { await stopCliSession(id).catch(() => {}); getCliSessions().then((d) => setSessions(d.sessions)).catch(() => {}); }
+
   const sFg = sync ? "#36d39a" : "#6b7480", sBg = sync ? "rgba(54,211,154,.1)" : "transparent", sBorder = sync ? "rgba(54,211,154,.4)" : "#2a323d";
+  const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "#9aa6b2"];
+
   return (
     <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(0,1fr) 294px", gap: 14, padding: 16, minHeight: 0 }}>
-      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 14, minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0,1fr)", gap: 14, minHeight: 0 }}>
         <div style={{ ...panel, padding: "14px 16px", ...row(16) }}>
-          <div style={{ flex: "none" }}><div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>编排台 · ORCHESTRATOR</div><div style={{ font: "600 16px 'Space Grotesk',sans-serif", color: "#e8ecf1", marginTop: 3, whiteSpace: "nowrap" }}>3 个子智能体并行运行</div></div>
+          <div style={{ flex: "none" }}><div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>编排台 · ORCHESTRATOR</div><div style={{ font: "600 16px 'Space Grotesk',sans-serif", color: "#e8ecf1", marginTop: 3, whiteSpace: "nowrap" }}>{running.length} 个 CLI agent 运行中</div></div>
           <canvas id="cx-orch" style={{ flex: 1, height: 38, display: "block", minWidth: 0 }} />
-          <div style={{ flex: "none", textAlign: "right" }}><div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "#6b7480" }}>TOTAL TOKENS</div><div style={{ font: "700 15px 'IBM Plex Mono',monospace", color: "#ff7a45", marginTop: 3 }}>{totalTokens}</div></div>
+          <div style={{ flex: "none", textAlign: "right" }}><div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "#6b7480" }}>已装 AGENT</div><div style={{ font: "700 15px 'IBM Plex Mono',monospace", color: "#ff7a45", marginTop: 3 }}>{installed.length}</div></div>
           <span style={{ width: 1, height: 34, background: "#262d37", flex: "none" }} />
           <button onClick={toggleSync} style={{ flex: "none", ...row(8), border: `1px solid ${sBorder}`, background: sBg, cursor: "pointer", borderRadius: 9, padding: "8px 12px", color: sFg, font: "600 11.5px 'Space Grotesk',sans-serif" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: sFg, boxShadow: `0 0 8px ${sFg}` }} />同步观察 {sync ? "开" : "关"}</button>
-          <button style={{ flex: "none", border: "1px solid #2a323d", background: "#0b0e13", cursor: "pointer", borderRadius: 9, padding: "8px 12px", color: "#aab2bd", font: "600 11.5px 'Space Grotesk',sans-serif" }}>+ 新建</button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, overflowY: "auto", minHeight: 0, alignContent: "start", paddingRight: 2 }}>
-          {agents.map((ag) => (
-            <div key={ag.id} style={{ background: "#0b0e13", border: `1px solid ${ag.cardBorder}`, borderRadius: 14, display: "grid", gridTemplateRows: "auto auto minmax(0,1fr) auto", overflow: "hidden", minHeight: 208, boxShadow: ag.cardGlow }}>
-              <div style={{ ...row(9), padding: "12px 13px 9px" }}>
-                <span style={{ width: 30, height: 30, borderRadius: 8, background: "#11161d", border: "1px solid #1c222b", display: "grid", placeContent: "center", font: "700 11px 'IBM Plex Mono',monospace", color: ag.tagFg, flex: "none" }}>{ag.tag}</span>
-                <div style={{ minWidth: 0, flex: 1 }}><div style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{ag.name}</div><div style={{ ...mono(9.5), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>$ {ag.cmd}</div></div>
-                <span style={{ ...row(5), flex: "none", font: "600 9.5px 'IBM Plex Mono',monospace", color: ag.lamp }}><b style={{ width: 7, height: 7, borderRadius: "50%", background: ag.lamp, display: "inline-block", boxShadow: `0 0 7px ${ag.lamp}` }} />{ag.statusText}</span>
+
+        <div style={{ ...panel, padding: "12px 14px", display: "grid", gap: 9 }}>
+          <div style={{ ...row(7), flexWrap: "wrap" }}>
+            {installed.map((a) => { const [tg, fg] = tagOf(a.name); const on = sel === a.name; return (
+              <button key={a.name} onClick={() => setSel(a.name)} style={{ ...row(6), border: `1px solid ${on ? fg : "#232a33"}`, background: on ? "rgba(255,122,69,.06)" : "#0b0e13", cursor: "pointer", borderRadius: 9, padding: "6px 11px" }}><span style={{ font: "700 10px 'IBM Plex Mono',monospace", color: fg }}>{tg}</span><span style={{ font: "600 12px 'Space Grotesk',sans-serif", color: on ? "#e8ecf1" : "#aab2bd" }}>{a.display}</span></button>
+            ); })}
+            {installed.length === 0 && <span style={mono(11)}>检测本机 agent 中…</span>}
+          </div>
+          <div style={{ ...row(9), background: "#0b0e13", border: "1px solid #232a33", borderRadius: 10, padding: "0 12px", height: 40 }}>
+            <span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>$</span>
+            <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") run(); }} placeholder={`给 ${sel || "agent"} 一个任务，回车真实发起…`} style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "#e8ecf1", font: "500 13px 'Space Grotesk',sans-serif" }} />
+            <button onClick={run} disabled={busy} style={{ border: 0, cursor: busy ? "default" : "pointer", background: busy ? "#3a2a1d" : "#ff7a45", color: "#1a0f08", font: "600 11px 'Space Grotesk'", padding: "6px 14px", borderRadius: 7 }}>{busy ? "启动中" : "运行"}</button>
+          </div>
+          {err && <div style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "#ff8a8a" }}>{err}</div>}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: sessions.length ? "1fr 1fr" : "1fr", gap: 14, overflowY: "auto", minHeight: 0, alignContent: "start", paddingRight: 2 }}>
+          {sessions.length === 0 && (
+            <div style={{ ...panel, padding: "40px 20px", textAlign: "center", color: "#6b7480" }}><div style={{ font: "600 13px 'Space Grotesk',sans-serif", marginBottom: 6, color: "#aab2bd" }}>还没有运行中的 CLI agent</div><div style={{ font: "400 12px 'Space Grotesk',sans-serif" }}>上面选一个 agent、输入任务，回车即可在本系统内真实驱动它，输出会实时流到这里。</div></div>
+          )}
+          {sessions.map((s) => { const [tg, fg] = tagOf(s.agent); const live = s.status === "running"; const lamp = live ? "#36d39a" : "#6b7480"; return (
+            <div key={s.id} style={{ background: "#0b0e13", border: `1px solid ${live ? "#26313a" : "#1a2029"}`, borderRadius: 14, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", overflow: "hidden", minHeight: 220, boxShadow: live ? "0 0 0 1px rgba(255,122,69,.05),0 8px 30px rgba(0,0,0,.3)" : "none" }}>
+              <div style={{ ...row(9), padding: "12px 13px 10px" }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: "#11161d", border: "1px solid #1c222b", display: "grid", placeContent: "center", font: "700 11px 'IBM Plex Mono',monospace", color: fg, flex: "none" }}>{tg}</span>
+                <div style={{ minWidth: 0, flex: 1 }}><div style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{s.name}</div><div style={{ ...mono(9.5), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>$ {s.prompt}</div></div>
+                <span style={{ ...row(5), flex: "none", font: "600 9.5px 'IBM Plex Mono',monospace", color: lamp }}><b style={{ width: 7, height: 7, borderRadius: "50%", background: lamp, display: "inline-block", boxShadow: `0 0 7px ${lamp}`, animation: live ? "cxBreathe 2.5s ease infinite" : "none" }} />{live ? "运行中" : "已结束"} · {fmtAgo(s.started)}</span>
               </div>
-              <div style={{ ...row(10), padding: "0 13px 9px", font: "500 9.5px 'IBM Plex Mono',monospace", color: "#6b7480" }}>
-                <span>模型 <b style={{ color: "#aab2bd" }}>{ag.model}</b></span><span>CPU <b style={{ color: "#aab2bd" }}>{ag.cpuPct}</b></span><span>tok <b style={{ color: "#ff7a45" }}>{ag.tokens}</b></span>
-                <span style={flex1} />
-                <span style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 12 }}>{[0, 0.15, 0.3].map((d, i) => (<i key={i} style={{ width: 2, height: "100%", background: ag.lamp, borderRadius: 2, display: "block", transformOrigin: "bottom", animation: `cxBar 1s ease-in-out infinite ${d}s` }} />))}</span>
-              </div>
-              <pre data-term={ag.id} style={{ margin: 0, padding: "11px 13px", background: "#070a0d", borderTop: "1px solid #1a2029", font: "500 11px/1.6 'IBM Plex Mono',monospace", color: "#9aa6b2", overflowY: "auto", minHeight: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{ag.feed}</pre>
+              <pre data-term={s.id} style={{ margin: 0, padding: "11px 13px", background: "#070a0d", borderTop: "1px solid #1a2029", font: "500 11px/1.6 'IBM Plex Mono',monospace", color: "#9aa6b2", overflowY: "auto", minHeight: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{s.output || "启动中…"}</pre>
               <div style={{ display: "flex", gap: 7, padding: "10px 13px", borderTop: "1px solid #1a2029" }}>
-                <button style={{ border: "1px solid #2a323d", background: "transparent", cursor: "pointer", borderRadius: 7, padding: "5px 11px", color: "#aab2bd", font: "600 10.5px 'Space Grotesk'" }}>查看</button>
-                <button style={{ border: "1px solid #2a323d", background: "transparent", cursor: "pointer", borderRadius: 7, padding: "5px 11px", color: "#aab2bd", font: "600 10.5px 'Space Grotesk'" }}>挂起</button>
+                <span style={{ ...mono(9.5), alignSelf: "center" }}>pid {s.pid}</span>
                 <span style={flex1} />
-                <button style={{ border: "1px solid #3a2626", background: "transparent", cursor: "pointer", borderRadius: 7, padding: "5px 11px", color: "#ff5d5d", font: "600 10.5px 'Space Grotesk'" }}>停止</button>
+                {live && <button onClick={() => stop(s.id)} style={{ border: "1px solid #3a2626", background: "transparent", cursor: "pointer", borderRadius: 7, padding: "5px 11px", color: "#ff5d5d", font: "600 10.5px 'Space Grotesk'" }}>停止</button>}
               </div>
             </div>
-          ))}
+          ); })}
         </div>
       </div>
+
       <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
-        <div style={{ padding: "14px 16px 11px", borderBottom: "1px solid #161b22" }}><div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>同步时间线</div><div style={{ font: "500 10px 'Space Grotesk',sans-serif", color: "#8b94a0", marginTop: 4 }}>跨智能体事件 · 实时汇聚</div></div>
+        <div style={{ padding: "14px 16px 11px", borderBottom: "1px solid #161b22" }}><div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>同步时间线</div><div style={{ font: "500 10px 'Space Grotesk',sans-serif", color: "#8b94a0", marginTop: 4 }}>跨 agent 事件 · 实时汇聚</div></div>
         <div style={{ overflowY: "auto", minHeight: 0, padding: "14px 16px", display: "grid", gap: 13, alignContent: "start" }}>
-          {timeline.map((ev, i) => (
-            <div key={i} style={{ display: "grid", gap: 4, borderLeft: `2px solid ${ev.tone}`, paddingLeft: 11 }}><div style={row(7)}><span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: ev.tone }}>{ev.who}</span><span style={mono(9)}>{ev.t}</span></div><p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "#aab2bd" }}>{ev.text}</p></div>
-          ))}
+          {sessions.length === 0 && <p style={{ margin: 0, ...mono(11) }}>发起 CLI agent 后，运行事件会汇聚到这里。</p>}
+          {sessions.map((s) => { const [, tone] = tagOf(s.agent); return (
+            <div key={s.id} style={{ display: "grid", gap: 4, borderLeft: `2px solid ${tone}`, paddingLeft: 11 }}><div style={row(7)}><span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: tone }}>{s.name}</span><span style={mono(9)}>{fmtAgo(s.started)}前</span></div><p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "#aab2bd" }}>{s.status === "running" ? "运行中" : "已结束"} · {s.prompt}</p></div>
+          ); })}
         </div>
       </div>
     </div>
