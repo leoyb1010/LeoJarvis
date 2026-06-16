@@ -7,10 +7,7 @@ import shutil
 import subprocess
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-from . import remote_status
 
 
 SAFE_ACTIONS = {"status", "clean", "optimize", "purge", "installers", "analyze", "apps"}
@@ -27,11 +24,6 @@ MO_CANDIDATES = (
     "/usr/local/bin/mole",
     "$HOME/.cargo/bin/mole",
     "mole",
-)
-BREW_CANDIDATES = (
-    "/opt/homebrew/bin/brew",
-    "/usr/local/bin/brew",
-    "brew",
 )
 
 
@@ -74,23 +66,6 @@ def _mo_path() -> str | None:
         if found:
             return found
     return None
-
-
-def _remote_find_binary_shell(var_name: str, candidates: tuple[str, ...]) -> str:
-    checks = " ".join(sh_quote(item) for item in candidates)
-    return (
-        f"{var_name}=''; "
-        f"for p in {checks}; do "
-        "eval p=\"$p\"; "
-        "if [ -x \"$p\" ]; then "
-        f"{var_name}=\"$p\"; break; "
-        "fi; "
-        "found=$(command -v \"$p\" 2>/dev/null || true); "
-        "if [ -n \"$found\" ]; then "
-        f"{var_name}=\"$found\"; break; "
-        "fi; "
-        "done"
-    )
 
 
 def _parse_json(text: str) -> Any:
@@ -267,76 +242,8 @@ def local_status() -> dict[str, Any]:
     return status
 
 
-def _ssh_prefix(row: dict[str, Any]) -> list[str]:
-    target = f"{row.get('user')}@{row.get('host')}" if row.get("user") else str(row.get("host"))
-    cmd = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=8",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-    ]
-    proxy = str(row.get("proxy_command") or "").strip()
-    if proxy:
-        cmd += ["-o", f"ProxyCommand={proxy}"]
-    for opt in remote_status._clean_options(row.get("ssh_options")):  # type: ignore[attr-defined]
-        cmd += ["-o", opt]
-    cmd += ["-p", str(int(row.get("port") or 22)), target]
-    return cmd
-
-
-def remote_status_row(row: dict[str, Any]) -> dict[str, Any]:
-    host_id = str(row.get("id") or row.get("host") or "")
-    script = "; ".join([
-        _remote_find_binary_shell("MO_BIN", MO_CANDIDATES),
-        _remote_find_binary_shell("BREW_BIN", BREW_CANDIDATES),
-        '[ -n "$MO_BIN" ] && printf "MO_PATH=%s\\n" "$MO_BIN" || true',
-        '[ -n "$MO_BIN" ] && "$MO_BIN" --version 2>/dev/null | sed -n "1p" || true',
-        '[ -n "$BREW_BIN" ] && printf "BREW_PATH=%s\\n" "$BREW_BIN" || true',
-    ])
-    res = _run(_ssh_prefix(row) + [script], timeout=12)
-    lines = [line.strip() for line in (res["stdout"] or "").splitlines() if line.strip()]
-    mo_path = ""
-    version = ""
-    brew_path = ""
-    for line in lines:
-        if line.startswith("MO_PATH="):
-            mo_path = line.partition("=")[2]
-        elif line.startswith("BREW_PATH="):
-            brew_path = line.partition("=")[2]
-        elif "mole" in line.lower() or re.search(r"\d+\.\d+", line):
-            version = version or line
-    return {
-        "target_id": host_id,
-        "target_name": str(row.get("name") or row.get("host") or host_id),
-        "host": str(row.get("host") or ""),
-        "kind": "ssh",
-        "online": res["ok"],
-        "mole_installed": bool(mo_path),
-        "mo_path": mo_path,
-        "version": version,
-        "brew_installed": bool(brew_path),
-        "install_hint": "brew install mole",
-        "capabilities": {
-            "status": bool(mo_path),
-            "clean_preview": bool(mo_path),
-            "optimize_preview": bool(mo_path),
-            "purge_preview": bool(mo_path),
-            "installer_preview": bool(mo_path),
-            "disk_analyze": bool(mo_path),
-            "app_uninstall_list": bool(mo_path),
-        },
-        "error": "" if res["ok"] else (res["stderr"] or res["stdout"])[:220],
-    }
-
-
 def _probe_fleet_status() -> dict[str, Any]:
-    hosts = [row for row in remote_status.configured_hosts() if row.get("enabled", True)]
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(hosts)))) as pool:
-        remote = list(pool.map(remote_status_row, hosts)) if hosts else []
-    rows = remote or [local_status()]
+    rows = [local_status()]
     ready = sum(1 for row in rows if row.get("mole_installed"))
     return {
         "ok": True,
@@ -352,24 +259,7 @@ def _probe_fleet_status() -> dict[str, Any]:
 
 
 def _placeholder_fleet_status() -> dict[str, Any]:
-    hosts = [row for row in remote_status.configured_hosts() if row.get("enabled", True)]
-    rows = [
-        {
-            "target_id": str(row.get("id") or row.get("host") or ""),
-            "target_name": str(row.get("name") or row.get("host") or ""),
-            "host": str(row.get("host") or ""),
-            "kind": "ssh",
-            "online": None,
-            "mole_installed": False,
-            "mo_path": "",
-            "version": "",
-            "brew_installed": False,
-            "install_hint": "正在后台探测",
-            "capabilities": {},
-            "error": "",
-        }
-        for row in hosts
-    ] or [local_status()]
+    rows = [local_status()]
     return {
         "ok": True,
         "generated_at": int(time.time()),
@@ -456,30 +346,21 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
     if action not in SAFE_ACTIONS:
         raise ValueError("unsupported device action")
 
+    if target_id not in {"", "local"}:
+        return {"ok": False, "target_id": target_id, "action": action, "safe_mode": True, "error": "仅支持本机设备"}
+
     args = _action_args(action, path=path)
-    if target_id in {"", "local"}:
-        mo = _mo_path()
-        if not mo:
-            return {
-                "ok": False,
-                "target_id": "local",
-                "action": action,
-                "safe_mode": True,
-                "error": "Mole CLI 未安装",
-                "install_hint": "brew install mole",
-            }
-        res = _run([mo, *args], timeout=180 if action in {"clean", "purge", "installers", "analyze", "apps"} else 45)
-    else:
-        rows = {str(row.get("id") or ""): row for row in remote_status.configured_hosts()}
-        row = rows.get(target_id)
-        if not row:
-            return {"ok": False, "target_id": target_id, "action": action, "safe_mode": True, "error": "未知目标主机"}
-        shell = "; ".join([
-            _remote_find_binary_shell("MO_BIN", MO_CANDIDATES),
-            'if [ -z "$MO_BIN" ]; then echo "Mole CLI 未安装" >&2; exit 127; fi',
-            " ".join(['"$MO_BIN"', *[sh_quote(part) for part in args]]),
-        ])
-        res = _run(_ssh_prefix(row) + [shell], timeout=210 if action in {"clean", "purge", "installers", "analyze", "apps"} else 60)
+    mo = _mo_path()
+    if not mo:
+        return {
+            "ok": False,
+            "target_id": "local",
+            "action": action,
+            "safe_mode": True,
+            "error": "Mole CLI 未安装",
+            "install_hint": "brew install mole",
+        }
+    res = _run([mo, *args], timeout=180 if action in {"clean", "purge", "installers", "analyze", "apps"} else 45)
 
     parsed = _parse_json(res["stdout"])
     output = res["stdout"] or res["stderr"]
@@ -496,7 +377,3 @@ def preview(action: str, *, target_id: str = "local", path: str = "") -> dict[st
         "summary": _summarize_result(action, parsed, output),
         "error": "" if res["ok"] else (res["stderr"] or res["stdout"])[:800],
     }
-
-
-def sh_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\\''") + "'"
