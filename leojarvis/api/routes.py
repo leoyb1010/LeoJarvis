@@ -347,10 +347,35 @@ def services_discover() -> list[dict]:
 
 @router.get("/agents/cli")
 def agents_cli() -> dict:
-    """本机 AI agent CLI 花名册：claude/codex/cursor/grok/gemini/opencode 的安装/版本/认证态。
-    驱动(run)不走裸 REST，必须经 /agent/chat 的 run_cli_agent 工具 + 行动闸门确认。"""
+    """本机 AI agent CLI 花名册：claude/codex/cursor/grok/gemini/opencode 的安装/版本/认证态。"""
     from ..agent import cli_agents
     return {"agents": cli_agents.list_agents()}
+
+
+class CliRunIn(BaseModel):
+    name: str
+    prompt: str
+    cwd: str | None = None
+
+
+@router.post("/agents/cli/run")
+def agents_cli_run(req: CliRunIn) -> dict:
+    """真实后台运行一个本机 CLI agent（用户在智能体页主动发起即确认），输出流式写日志。"""
+    from ..agent import cli_agents
+    return cli_agents.spawn_cli_agent(req.name, req.prompt, cwd=req.cwd)
+
+
+@router.get("/agents/cli/sessions")
+def agents_cli_sessions() -> dict:
+    """所有真实 CLI agent 会话及实时状态/输出（智能体页轮询此端点做真实流式观察）。"""
+    from ..agent import cli_agents
+    return {"sessions": cli_agents.cli_sessions()}
+
+
+@router.post("/agents/cli/sessions/{sid}/stop")
+def agents_cli_session_stop(sid: str) -> dict:
+    from ..agent import cli_agents
+    return cli_agents.stop_cli_session(sid)
 
 
 @router.get("/agents/cli/{name}")

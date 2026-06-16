@@ -40,7 +40,8 @@ def _alive(pid: int) -> bool:
         return False
 
 
-def spawn_agent(name: str, command: str, cwd: str | None = None) -> str:
+def spawn(name: str, command: str, cwd: str | None = None, meta: dict | None = None) -> dict:
+    """把一条命令作为后台进程拉起，登记并返回 registry 行。meta 可附加 kind/agent/prompt 等。"""
     aid = uuid.uuid4().hex[:8]
     log_path = _AGENT_DIR / f"{aid}.log"
     workdir = os.path.expanduser(cwd) if cwd else os.path.expanduser("~")
@@ -48,13 +49,19 @@ def spawn_agent(name: str, command: str, cwd: str | None = None) -> str:
         proc = subprocess.Popen(command, shell=True, stdout=f, stderr=subprocess.STDOUT,
                                 cwd=workdir, start_new_session=True)
     rows = _load()
-    rows.append({
+    row = {
         "id": aid, "name": name or command[:30], "command": command,
         "pid": proc.pid, "cwd": workdir, "log": str(log_path),
-        "started": int(time.time()), "status": "running",
-    })
+        "started": int(time.time()), "status": "running", **(meta or {}),
+    }
+    rows.append(row)
     _save(rows)
-    return f"已派发 agent『{name or command[:30]}』(id={aid}, pid={proc.pid})。用 list_agents 看状态。"
+    return row
+
+
+def spawn_agent(name: str, command: str, cwd: str | None = None) -> str:
+    row = spawn(name, command, cwd)
+    return f"已派发 agent『{row['name']}』(id={row['id']}, pid={row['pid']})。用 list_agents 看状态。"
 
 
 def list_agents() -> list[dict]:

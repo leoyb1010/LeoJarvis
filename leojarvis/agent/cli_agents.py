@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -43,14 +44,14 @@ _SPECS: list[dict[str, Any]] = [
     {
         "name": "cursor", "display": "Cursor CLI",
         "bins": ["cursor-agent"], "extra_paths": ["~/.local/bin"],
-        "run": ["-p", "{prompt}"], "run_supported": "confirmed",
+        "run": ["-p", "-f", "{prompt}"], "run_supported": "confirmed",
         "auth": ["~/.config/cursor-agent", "~/.cursor"],
         "docs": "Cursor Agent · cursor-agent -p <prompt>",
     },
     {
         "name": "grok", "display": "Grok CLI",
         "bins": ["grok"], "extra_paths": ["~/.grok/bin", "~/.local/bin"],
-        "run": ["{prompt}"], "run_supported": "best-effort",
+        "run": ["-p", "{prompt}"], "run_supported": "confirmed",
         "auth": ["~/.grok"],
         "docs": "xAI Grok · grok <prompt>（headless best-effort）",
     },
@@ -186,3 +187,46 @@ def run_agent(name: str, prompt: str, cwd: str | None = None, timeout: int = 120
         return {"ok": False, "name": name, "error": f"超时 {timeout}s", "argv": argv}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "name": name, "error": str(exc), "argv": argv}
+
+
+def spawn_cli_agent(name: str, prompt: str, cwd: str | None = None) -> dict:
+    """真实后台运行一个 CLI agent，输出流式写入日志，可在智能体页实时观察。
+
+    返回会话 id；用 cli_sessions() 读实时状态与输出，stop_cli_session() 停止。
+    """
+    spec = _spec(name)
+    if not spec:
+        return {"ok": False, "error": f"未知 agent: {name}"}
+    binpath = _resolve_bin(spec)
+    if not binpath:
+        return {"ok": False, "error": f"{name} 未安装"}
+    if not prompt or not prompt.strip():
+        return {"ok": False, "error": "prompt 为空"}
+    args = [a.replace("{prompt}", prompt) for a in spec["run"]]
+    command = " ".join(shlex.quote(x) for x in [binpath, *args])
+    from . import agents_ctrl
+    row = agents_ctrl.spawn(spec["display"], command, cwd=cwd,
+                            meta={"kind": "cli-agent", "agent": name, "prompt": prompt[:240]})
+    return {"ok": True, "id": row["id"], "name": spec["display"], "agent": name, "pid": row["pid"]}
+
+
+def cli_sessions(output_lines: int = 60) -> list[dict]:
+    """列出所有 CLI agent 会话（真实进程）及其实时状态与输出尾部。"""
+    from . import agents_ctrl
+    out: list[dict] = []
+    for r in agents_ctrl.list_agents():
+        if r.get("kind") != "cli-agent":
+            continue
+        out.append({
+            "id": r["id"], "agent": r.get("agent"), "name": r.get("name"),
+            "prompt": r.get("prompt", ""), "status": r["status"],
+            "started": r.get("started"), "pid": r.get("pid"),
+            "output": agents_ctrl.agent_log(r["id"], output_lines),
+        })
+    out.sort(key=lambda x: x.get("started") or 0, reverse=True)
+    return out
+
+
+def stop_cli_session(sid: str) -> dict:
+    from . import agents_ctrl
+    return {"ok": True, "message": agents_ctrl.stop_agent(sid)}
