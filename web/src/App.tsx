@@ -4,6 +4,7 @@ import { Sidebar, type ViewId } from "./components/Sidebar";
 import { NotifyToast } from "./components/NotifyToast";
 import { FloatingAgent } from "./components/Agent";
 import { Dashboard } from "./components/Dashboard";
+import { Home } from "./components/Home";
 import { StatusBar } from "./components/StatusBar";
 import { SystemView } from "./components/views/SystemView";
 import { PersonalNotesView } from "./components/views/PersonalNotesView";
@@ -14,6 +15,7 @@ import { MemoryView } from "./components/MemoryView";
 type ThemeMode = "auto" | "dark" | "light";
 
 const VIEWS: Record<ViewId, ComponentType> = {
+  home: Home,
   dashboard: Dashboard,
   system: SystemView,
   intelligence: IntelligenceView,
@@ -24,7 +26,7 @@ const VIEWS: Record<ViewId, ComponentType> = {
 
 function viewFromHash(): ViewId {
   const raw = window.location.hash.replace(/^#\/?/, "").trim();
-  return (raw in VIEWS ? raw : "dashboard") as ViewId;
+  return (raw in VIEWS ? raw : "home") as ViewId;
 }
 
 export default function App() {

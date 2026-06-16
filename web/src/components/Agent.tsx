@@ -123,7 +123,7 @@ function RichMessage({ text }: { text: string }) {
   );
 }
 
-function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose?: () => void }) {
+export function AgentConsole({ compact = false, onClose, hideHead = false }: { compact?: boolean; onClose?: () => void; hideHead?: boolean }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -168,7 +168,7 @@ function AgentConsole({ compact = false, onClose }: { compact?: boolean; onClose
           </div>
           <button className="icon-btn" onClick={onClose}>关闭</button>
         </div>
-      ) : (
+      ) : hideHead ? null : (
         <div className="page-head">
           <h1>Command Center</h1>
           <p>直接交代任务，它会调用本机工具执行。低风险自动完成，高风险动作先停在确认卡片里。</p>

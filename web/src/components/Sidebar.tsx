@@ -1,12 +1,13 @@
 import { motion } from "framer-motion";
 
-export type ViewId = "dashboard" | "system" | "intelligence" | "notes" | "memory" | "settings";
+export type ViewId = "home" | "dashboard" | "system" | "intelligence" | "notes" | "memory" | "settings";
 export type ThemeMode = "auto" | "dark" | "light";
 
 const SECTIONS: { title: string; items: { id: ViewId; label: string }[] }[] = [
   {
     title: "核心",
     items: [
+      { id: "home", label: "首页 · 对话" },
       { id: "dashboard", label: "全景驾驶舱" },
     ],
   },
