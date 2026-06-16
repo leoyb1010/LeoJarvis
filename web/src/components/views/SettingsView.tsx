@@ -1,21 +1,14 @@
 import { useEffect, useState } from "react";
 import {
-  addRemoteLeoJarvis,
-  connectRemoteLeoJarvis,
-  disconnectRemoteLeoJarvis,
   getSettings,
   getSettingsDiagnostics,
   getMcpStatus,
   getTuning,
   importOpml,
-  listRemoteLeoJarvis,
   patchMcpSettings,
   patchSettings,
-  probeSshDevices,
-  removeSshDevice,
   type LeoJarvisSettings,
   type McpStatus,
-  type RemoteLeoJarvisConnection,
   type RssSource,
   type Tuning,
 } from "../../api";
@@ -104,10 +97,6 @@ export function SettingsView() {
   const [opmlText, setOpmlText] = useState("");
   const [xUsers, setXUsers] = useState("");
   const [mcpDraftKeys, setMcpDraftKeys] = useState<Record<string, string>>({});
-  const [sshDraft, setSshDraft] = useState({ name: "", host: "", user: "", port: 22, proxy_command: "" });
-  const [remoteDraft, setRemoteDraft] = useState({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787, proxy_command: "" });
-  const [remoteLeoJarvis, setRemoteLeoJarvis] = useState<RemoteLeoJarvisConnection[]>([]);
-  const [remoteBusy, setRemoteBusy] = useState("");
 
   async function load() {
     setError("");
@@ -119,7 +108,6 @@ export function SettingsView() {
       getSettingsDiagnostics().then(setDiag).catch((err) => setDiag({ error: String(err) }));
       getTuning().then(setTuning).catch(() => {});
       getMcpStatus().then(setMcpStatus).catch(() => {});
-      listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
     } catch (err) {
       setError(String(err));
       setSettings((prev) => prev || DEFAULT_SETTINGS);
@@ -127,14 +115,6 @@ export function SettingsView() {
   }
 
   useEffect(() => { load(); }, []);
-
-  // 远程连接状态会被后台维护任务自动修复，设置页轮询保持显示同步。
-  useEffect(() => {
-    const t = window.setInterval(() => {
-      listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
-    }, 10000);
-    return () => window.clearInterval(t);
-  }, []);
 
   async function save(next: Partial<LeoJarvisSettings>) {
     setSaving(true);
@@ -144,7 +124,6 @@ export function SettingsView() {
       setSettings(res);
       getSettingsDiagnostics().then(setDiag).catch((err) => setDiag({ error: String(err) }));
       getMcpStatus().then(setMcpStatus).catch(() => {});
-      listRemoteLeoJarvis().then(setRemoteLeoJarvis).catch(() => {});
     } catch (err) {
       setError(String(err));
     } finally {
@@ -165,7 +144,6 @@ export function SettingsView() {
 
   const emailAccounts = settings.email?.accounts || [];
   const rssSources = settings.rss?.sources || [];
-  const remotes = settings.remote_devices || [];
   const tv = (s: keyof Tuning, k: string, d: number) => Number((tuning?.[s] as any)?.[k] ?? d);
 
   function setRss(sources: RssSource[]) { save({ rss: { sources } }); }
@@ -187,44 +165,13 @@ export function SettingsView() {
     }
   }
 
-  async function addRemoteProduct() {
-    if (!remoteDraft.host.trim()) return;
-    setRemoteBusy("add");
-    try {
-      const res = await addRemoteLeoJarvis(remoteDraft);
-      const connected = await connectRemoteLeoJarvis(res.connection.id);
-      setRemoteDraft({ name: "", host: "", user: "", ssh_port: 22, remote_port: 8787, proxy_command: "" });
-      setRemoteLeoJarvis(await listRemoteLeoJarvis());
-      if (!connected.ok) setError(connected.error || "SSH tunnel 连接失败，请确认目标机 SSH 授权和 LeoJarvis 已运行。");
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setRemoteBusy("");
-    }
-  }
-
-  async function toggleRemote(row: RemoteLeoJarvisConnection) {
-    setRemoteBusy(row.id);
-    setError("");
-    try {
-      if (row.connected) await disconnectRemoteLeoJarvis(row.id);
-      else {
-        const res = await connectRemoteLeoJarvis(row.id);
-        if (!res.ok) setError(res.error || "连接失败");
-      }
-      setRemoteLeoJarvis(await listRemoteLeoJarvis());
-    } finally {
-      setRemoteBusy("");
-    }
-  }
-
   return (
     <div className="settings-view">
       <div className="page-head settings-head">
         <div>
           <div className="kicker">Preferences</div>
           <h1>设置</h1>
-          <p>邮件账户、Gmail、应用通知、RSS / OPML、X 监控、阈值与节奏、SSH 设备与远程 LeoJarvis，全部可在这里自定义。保存后后端立即按新配置读取（定时任务节奏需重启生效）。</p>
+          <p>邮件账户、Gmail、应用通知、RSS / OPML、X 监控、阈值与节奏，全部可在这里自定义。保存后后端立即按新配置读取（定时任务节奏需重启生效）。</p>
         </div>
         <button className="btn ghost" onClick={load}>重新诊断</button>
       </div>
@@ -421,61 +368,6 @@ export function SettingsView() {
             <label><span>磁盘告警(%)</span><input type="number" min="50" max="99" defaultValue={tv("guard", "disk_used_pct", 90)} onBlur={(e) => saveOverride("guard", { disk_used_pct: Number(e.target.value) })} /></label>
             <label><span>每核负载告警</span><input type="number" step="0.1" min="0.5" defaultValue={tv("guard", "load_per_core", 2.5)} onBlur={(e) => saveOverride("guard", { load_per_core: Number(e.target.value) })} /></label>
           </div>
-        </section>
-
-        {/* 远程 LeoJarvis */}
-        <section className="card settings-card remote-product-card">
-          <div className="panel-title">远程 LeoJarvis 实例（SSH 隧道）</div>
-          <p className="settings-note">目标机器也部署 LeoJarvis 后，这里通过 SSH tunnel 连到远程 127.0.0.1:8787，主页驾驶舱可直接切换到那台机器的完整驾驶舱。需目标机已授权本机 SSH key。</p>
-          <div className="settings-list">
-            {remoteLeoJarvis.map((r) => {
-              const verifiedAgo = r.last_health_ts ? Math.max(0, Math.round((Date.now() / 1000 - r.last_health_ts) / 60)) : null;
-              return (
-                <div className="settings-row remote-row" key={r.id}>
-                  <span className={`conn-dot ${r.connected ? "good" : "bad"}`} />
-                  <b>{r.name || r.host}</b>
-                  <span>
-                    {r.user ? `${r.user}@` : ""}{r.host}
-                    {r.connected
-                      ? ` · 已连接 127.0.0.1:${r.local_port}${verifiedAgo != null ? `（${verifiedAgo < 1 ? "刚刚" : `${verifiedAgo} 分钟前`}验证）` : ""}`
-                      : ` · ${r.last_error || "未连接，等待后台重连"}`}
-                  </span>
-                  <button className="btn sm" disabled={remoteBusy === r.id} onClick={() => toggleRemote(r)}>{remoteBusy === r.id ? "处理中" : r.connected ? "断开" : "连接"}</button>
-                </div>
-              );
-            })}
-            {remoteLeoJarvis.length === 0 ? <div className="empty">暂无远程 LeoJarvis。先在目标机器部署并运行 LeoJarvis，再添加 SSH 连接。</div> : null}
-          </div>
-          <div className="settings-form remote-cortex-form">
-            <input placeholder="设备名称" value={remoteDraft.name} onChange={(e) => setRemoteDraft({ ...remoteDraft, name: e.target.value })} />
-            <input placeholder="host / IP" value={remoteDraft.host} onChange={(e) => setRemoteDraft({ ...remoteDraft, host: e.target.value })} />
-            <input placeholder="ssh user" value={remoteDraft.user} onChange={(e) => setRemoteDraft({ ...remoteDraft, user: e.target.value })} />
-            <input type="number" placeholder="远端端口" value={remoteDraft.remote_port} onChange={(e) => setRemoteDraft({ ...remoteDraft, remote_port: Number(e.target.value) || 8787 })} />
-            <input placeholder="ProxyCommand（Cloudflare：cloudflared access ssh --hostname %h）" value={remoteDraft.proxy_command} onChange={(e) => setRemoteDraft({ ...remoteDraft, proxy_command: e.target.value })} />
-            <button className="btn sm primary" disabled={!remoteDraft.host || !!remoteBusy} onClick={addRemoteProduct}>{remoteBusy === "add" ? "连接中" : "添加并连接"}</button>
-          </div>
-        </section>
-
-        {/* SSH 设备健康 */}
-        <section className="card settings-card">
-          <div className="panel-title">SSH 设备健康监控</div>
-          <p className="settings-note">仅需把本机 SSH key 授权进目标机 <code>~/.ssh/authorized_keys</code>，目标机有 python3 即可。LeoJarvis 通过 SSH 只读执行健康脚本（CPU/内存/磁盘/端口/进程），不读文件内容。</p>
-          <div className="settings-list">
-            {remotes.map((r, i) => <div className="settings-row" key={`${r.host}-${i}`}><b>{r.name || r.host}</b><span>{r.user ? `${r.user}@` : ""}{r.host}:{r.port || 22}{r.proxy_command ? " · ProxyCommand" : ""}</span><button className="btn sm ghost" onClick={async () => { if (r.id) await removeSshDevice(r.id); save({ remote_devices: remotes.filter((_, j) => j !== i) }); }}>删除</button></div>)}
-            {remotes.length === 0 ? <div className="empty">暂无远程设备。</div> : null}
-          </div>
-          <div className="settings-form ssh-form">
-            <input placeholder="名称" value={sshDraft.name} onChange={(e) => setSshDraft({ ...sshDraft, name: e.target.value })} />
-            <input placeholder="host / IP" value={sshDraft.host} onChange={(e) => setSshDraft({ ...sshDraft, host: e.target.value })} />
-            <input placeholder="user" value={sshDraft.user} onChange={(e) => setSshDraft({ ...sshDraft, user: e.target.value })} />
-            <input type="number" placeholder="端口" value={sshDraft.port} onChange={(e) => setSshDraft({ ...sshDraft, port: Number(e.target.value) || 22 })} />
-            <input placeholder="ProxyCommand（可选，如 Cloudflare：cloudflared access ssh --hostname %h）" value={sshDraft.proxy_command} onChange={(e) => setSshDraft({ ...sshDraft, proxy_command: e.target.value })} />
-            <button className="btn sm primary" disabled={!sshDraft.host} onClick={() => {
-              save({ remote_devices: [...remotes, { ...sshDraft, enabled: true }] });
-              setSshDraft({ name: "", host: "", user: "", port: 22, proxy_command: "" });
-            }}>添加 SSH 设备</button>
-          </div>
-          <button className="btn sm" disabled={remotes.length === 0} onClick={async () => { setError(""); try { const r = await probeSshDevices(); setNotice(`已探测 ${r.count} 台设备，详见「设备健康」页。`); window.setTimeout(() => setNotice(""), 4000); } catch (err) { setError(String(err)); } }}>立即探测全部设备</button>
         </section>
 
         {/* 系统显示 */}

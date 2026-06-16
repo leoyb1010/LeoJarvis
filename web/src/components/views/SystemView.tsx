@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  addSshDevice,
   getDeviceOpsStatus,
-  getDevices,
+  getDeviceSummary,
   getDevTools,
   getServices,
   getSystemOverview,
   previewDeviceOps,
-  probeSshDevices,
-  sendSelfHeartbeat,
   upgradeAiTool,
   type AiToolStatus,
   type DeviceOpsPreview,
@@ -213,7 +210,7 @@ function DeviceOpsCard({
 export function SystemView() {
   const [data, setData] = useState<SystemOverview | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
-  const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [device, setDevice] = useState<DeviceSummary | null>(null);
   const [deviceOps, setDeviceOps] = useState<DeviceOpsStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -223,40 +220,24 @@ export function SystemView() {
   const [activeService, setActiveService] = useState<ServiceRow | null>(null);
   const [opsResult, setOpsResult] = useState<DeviceOpsPreview | null>(null);
   const [opsBusy, setOpsBusy] = useState("");
-  const [showAddDevice, setShowAddDevice] = useState(false);
-  const [ssh, setSsh] = useState({ name: "", host: "", user: "" });
-  const [sshBusy, setSshBusy] = useState(false);
-  const [sshError, setSshError] = useState("");
   const [devTools, setDevTools] = useState<DevToolchain | null>(null);
   const [deviceOpsRefreshing, setDeviceOpsRefreshing] = useState(false);
-  const lastProbe = useRef(0);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [overview, serviceRows, deviceRows] = await Promise.all([getSystemOverview(), getServices(), getDevices()]);
+      const [overview, serviceRows] = await Promise.all([getSystemOverview(), getServices()]);
       setData(overview);
       setServices(serviceRows);
-      setDevices(deviceRows);
+      // 本机健康摘要走单机端点；失败不影响整页（多设备端点已下线）。
+      getDeviceSummary().then(setDevice).catch(() => {});
       getDevTools().then(setDevTools).catch(() => {});
       refreshDeviceOps(false);
     } catch (err) {
       setError(String(err));
     } finally {
       setLoading(false);
-    }
-    // 远端 SSH 探测是慢操作（逐台连接），放到首屏渲染之后后台执行，
-    // 完成后只静默刷新设备列表，避免“点击后很久才刷新出页面”。
-    if (Date.now() - lastProbe.current > 45000) {
-      lastProbe.current = Date.now();
-      sendSelfHeartbeat().catch(() => {});
-      probeSshDevices()
-        .then(() => {
-          getDevices().then(setDevices).catch(() => {});
-          refreshDeviceOps(false);
-        })
-        .catch(() => {});
     }
   };
 
@@ -271,8 +252,6 @@ export function SystemView() {
     return Math.round((services.filter((s) => s.online).length / services.length) * 100);
   }, [services]);
 
-  const onlineDevices = useMemo(() => devices.filter((d) => d.online).length, [devices]);
-
   async function doUpgradeTool(tool: AiToolStatus) {
     if (!tool.can_upgrade) return;
     setUpgradingTool(tool.id);
@@ -285,37 +264,6 @@ export function SystemView() {
       setUpgradeResult(String(err));
     } finally {
       setUpgradingTool("");
-    }
-  }
-
-  async function addRemote() {
-    if (!ssh.host.trim()) return;
-    setSshBusy(true);
-    setSshError("");
-    try {
-      await addSshDevice({ ...ssh, port: 22, enabled: true });
-      await probeSshDevices();
-      setSsh({ name: "", host: "", user: "" });
-      setShowAddDevice(false);
-      await load();
-    } catch (err) {
-      setSshError(String(err));
-    } finally {
-      setSshBusy(false);
-    }
-  }
-
-  async function refreshDevices() {
-    setSshBusy(true);
-    try {
-      await sendSelfHeartbeat();
-      await probeSshDevices();
-      setDevices(await getDevices());
-      await refreshDeviceOps(true);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSshBusy(false);
     }
   }
 
@@ -355,7 +303,7 @@ export function SystemView() {
         <div>
           <div className="kicker">SystemGuard</div>
           <h1>系统与设备</h1>
-          <p>先看本机资源与服务，再看所有 Mac 的健康卡。远端设备通过 SSH 只读采集健康摘要。</p>
+          <p>本机资源、服务、健康摘要与设备管家一站式概览。</p>
         </div>
         <button className="btn primary" onClick={load} disabled={loading}>{loading ? "刷新中" : "立即刷新"}</button>
       </div>
@@ -370,7 +318,7 @@ export function SystemView() {
               </div>
               <div>
                 <span className="sys-hero-label">整体健康度</span>
-                <p>服务可用率 {serviceHealth}% · 设备在线 {onlineDevices}/{devices.length || 1} · 更新 {fmtTime(data.generated_at)}</p>
+                <p>服务可用率 {serviceHealth}% · 更新 {fmtTime(data.generated_at)}</p>
               </div>
             </div>
             <div className="sys-hero-risks">
@@ -388,16 +336,11 @@ export function SystemView() {
           </div>
 
           <SectionHead
-            title="设备健康"
-            desc="每台 Mac 只上报健康摘要，不读取文件内容。"
-            meta={`${onlineDevices}/${devices.length} 在线`}
-          >
-            <button className="btn sm ghost" onClick={refreshDevices} disabled={sshBusy}>{sshBusy ? "探测中" : "重新探测"}</button>
-            <button className="btn sm primary" onClick={() => setShowAddDevice(true)}>添加设备</button>
-          </SectionHead>
+            title="本机健康"
+            desc="当前 Mac 的健康摘要：CPU、内存、磁盘、温控、电源与服务在线率。"
+          />
           <div className="device-grid compact">
-            {devices.map((device) => <DeviceCard device={device} key={device.device_id} />)}
-            {devices.length === 0 ? <div className="empty">暂无设备心跳。</div> : null}
+            {device ? <DeviceCard device={device} key={device.device_id} /> : <div className="empty">本机健康摘要读取中…</div>}
           </div>
 
           <SectionHead
@@ -511,17 +454,6 @@ export function SystemView() {
           </details>
         </>
       )}
-
-      <Modal open={showAddDevice} onClose={() => { setShowAddDevice(false); setSshError(""); }} kicker="SSH 设备" title="添加远程机器"
-        footer={<button className="btn sm primary" onClick={addRemote} disabled={sshBusy || !ssh.host.trim()}>{sshBusy ? "连接中…" : "添加并探测"}</button>}>
-        <div className="modal-form">
-          <p className="modal-note">先在目标机授权本机 SSH 公钥（ssh-copy-id user@host），LeoJarvis 只读取 CPU、内存、磁盘和服务摘要，不读文件内容。</p>
-          <label><span>名称</span><input placeholder="例如 Mac Studio" value={ssh.name} onChange={(e) => setSsh({ ...ssh, name: e.target.value })} /></label>
-          <label><span>Host / IP</span><input placeholder="192.168.1.10 或 Tailscale IP" value={ssh.host} onChange={(e) => setSsh({ ...ssh, host: e.target.value })} /></label>
-          <label><span>用户名</span><input placeholder="user" value={ssh.user} onChange={(e) => setSsh({ ...ssh, user: e.target.value })} /></label>
-          {sshError ? <div className="error">{sshError}</div> : null}
-        </div>
-      </Modal>
 
       <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker="编程 / Agent 工具" title={activeTool?.name}
         footer={activeTool?.can_upgrade ? <button className="btn primary sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>

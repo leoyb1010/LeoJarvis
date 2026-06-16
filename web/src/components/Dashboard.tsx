@@ -16,25 +16,15 @@ import {
   type SimpleIcon,
 } from "simple-icons";
 import {
-  closeTerminalSession,
-  connectRemoteLeoJarvis,
-  createTerminalSession,
   getBriefingItem,
   getCockpitOverview,
-  getRemoteCockpit,
-  getTerminalSessions,
-  listRemoteLeoJarvis,
-  readTerminalSession,
   upgradeAiTool,
-  writeTerminalSession,
   type AiToolStatus,
   type BriefingItem,
   type CockpitGithubCard,
   type CockpitOverview,
   type LocalNotificationApp,
-  type RemoteLeoJarvisConnection,
   type ServiceRow,
-  type TerminalSession,
 } from "../api";
 import { PageSkeleton } from "./Skeleton";
 import { Modal } from "./Modal";
@@ -106,13 +96,6 @@ function evidenceList(item: BriefingItem) {
   if (rows.length) return rows.slice(0, 4);
   if (item.why_important) return [item.why_important];
   return ["已通过情报评分进入驾驶舱。"];
-}
-
-function cleanTerminalOutput(value: string) {
-  return value
-    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
 // 微型趋势线：保留克制，但加入低噪网格底，避免六格像生硬折线。
@@ -278,81 +261,27 @@ export function Dashboard() {
   const [showHealthDetail, setShowHealthDetail] = useState(false);
   const [upgradingTool, setUpgradingTool] = useState("");
   const [upgradeResult, setUpgradeResult] = useState("");
-  const [remotes, setRemotes] = useState<RemoteLeoJarvisConnection[]>([]);
-  const [activeDevice, setActiveDevice] = useState("local");
-  const [deviceError, setDeviceError] = useState("");
-  const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
-  const [terminalDevice, setTerminalDevice] = useState("local");
-  const [terminalOutput, setTerminalOutput] = useState("");
-  const [terminalInput, setTerminalInput] = useState("");
-  const [terminalBusy, setTerminalBusy] = useState(false);
-  const [terminalError, setTerminalError] = useState("");
-  // 后台仍在运行的 CLI 会话（关闭弹层后不杀进程），用于在工具卡上标记“后台运行中”。
-  const [bgSessions, setBgSessions] = useState<TerminalSession[]>([]);
 
   useEffect(() => {
     let alive = true;
-    // 远端连接状态会随隧道建立从“未连接”变“已连接”，必须随轮询刷新，
-    // 否则首屏拿到的离线状态会一直留在下拉里，远端永远显示离线。
-    const refreshRemotes = () =>
-      listRemoteLeoJarvis().then((rows) => { if (alive) setRemotes(rows); }).catch(() => {});
     const load = () => {
-      setDeviceError("");
-      const dataPromise = activeDevice === "local"
-        ? getCockpitOverview()
-        : getRemoteCockpit(activeDevice).then((res) => {
-            if (!res.ok || !res.data) throw new Error(res.error || "远程 LeoJarvis 未连接");
-            return res.data;
-          });
-      dataPromise
+      getCockpitOverview()
         .then((res) => {
           if (!alive) return;
           setError("");
-          setDeviceError("");
           setData(res);
           setSamples((prev) => {
-            const key = activeDevice === "local" ? "cortex-dashboard-samples" : `cortex-dashboard-samples-${activeDevice}`;
             const next = [...prev.filter((row) => row.ts !== res.generated_at), sampleFrom(res)].slice(-40);
-            try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* optional */ }
+            try { localStorage.setItem("cortex-dashboard-samples", JSON.stringify(next)); } catch { /* optional */ }
             return next;
           });
         })
-        .catch((err) => { if (alive) { setError(String(err)); setDeviceError(String(err)); } });
+        .catch((err) => { if (alive) setError(String(err)); });
     };
-    refreshRemotes();
     load();
-    const t = window.setInterval(() => { load(); refreshRemotes(); }, 8000);
+    const t = window.setInterval(load, 8000);
     return () => { alive = false; window.clearInterval(t); };
-  }, [activeDevice]);
-
-  // 后台 CLI 会话清单：标记哪些工具有正在后台运行的控制台，可一键重新挂载。
-  useEffect(() => {
-    let alive = true;
-    const poll = () => getTerminalSessions(activeDevice)
-      .then((rows) => { if (alive) setBgSessions(rows.filter((s) => s.running)); })
-      .catch(() => {});
-    poll();
-    const t = window.setInterval(poll, 5000);
-    return () => { alive = false; window.clearInterval(t); };
-  }, [activeDevice, terminalSession?.id]);
-
-  useEffect(() => {
-    if (!terminalSession?.id) return;
-    let alive = true;
-    const read = async () => {
-      try {
-        const res = await readTerminalSession(terminalSession.id, terminalDevice);
-        if (!alive) return;
-        if (res.output) setTerminalOutput((prev) => `${prev}${res.output}`.slice(-50000));
-        if (res.session) setTerminalSession(res.session);
-      } catch (err) {
-        if (alive) setTerminalError(String(err));
-      }
-    };
-    read();
-    const t = window.setInterval(read, 700);
-    return () => { alive = false; window.clearInterval(t); };
-  }, [terminalSession?.id, terminalDevice]);
+  }, []);
 
   const series = useMemo(() => ({
     health: samples.map((s) => s.health),
@@ -364,52 +293,13 @@ export function Dashboard() {
     intel: samples.map((s) => s.intel),
     memory: samples.map((s) => s.memory),
   }), [samples]);
-  const terminalDisplay = useMemo(() => cleanTerminalOutput(terminalOutput), [terminalOutput]);
 
-  const validRemotes = remotes.filter((r) => r.enabled !== false);
-  const switchLabel = activeDevice === "local" ? "本机 LeoJarvis"
-    : validRemotes.find((r) => r.id === activeDevice)?.name
-    || "远程设备";
-  const switchSub = activeDevice === "local" ? "127.0.0.1:8787"
-    : validRemotes.find((r) => r.id === activeDevice)?.host
-    || "";
-  const isLocalDevice = activeDevice === "local";
-  const deviceScope = isLocalDevice ? "本机" : "远端";
-  const statusTitle = isLocalDevice ? "本机状态" : "远程状态";
-  const serviceTitle = isLocalDevice ? "本机服务" : "远端服务";
-  const agentTitle = isLocalDevice ? "本机编程服务" : "远端编程服务";
-  const appsTitle = isLocalDevice ? "本机应用与邮件监控" : "远端应用与邮件监控";
-  const sourceMeta = isLocalDevice ? "127.0.0.1:8787" : switchSub;
-  const onDeviceChange = (value: string) => {
-    setActiveDevice(value);
-    setData(null);
-    setSamples([]);
-    setActiveApp(null);
-    setActiveSignal(null);
-    setActiveRepo(null);
-    setActiveTool(null);
-    setActiveService(null);
-    setUpgradeResult("");
-    setTerminalSession(null);
-    setTerminalOutput("");
-    setTerminalInput("");
-    setTerminalError("");
-  };
-  const reconnectActive = async () => {
-    if (activeDevice === "local") return;
-    setDeviceError("正在重连…");
-    try {
-      const res = await connectRemoteLeoJarvis(activeDevice);
-      if (!res.ok) {
-        setDeviceError(res.error || "重连失败");
-        return;
-      }
-      setDeviceError("");
-      setData(null);
-    } catch (err) {
-      setDeviceError(String(err));
-    }
-  };
+  const deviceScope = "本机";
+  const statusTitle = "本机状态";
+  const serviceTitle = "本机服务";
+  const agentTitle = "本机编程服务";
+  const appsTitle = "本机应用与邮件监控";
+  const sourceMeta = "127.0.0.1:8787";
   const openSignalDetail = async (item: BriefingItem) => {
     setActiveSignal(item.source_detail_translated ? item : { ...item, detail: "", source_detail: "", source_detail_missing: false });
     setDetailLoadingId(item.event_id);
@@ -422,30 +312,9 @@ export function Dashboard() {
       setDetailLoadingId("");
     }
   };
-  const deviceSwitch = (
-    <div className="dash-device-switch card">
-      <div>
-        <span className="kicker">Device Switch</span>
-        <b>{switchLabel}</b>
-        <small>{switchSub}</small>
-      </div>
-      <select value={activeDevice} onChange={(e) => onDeviceChange(e.target.value)}>
-        <option value="local">本机 LeoJarvis</option>
-        {validRemotes.length ? <optgroup label="远程 LeoJarvis 实例">{validRemotes.map((r) => <option key={r.id} value={r.id}>{r.name || r.host}{r.connected ? " · 已连接" : " · 未连接"}</option>)}</optgroup> : null}
-      </select>
-      {deviceError ? (
-        <em className="device-error">
-          {deviceError}
-          {!isLocalDevice ? <button className="btn sm ghost" onClick={reconnectActive}>立即重连</button> : null}
-        </em>
-      ) : <em>{isLocalDevice ? "本机实时驾驶舱" : "通过 SSH tunnel 读取远程完整驾驶舱"}</em>}
-    </div>
-  );
 
-  // 切换设备时保持设备切换条常驻，下方再显示骨架/错误，避免整页骨架把下拉藏起来。
   if (!data) return (
     <div className="dash">
-      {deviceSwitch}
       {error ? <div className="error">{error}</div> : <PageSkeleton head={false} hero={false} cards={6} />}
     </div>
   );
@@ -465,10 +334,6 @@ export function Dashboard() {
 
   async function doUpgradeTool(tool: AiToolStatus) {
     if (!tool.can_upgrade) return;
-    if (!isLocalDevice) {
-      setUpgradeResult("当前展示的是远端工具状态。为了避免误操作，本机 App 不会直接对远端执行升级；请登录对应远端主机后再升级。");
-      return;
-    }
     setUpgradingTool(tool.id);
     setUpgradeResult("");
     try {
@@ -480,55 +345,6 @@ export function Dashboard() {
       setUpgradeResult(String(err));
     } finally {
       setUpgradingTool("");
-    }
-  }
-
-  // 仅“脱离”：停止前端轮询、清空本地显示，但不杀进程——CLI 继续在后台独立运行。
-  function detachToolTerminal() {
-    setTerminalSession(null);
-    setTerminalOutput("");
-    setTerminalInput("");
-    setTerminalError("");
-  }
-
-  // 显式“结束会话”：真正杀掉后台 CLI 进程。
-  async function endToolTerminal() {
-    if (terminalSession) {
-      try { await closeTerminalSession(terminalSession.id, terminalDevice); } catch { /* best-effort */ }
-    }
-    detachToolTerminal();
-    getTerminalSessions(activeDevice).then((rows) => setBgSessions(rows.filter((s) => s.running))).catch(() => {});
-  }
-
-  // 打开/重新挂载控制台：后端遇到同工具的后台会话会自动重新挂载并回放完整上下文。
-  async function openToolTerminal(tool: AiToolStatus) {
-    if (!tool.installed || terminalBusy) return;
-    setTerminalBusy(true);
-    setTerminalError("");
-    setTerminalOutput("");
-    setTerminalInput("");
-    setTerminalSession(null);
-    try {
-      const res = await createTerminalSession(tool.id, "", activeDevice);
-      if (!res.ok || !res.session) throw new Error(res.error || "CLI 控制台启动失败");
-      setTerminalDevice(activeDevice);
-      setTerminalSession(res.session);
-      setTerminalOutput(res.output || "");
-    } catch (err) {
-      setTerminalError(String(err));
-    } finally {
-      setTerminalBusy(false);
-    }
-  }
-
-  async function sendTerminalText() {
-    if (!terminalSession || !terminalInput.trim()) return;
-    const text = terminalInput.endsWith("\n") ? terminalInput : `${terminalInput}\n`;
-    setTerminalInput("");
-    try {
-      await writeTerminalSession(terminalSession.id, text, terminalDevice);
-    } catch (err) {
-      setTerminalError(String(err));
     }
   }
 
@@ -588,7 +404,14 @@ export function Dashboard() {
 
   return (
     <div className="dash">
-      {deviceSwitch}
+      <div className="dash-device-switch card">
+        <div>
+          <span className="kicker">Device</span>
+          <b>本机 LeoJarvis</b>
+          <small>127.0.0.1:8787</small>
+        </div>
+        <em>本机实时驾驶舱</em>
+      </div>
 
       <SectionTitle
         title={statusTitle}
@@ -634,20 +457,19 @@ export function Dashboard() {
           <div className="dash-tool-list">
             {(runtime?.ai_tools || []).map((tool) => {
               const visual = toolVisual(tool);
-              const hasBg = bgSessions.some((s) => s.tool_id === tool.id);
               return (
                 <button
-                  className={`dash-tool runtime-icon-card ${tool.installed ? "on" : "off"} ${hasBg || tool.running ? "running" : ""} ${hasBg ? "has-bg" : ""} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
+                  className={`dash-tool runtime-icon-card ${tool.installed ? "on" : "off"} ${tool.running ? "running" : ""} tone-${visual.tone} ${visual.icon || visual.image ? "has-real-icon" : "has-fallback-icon"}`}
                   key={tool.id}
                   onClick={() => setActiveTool(tool)}
-                  title={`${tool.name} · ${!tool.installed ? "未安装" : hasBg ? "后台控制台运行中" : tool.running ? "运行中" : "就绪"}`}
+                  title={`${tool.name} · ${!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}`}
                 >
                   <span className="runtime-icon-shell">
                     <RuntimeIcon visual={visual} />
                     <span className="status-lamp" />
                   </span>
                   <b>{visual.name}</b>
-                  <i>{!tool.installed ? "未安装" : hasBg ? "后台运行" : tool.running ? "运行中" : "就绪"}</i>
+                  <i>{!tool.installed ? "未安装" : tool.running ? "运行中" : "就绪"}</i>
                 </button>
               );
             })}
@@ -821,20 +643,8 @@ export function Dashboard() {
         ) : null}
       </Modal>
 
-      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); detachToolTerminal(); }} kicker={agentTitle} title={activeTool?.name}
-        footer={activeTool ? (
-          <div className="modal-actions">
-            {activeTool.installed ? (
-              terminalSession ? (
-                <>
-                  <button className="btn sm ghost" onClick={() => { setActiveTool(null); setUpgradeResult(""); detachToolTerminal(); }}>最小化（后台运行）</button>
-                  <button className="btn sm danger" onClick={() => void endToolTerminal()}>结束会话</button>
-                </>
-              ) : <button className="btn sm primary" onClick={() => void openToolTerminal(activeTool)} disabled={terminalBusy}>{terminalBusy ? "启动中" : (bgSessions.some((s) => s.tool_id === activeTool.id) ? "重新挂载控制台" : "打开控制台")}</button>
-            ) : null}
-            {activeTool.can_upgrade && isLocalDevice ? <button className="btn sm" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}
-          </div>
-        ) : null}>
+      <Modal open={!!activeTool} onClose={() => { setActiveTool(null); setUpgradeResult(""); }} kicker={agentTitle} title={activeTool?.name}
+        footer={activeTool?.can_upgrade ? <button className="btn sm primary" onClick={() => activeTool && doUpgradeTool(activeTool)} disabled={!!upgradingTool}>{upgradingTool ? "升级中" : "一键升级"}</button> : null}>
         {activeTool ? (
           <div className="modal-kv">
             <div><span>安装状态</span><b>{activeTool.installed ? "已安装" : "未安装"}</b></div>
@@ -847,27 +657,7 @@ export function Dashboard() {
             {activeTool.upgrade_command ? <div><span>升级命令</span><b><code>{activeTool.upgrade_command}</code></b></div> : null}
             {activeTool.path ? <p className="modal-note"><code>{activeTool.path}</code></p> : null}
             <p className="modal-note">{activeTool.advice}</p>
-            {!isLocalDevice ? <p className="modal-note">当前为远端设备：控制台通过远端 LeoJarvis 白名单接口启动；升级操作仍需登录远端主机确认。</p> : null}
             {upgradeResult ? <pre className="toolResult">{upgradeResult}</pre> : null}
-            {terminalError ? <p className="modal-note tone-bad">{terminalError}</p> : null}
-            {terminalSession ? (
-              <section className="cli-console">
-                <div className="cli-console-head">
-                  <b>{terminalSession.tool_name}</b>
-                  <span>{terminalSession.running ? "运行中" : `已结束 ${terminalSession.exit_code ?? ""}`} · {terminalSession.command}</span>
-                </div>
-                <pre>{terminalDisplay || "控制台已启动，等待输出…"}</pre>
-                <div className="cli-console-input">
-                  <input
-                    value={terminalInput}
-                    placeholder="输入命令或提示，Enter 发送"
-                    onChange={(e) => setTerminalInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void sendTerminalText(); }}
-                  />
-                  <button className="btn sm primary" onClick={() => void sendTerminalText()} disabled={!terminalInput.trim() || !terminalSession.running}>发送</button>
-                </div>
-              </section>
-            ) : null}
           </div>
         ) : null}
       </Modal>

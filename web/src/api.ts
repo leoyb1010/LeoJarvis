@@ -153,25 +153,8 @@ export async function getDeviceSummary(): Promise<DeviceSummary> {
   return readJson(await fetch(`${BASE}/device/summary`), "读取本机设备摘要");
 }
 
-export async function getDevices(): Promise<DeviceSummary[]> {
-  return readJson(await fetch(`${BASE}/devices`), "读取设备健康列表");
-}
-
-export async function sendSelfHeartbeat(): Promise<{ ok: boolean; device: DeviceSummary }> {
-  return readJson(await fetch(`${BASE}/devices/self-heartbeat`, { method: "POST" }), "上报本机心跳");
-}
-
-export async function addSshDevice(input: { host: string; name?: string; user?: string; port?: number; enabled?: boolean; proxy_command?: string; ssh_options?: string[] }) {
-  return readJson<any>(await fetch(`${BASE}/devices/ssh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }), "添加 SSH 设备");
-}
-
-export async function probeSshDevices() {
-  return readJson<any>(await fetch(`${BASE}/devices/ssh/probe`, { method: "POST" }), "探测 SSH 设备");
-}
+// 多设备健康列表 / SSH 探测 / 本机心跳上报相关端点已被后端移除（单机化），
+// 前端改用 /device/summary 读取本机健康摘要。
 
 export type RemoteLeoJarvisConnection = {
   id: string;
@@ -190,29 +173,9 @@ export type RemoteLeoJarvisConnection = {
   ssh_options?: string[];
 };
 
-export async function listRemoteLeoJarvis(): Promise<RemoteLeoJarvisConnection[]> {
-  return readJson(await fetch(`${BASE}/remote-cortex`), "读取远程 LeoJarvis");
-}
-
-export async function addRemoteLeoJarvis(input: Partial<RemoteLeoJarvisConnection> & { host: string }) {
-  return readJson<{ ok: boolean; connection: RemoteLeoJarvisConnection }>(await fetch(`${BASE}/remote-cortex`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }), "添加远程 LeoJarvis");
-}
-
-export async function connectRemoteLeoJarvis(id: string) {
-  return readJson<{ ok: boolean; connection?: RemoteLeoJarvisConnection; error?: string }>(await fetch(`${BASE}/remote-cortex/${id}/connect`, { method: "POST" }), "连接远程 LeoJarvis");
-}
-
-export async function disconnectRemoteLeoJarvis(id: string) {
-  return readJson<{ ok: boolean }>(await fetch(`${BASE}/remote-cortex/${id}/disconnect`, { method: "POST" }), "断开远程 LeoJarvis");
-}
-
-export async function getRemoteCockpit(id: string): Promise<{ ok: boolean; connection?: RemoteLeoJarvisConnection; data?: CockpitOverview; error?: string }> {
-  return readJson(await fetch(`${BASE}/remote-cortex/${id}/cockpit`), "读取远程驾驶舱");
-}
+// 远程 LeoJarvis 实例（/remote-cortex 及其子路由）已被后端移除（单机化），
+// 对应的列表/新增/连接/断开/远程驾驶舱调用全部删除。RemoteLeoJarvisConnection
+// 类型仍保留，仅用于 LeoJarvisSettings.remote_cortex 的形状兼容。
 
 export type RssSource = { name?: string; url?: string; category?: string; domain?: string; limit?: number; enabled?: boolean };
 
@@ -311,9 +274,7 @@ export async function searchMcpWeb(query: string, limit = 8) {
   }), "MCP 搜索");
 }
 
-export async function removeSshDevice(id: string) {
-  return readJson<{ ok: boolean }>(await fetch(`${BASE}/devices/ssh/${id}`, { method: "DELETE" }), "删除 SSH 设备");
-}
+// /devices/ssh/{id} 删除端点已随多设备功能一起被后端移除。
 
 // ---------- 全景驾驶舱 ----------
 
@@ -799,77 +760,8 @@ export async function upgradeAiTool(id: string): Promise<{ ok: boolean; tool?: s
   return readJson(await fetch(`${BASE}/system/ai-tools/${id}/upgrade`, { method: "POST" }), "升级 AI 工具");
 }
 
-export type TerminalSession = {
-  id: string;
-  tool_id: string;
-  tool_name: string;
-  command: string;
-  cwd: string;
-  created_at: number;
-  running: boolean;
-  exit_code?: number | null;
-};
-
-export type TerminalResponse = {
-  ok: boolean;
-  error?: string;
-  session?: TerminalSession;
-  output?: string;
-};
-
-function remoteTerminalData<T>(payload: T | { ok: boolean; data?: T; error?: string }): T {
-  if (payload && typeof payload === "object" && "data" in payload && (payload as any).data) return (payload as any).data as T;
-  return payload as T;
-}
-
-export async function getTerminalSessions(remoteId = "local"): Promise<TerminalSession[]> {
-  const path = remoteId === "local" ? `${BASE}/terminal/sessions` : `${BASE}/remote-cortex/${remoteId}/terminal/sessions`;
-  try {
-    const payload = await readJson<TerminalSession[] | { ok: boolean; data?: TerminalSession[] }>(await fetch(path), "读取 CLI 会话");
-    const rows = Array.isArray(payload) ? payload : (payload as any)?.data;
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function createTerminalSession(tool_id: string, cwd = "", remoteId = "local"): Promise<TerminalResponse> {
-  const path = remoteId === "local" ? `${BASE}/terminal/sessions` : `${BASE}/remote-cortex/${remoteId}/terminal/sessions`;
-  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool_id, cwd }),
-  }), "启动 CLI 控制台");
-  return remoteTerminalData<TerminalResponse>(payload);
-}
-
-export async function readTerminalSession(sessionId: string, remoteId = "local"): Promise<TerminalResponse> {
-  const path = remoteId === "local"
-    ? `${BASE}/terminal/sessions/${sessionId}/read`
-    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}/read`;
-  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path), "读取 CLI 控制台");
-  return remoteTerminalData<TerminalResponse>(payload);
-}
-
-export async function writeTerminalSession(sessionId: string, text: string, remoteId = "local"): Promise<TerminalResponse> {
-  const path = remoteId === "local"
-    ? `${BASE}/terminal/sessions/${sessionId}/write`
-    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}/write`;
-  const payload = await readJson<TerminalResponse | { ok: boolean; data?: TerminalResponse; error?: string }>(await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  }), "写入 CLI 控制台");
-  return remoteTerminalData<TerminalResponse>(payload);
-}
-
-export async function closeTerminalSession(sessionId: string, remoteId = "local"): Promise<{ ok: boolean; error?: string }> {
-  const path = remoteId === "local"
-    ? `${BASE}/terminal/sessions/${sessionId}`
-    : `${BASE}/remote-cortex/${remoteId}/terminal/sessions/${sessionId}`;
-  const payload = await readJson<{ ok: boolean; error?: string } | { ok: boolean; data?: { ok: boolean; error?: string }; error?: string }>(await fetch(path, { method: "DELETE" }), "关闭 CLI 控制台");
-  return remoteTerminalData<{ ok: boolean; error?: string }>(payload);
-}
+// 本机/远程 CLI 控制台会话（/terminal/sessions 及 /remote-cortex/*/terminal/sessions）
+// 已被后端移除，相关类型与读写/创建/关闭会话的调用全部删除。
 
 export type DevTool = { id: string; name: string; category: string; installed: boolean; path: string | null; version: string; launch: string; checked_at: number };
 export type DevToolchain = {
