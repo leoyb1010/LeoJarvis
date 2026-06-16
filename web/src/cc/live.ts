@@ -42,8 +42,17 @@ export const getServices = () => jget<Service[]>("/services/discover");
 export type BriefItem = { title?: string; source?: string; priority?: string; triage?: string; why_important?: string; take?: string; ts?: number; event_id?: string } & Record<string, any>;
 export type Briefing = { items?: BriefItem[]; counts?: Record<string, number> } & Record<string, any>;
 export const getBriefing = () => jget<Briefing>("/briefing/today?compact=1");
-export const getIntelligence = () => jget<any>("/intelligence/overview");
-export const getBriefingItem = (id: string) => jget<any>(`/briefing/items/${encodeURIComponent(id)}`);
+
+// intelligence/overview: { github:[{ repo_full_name, display_description/summary_zh/description, language, stars, stars_per_day, delta_24h, momentum_score, url, topics, ... }], sources:[{ id, type, name, url, domain, enabled, last_scan_ts }], targets:[{ id, label, kind, query, enabled }], stats:{ enabled_targets, enabled_sources, notify_events, github_repos } }
+export type IntelRepo = { repo_full_name?: string; description?: string; display_description?: string; summary_zh?: string; language?: string; stars?: number; forks?: number; stars_per_day?: number; delta_24h?: number; momentum_score?: number; url?: string; topics?: string[]; display_topics?: string[] } & Record<string, any>;
+export type IntelSource = { id?: string; type?: string; name?: string; url?: string; domain?: string; enabled?: number; last_scan_ts?: number | null } & Record<string, any>;
+export type IntelTarget = { id?: string; label?: string; kind?: string; query?: string; enabled?: number } & Record<string, any>;
+export type Intelligence = { github?: IntelRepo[]; sources?: IntelSource[]; targets?: IntelTarget[]; stats?: Record<string, number> } & Record<string, any>;
+export const getIntelligence = () => jget<Intelligence>("/intelligence/overview");
+
+// briefing/items/{id}: { ok, item:{ title, source, source_detail(中文全文正文), source_detail_translated, why_important, take, next_step, reasons[], url, score, ts, priority, ... } }
+export type BriefDetailItem = { title?: string; source?: string; source_detail?: string; source_detail_translated?: boolean; source_detail_missing?: boolean; why_important?: string; take?: string; next_step?: string; reasons?: string[]; url?: string; score?: number; ts?: number; priority?: string; relation?: string } & Record<string, any>;
+export const getBriefingItem = (id: string) => jget<{ ok?: boolean; item?: BriefDetailItem }>(`/briefing/items/${encodeURIComponent(id)}`);
 
 // ---- 中枢对话（真实）----
 export type ChatMsg = { role: "user" | "assistant"; content: string };

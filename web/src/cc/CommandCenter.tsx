@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import {
   getCliAgents, getCliSessions, runCliAgent, stopCliSession, fmtAgo,
   getVitals, getServices, getSystemOverview, getBriefing, getNotes, getNotifications,
-  agentChat, approveAction,
+  agentChat, approveAction, getIntelligence, getBriefingItem,
   type CliAgent, type CliSession, type Vitals, type Service, type SystemOverview,
-  type Briefing, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
+  type Briefing, type BriefItem, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
+  type Intelligence, type IntelRepo, type IntelSource, type IntelTarget, type BriefDetailItem,
 } from "./live";
 
 const TAG: Record<string, [string, string]> = { claude: ["CC", "#ff7a45"], codex: ["CX", "#36d39a"], cursor: ["CU", "#4da3ff"], grok: ["GK", "#b69cff"], gemini: ["GM", "#ffb454"], opencode: ["OC", "#9aa6b2"] };
@@ -508,68 +509,203 @@ function Agents({ sync, toggleSync }: { sync: boolean; toggleSync: () => void })
 }
 
 // ============ INTEL ============
+// GitHub 雷达：按增速 stars_per_day 分档 → 标签 [文字色, 背景色]。
+function repoSignal(speed: number): { sig: string; fg: string; bg: string } {
+  if (speed >= 300) return { sig: "爆发", fg: "#fff", bg: "#ff5d5d" };
+  if (speed >= 80) return { sig: "加速", fg: "#fff", bg: "rgba(255,122,69,.85)" };
+  return { sig: "升温", fg: "#ff7a45", bg: "rgba(255,122,69,.16)" };
+}
+// 大数字星标 → 紧凑显示（50128 → 50.1k）。
+function compactNum(n?: number): string {
+  if (typeof n !== "number" || !isFinite(n)) return "—";
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+
+// ★ 详情抽屉：点信号流某条 → getBriefingItem(event_id) → 展示完整中文内容（source_detail 中文全文正文）。
+function IntelDetail({ id, onClose }: { id: string; onClose: () => void }) {
+  const [item, setItem] = useState<BriefDetailItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setLoading(true); setErr(false); setItem(null);
+    getBriefingItem(id)
+      .then((r) => { if (!live) return; if (r?.ok && r.item) setItem(r.item); else setErr(true); })
+      .catch(() => { if (live) setErr(true); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [id]);
+  // Esc 关闭
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const [pf, pb] = priStyle(item?.priority);
+  const time = tsToTime(item?.ts);
+  const openUrl = () => { if (item?.url) window.open(item.url, "_blank", "noopener,noreferrer"); };
+  const sectLbl: CSSProperties = { font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".14em", color: "#6b7480", marginBottom: 8 };
+  const bodyText: CSSProperties = { margin: 0, font: "400 14px/1.85 'Space Grotesk','PingFang SC',sans-serif", color: "#c4ccd6", whiteSpace: "pre-wrap" };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(4,6,9,.62)", backdropFilter: "blur(2px)", display: "flex", justifyContent: "flex-end", animation: "cxFade .18s ease both" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(560px,92vw)", height: "100%", background: "#0e1218", borderLeft: "1px solid #1c222b", boxShadow: "-24px 0 60px rgba(0,0,0,.5)", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", animation: "cxSlideIn .26s cubic-bezier(.22,.61,.36,1) both" }}>
+        {/* 抽屉头 */}
+        <div style={{ ...row(10), padding: "16px 20px 14px", borderBottom: "1px solid #161b22" }}>
+          <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>情报详情 · DETAIL</span>
+          <span style={flex1} />
+          <button onClick={onClose} aria-label="关闭" style={{ width: 28, height: 28, display: "grid", placeContent: "center", border: "1px solid #1c222b", background: "#0b0e13", borderRadius: 8, cursor: "pointer", color: "#aab2bd" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        {/* 抽屉体 */}
+        <div style={{ overflowY: "auto", minHeight: 0, padding: "20px 22px 28px" }}>
+          {loading && (
+            <div style={{ display: "grid", gap: 12, placeItems: "center", padding: "60px 0", textAlign: "center" }}>
+              <div style={{ display: "flex", gap: 5 }}>{[0, 1, 2].map((i) => (<span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#ff7a45", animation: "cxType 1s ease-in-out infinite", animationDelay: `${i * 0.16}s` }} />))}</div>
+              <span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "#8b94a0" }}>正在翻译 / 读取详情…</span>
+              <span style={{ ...mono(9.5) }}>LLM 翻译可能需要几秒</span>
+            </div>
+          )}
+          {!loading && err && (
+            <div style={{ display: "grid", gap: 10, placeItems: "center", padding: "60px 0", textAlign: "center" }}>
+              <span style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>详情加载失败</span>
+              <span style={{ font: "400 12px 'Space Grotesk',sans-serif", color: "#8b94a0" }}>后端无响应或该条目暂无详情，请稍后重试。</span>
+            </div>
+          )}
+          {!loading && !err && item && (<>
+            <div style={{ ...row(8), marginBottom: 12, flexWrap: "wrap" }}>
+              <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "3px 9px" }}>{item.priority || "观察"}</span>
+              <span style={mono(10.5, "#aab2bd")}>{item.source || ""}{time ? ` · ${time}` : ""}</span>
+              {typeof item.score === "number" && <><span style={flex1} /><span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>评分 {item.score.toFixed(2)}</span></>}
+            </div>
+            <h2 style={{ margin: "0 0 18px", font: "600 21px/1.4 'Space Grotesk','PingFang SC',sans-serif", color: "#e8ecf1" }}>{item.title || "(无标题)"}</h2>
+
+            {/* 中文全文正文 —— 来自 source_detail */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={sectLbl}>全文 · 中文{item.source_detail_translated ? "（已翻译）" : ""}</div>
+              <div style={{ ...sub, padding: "14px 16px", background: "#0b0e13" }}>
+                {item.source_detail && item.source_detail.trim()
+                  ? <p style={bodyText}>{item.source_detail}</p>
+                  : <p style={{ ...bodyText, color: "#8b94a0" }}>{item.source_detail_missing ? "该来源未提供可读全文。" : (item.take || "暂无全文正文。")}</p>}
+              </div>
+            </div>
+
+            {item.why_important && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={sectLbl}>为什么重要</div>
+                <p style={bodyText}>{item.why_important}</p>
+              </div>
+            )}
+            {(item.take || item.next_step) && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={sectLbl}>建议</div>
+                {item.take && <p style={{ ...bodyText, marginBottom: item.next_step ? 8 : 0 }}>{item.take}</p>}
+                {item.next_step && <p style={{ ...bodyText, color: "#aab2bd" }}><span style={{ color: "#ff7a45" }}>下一步 · </span>{item.next_step}</p>}
+              </div>
+            )}
+            {Array.isArray(item.reasons) && item.reasons.length > 0 && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={sectLbl}>判断依据</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {item.reasons.map((r, i) => (<span key={i} style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "#aab2bd", background: "#0b0e13", border: "1px solid #1c222b", borderRadius: 999, padding: "5px 11px" }}>{r}</span>))}
+                </div>
+              </div>
+            )}
+            {item.url && (
+              <button onClick={openUrl} className="cx-chip" style={{ ...row(8), border: "1px solid #232a33", background: "#0b0e13", color: "#ff7a45", cursor: "pointer", font: "600 12px 'Space Grotesk',sans-serif", padding: "10px 14px", borderRadius: 10, width: "100%", justifyContent: "center" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M14 5h5v5M19 5l-9 9M11 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg>
+                打开原文链接
+              </button>
+            )}
+          </>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Intel() {
-  const PRI: Record<string, [string, string]> = { 高优先: ["#fff", "#ff5d5d"], 简报: ["#ff7a45", "rgba(255,122,69,.16)"], 观察: ["#aab2bd", "rgba(255,255,255,.06)"] };
-  const I = (pri: string, source: string, time: string, title: string, take: string, rel: number) => ({ pri, source, time, title, take, rel });
-  const intel = [
-    I("高优先", "Hacker News", "08:12", "Anthropic 发布新一代本地代理协议", "与你的 MCP / 本地助理方向高度相关，建议今天读完并评估接入。", 96),
-    I("高优先", "邮件", "07:58", "投资人回信：下周见面确认", "已读取邮件主题，非内容；建议尽快回复确认时间。", 91),
-    I("简报", "GitHub Trending", "07:40", "local-first AI agent 框架一周 star 翻倍", "架构思路可借鉴到 LeoJarvis 的工具总线。", 81),
-    I("简报", "雪球", "07:20", "你关注的持仓出现异动信号", "非紧急，已并入生活段简报。", 74),
-    I("观察", "arXiv", "06:55", "长期记忆确认队列的可解释召回", "与你的待确认记忆机制呼应，留作参考。", 63),
-    I("简报", "V2EX", "06:40", "本地优先工具讨论热帖", "社区在聊隐私与本机算力，可关注观点。", 60),
-    I("观察", "少数派", "06:10", "Mac 效率工具年度盘点", "和设备管家方向相关，留作参考。", 52),
-    I("简报", "高德", "昨天", "通勤路线施工提醒", "明早出行可能受影响，建议提前 15 分钟。", 55),
-    I("观察", "小宇宙", "昨天", "AI 助理播客新一期", "话题与个人超级助理相关，闲时可听。", 48),
-    I("观察", "Reddit", "昨天", "r/LocalLLaMA 本周高赞", "本地模型推理优化讨论，留作技术参考。", 45),
-  ];
-  const REPO = (name: string, lang: string, speed: number, stars: string, sig: string, summary: string) => {
-    const SG: Record<string, [string, string]> = { 爆发: ["#fff", "#ff5d5d"], 加速: ["#fff", "rgba(255,122,69,.85)"], 升温: ["#ff7a45", "rgba(255,122,69,.16)"] };
-    return { name, lang, speed, stars, sig, summary, sigFg: SG[sig][0], sigBg: SG[sig][1] };
-  };
-  const repos = [REPO("local-agent/core", "Rust", 142, "8.4k", "爆发", "本地优先代理运行时，内置工具闸门与审计。"), REPO("mcp-tools/gateway", "TypeScript", 88, "3.1k", "加速", "统一 MCP 网关，聚合搜索 / GitHub / 地图工具。"), REPO("agent-os/runtime", "Go", 64, "2.2k", "加速", "多智能体编排运行时，支持并行子任务。"), REPO("whisper-live", "Python", 31, "12k", "升温", "实时语音转写，可用于语音指令输入。"), REPO("memory-vec", "Rust", 22, "1.1k", "升温", "可解释向量记忆库，带召回审计。")];
+  const [brief, setBrief] = useState<Briefing | null>(null);
+  const [intelData, setIntelData] = useState<Intelligence | null>(null);
   const [filter, setFilter] = useState("全部");
-  const filters = ["全部", "高优先", "简报", "观察"];
-  const sources = [{ name: "RSS · 12 源", count: "活跃", dot: "#36d39a" }, { name: "网页变化监控", count: "6", dot: "#36d39a" }, { name: "GitHub 雷达", count: "10 query", dot: "#36d39a" }, { name: "邮件 IMAP", count: "已连", dot: "#36d39a" }, { name: "ICS 日历", count: "待配置", dot: "#6b7480" }];
-  const targets = ["AI 助理", "MCP", "个人助理", "local-first", "agent", "本地算力"];
-  const shown = filter === "全部" ? intel : intel.filter((it) => it.pri === filter);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const filters = ["全部", "高优先", "中优先", "观察"];
+
+  // 挂载 fetch（兜底）；情报每 90s 刷新一次。
+  useEffect(() => {
+    let live = true;
+    const load = () => {
+      getBriefing().then((b) => { if (live) setBrief(b); }).catch(() => { if (live) setBrief((p) => p ?? { items: [], counts: {} }); });
+      getIntelligence().then((d) => { if (live) setIntelData(d); }).catch(() => { if (live) setIntelData((p) => p ?? {}); });
+    };
+    load();
+    const t = setInterval(load, 90000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+
+  const items: BriefItem[] = Array.isArray(brief?.items) ? brief!.items! : [];
+  const total = (typeof brief?.counts?.total === "number" ? brief!.counts!.total : items.length);
+  // 优先级真实统计
+  const countPri = (p: string) => items.filter((it) => (it.priority || "观察") === p).length;
+  const nHigh = countPri("高优先"), nMid = countPri("中优先"), nWatch = items.length - nHigh - nMid;
+  const shown = filter === "全部" ? items : items.filter((it) => (it.priority || "观察") === filter);
+
+  const repos: IntelRepo[] = Array.isArray(intelData?.github) ? intelData!.github! : [];
+  const sources: IntelSource[] = Array.isArray(intelData?.sources) ? intelData!.sources! : [];
+  const targets: IntelTarget[] = Array.isArray(intelData?.targets) ? intelData!.targets! : [];
+  // 来源按类型分组计数（rss / web / github …）。
+  const srcGroups = (() => {
+    const m = new Map<string, { total: number; on: number }>();
+    for (const s of sources) { const k = (s.type || "其它").toString(); const g = m.get(k) || { total: 0, on: 0 }; g.total++; if (s.enabled) g.on++; m.set(k, g); }
+    const dispName: Record<string, string> = { rss: "RSS 源", web: "网页变化监控", github: "GitHub 雷达", mail: "邮件 IMAP", imap: "邮件 IMAP", ics: "ICS 日历", x: "X / 推文" };
+    return Array.from(m.entries()).map(([k, g]) => ({ key: k, name: dispName[k] || k, count: `${g.on}/${g.total}`, dot: g.on > 0 ? "#36d39a" : "#6b7480" }));
+  })();
+
   const headBar = { ...row(8), padding: "15px 16px 12px", borderBottom: "1px solid #161b22" };
   const col = { ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" } as CSSProperties;
   return (
     <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 14, padding: 16, minHeight: 0 }}>
+      <style>{"@keyframes cxSlideIn{from{transform:translateX(28px);opacity:.4}to{transform:translateX(0);opacity:1}}@keyframes cxFade{from{opacity:0}to{opacity:1}}"}</style>
       <div style={{ ...panel, padding: "14px 16px", ...row(18), flexWrap: "wrap" }}>
-        <div style={{ flex: "none", display: "flex", alignItems: "baseline", gap: 8 }}><b style={{ font: "700 26px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>28</b><span style={mono(11)}>今日信号</span></div>
+        <div style={{ flex: "none", display: "flex", alignItems: "baseline", gap: 8 }}><b style={{ font: "700 26px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{total}</b><span style={mono(11)}>今日信号</span></div>
         <div style={{ flex: "none", display: "flex", gap: 8, font: "600 10.5px 'IBM Plex Mono',monospace" }}>
-          <span style={{ ...row(5), background: "rgba(255,93,93,.12)", color: "#ff8a8a", borderRadius: 7, padding: "5px 9px" }}>高优先 3</span>
-          <span style={{ ...row(5), background: "rgba(255,122,69,.12)", color: "#ff9d6e", borderRadius: 7, padding: "5px 9px" }}>简报 12</span>
-          <span style={{ ...row(5), background: "rgba(255,255,255,.05)", color: "#aab2bd", borderRadius: 7, padding: "5px 9px" }}>观察 13</span>
+          <span style={{ ...row(5), background: "rgba(255,93,93,.12)", color: "#ff8a8a", borderRadius: 7, padding: "5px 9px" }}>高优先 {nHigh}</span>
+          <span style={{ ...row(5), background: "rgba(255,122,69,.12)", color: "#ff9d6e", borderRadius: 7, padding: "5px 9px" }}>中优先 {nMid}</span>
+          <span style={{ ...row(5), background: "rgba(255,255,255,.05)", color: "#aab2bd", borderRadius: 7, padding: "5px 9px" }}>观察 {nWatch}</span>
         </div>
         <span style={{ flex: 1, minWidth: 20 }} />
         <div style={{ flex: "none", display: "flex", gap: 5, background: "#0b0e13", border: "1px solid #1c222b", borderRadius: 9, padding: 4 }}>
           {filters.map((f) => (<button key={f} onClick={() => setFilter(f)} style={{ border: 0, cursor: "pointer", font: "600 11px 'Space Grotesk',sans-serif", padding: "6px 13px", borderRadius: 6, color: filter === f ? "#1a0f08" : "#aab2bd", background: filter === f ? "#ff7a45" : "transparent", transition: "all .16s", whiteSpace: "nowrap" }}>{f}</button>))}
         </div>
-        <span style={{ flex: "none", ...mono(10) }}>已读 12 · 已忽略 41</span>
+        <span style={{ flex: "none", ...mono(10) }}>来源 {sources.length} · 关注 {targets.length}</span>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.45fr) minmax(0,1fr) 286px", gap: 14, minHeight: 0 }}>
         <div style={col}>
           <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>信号流 · 已筛选评分</span><span style={flex1} /><span style={mono(10, "#aab2bd")}>{shown.length} 条</span></div>
           <div style={{ overflowY: "auto", minHeight: 0, padding: "8px 16px 16px" }}>
-            {shown.map((it, i) => (
-              <button key={i} className="cx-intel" style={{ textAlign: "left", width: "100%", border: 0, cursor: "pointer", background: "transparent", padding: "13px 0", borderBottom: "1px solid #161b22", display: "grid", gap: 6 }}>
-                <div style={row(8)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: PRI[it.pri][0], background: PRI[it.pri][1], borderRadius: 999, padding: "2px 8px" }}>{it.pri}</span><span style={mono(10)}>{it.source} · {it.time}</span><span style={flex1} /><span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>相关 {it.rel}</span></div>
-                <b style={{ font: "600 14px/1.4 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{it.title}</b>
-                <p style={{ margin: 0, font: "400 12px/1.55 'Space Grotesk',sans-serif", color: "#8b94a0" }}>{it.take}</p>
+            {brief === null && <div style={{ ...mono(11), padding: "20px 0", textAlign: "center" }}>正在加载信号流…</div>}
+            {brief !== null && shown.length === 0 && <div style={{ ...mono(11), padding: "20px 0", textAlign: "center" }}>暂无{filter === "全部" ? "" : filter}信号</div>}
+            {shown.map((it, i) => { const [pf, pb] = priStyle(it.priority); const time = tsToTime(it.ts); const id = it.event_id; return (
+              <button key={id || i} onClick={() => { if (id) setSelectedId(id); }} className="cx-intel" style={{ textAlign: "left", width: "100%", border: 0, cursor: id ? "pointer" : "default", background: "transparent", padding: "13px 0", borderBottom: "1px solid #161b22", display: "grid", gap: 6 }}>
+                <div style={row(8)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "2px 8px" }}>{it.priority || "观察"}</span><span style={mono(10)}>{it.source || ""}{time ? ` · ${time}` : ""}</span><span style={flex1} />{typeof it.score === "number" && <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>评分 {it.score.toFixed(2)}</span>}</div>
+                <b style={{ font: "600 14px/1.4 'Space Grotesk',sans-serif", color: "#e8ecf1", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.title}</b>
+                {it.take && <p style={{ margin: 0, font: "400 12px/1.55 'Space Grotesk',sans-serif", color: "#8b94a0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.take}</p>}
               </button>
-            ))}
+            ); })}
           </div>
         </div>
         <div style={col}>
-          <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>GITHUB 雷达</span><span style={flex1} /><span style={mono(10, "#aab2bd")}>高增速</span></div>
+          <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "#6b7480" }}>GITHUB 雷达</span><span style={flex1} /><span style={mono(10, "#aab2bd")}>高增速 · {repos.length}</span></div>
           <div style={{ overflowY: "auto", minHeight: 0, padding: "12px 16px 16px", display: "grid", gap: 11, alignContent: "start" }}>
-            {repos.map((rp) => (
-              <div key={rp.name} style={{ border: "1px solid #1a2029", background: "#0b0e13", borderRadius: 11, padding: 12, display: "grid", gap: 6 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{rp.name}</b><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: rp.sigFg, background: rp.sigBg, borderRadius: 999, padding: "2px 8px" }}>{rp.sig}</span></div><p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "#8b94a0" }}>{rp.summary}</p><div style={{ display: "flex", gap: 12, font: "500 10px 'IBM Plex Mono',monospace", color: "#6b7480" }}><span>{rp.lang}</span><span>★ {rp.stars}</span><span style={{ color: "#36d39a" }}>▲ {rp.speed}/天</span></div></div>
-            ))}
+            {intelData === null && <div style={{ ...mono(11), padding: "16px 0", textAlign: "center" }}>正在加载雷达…</div>}
+            {intelData !== null && repos.length === 0 && <div style={{ ...mono(11), padding: "16px 0", textAlign: "center" }}>暂无仓库</div>}
+            {repos.map((rp, i) => { const speed = typeof rp.stars_per_day === "number" ? rp.stars_per_day : 0; const sg = repoSignal(speed); const name = rp.repo_full_name || "(未知仓库)"; const summary = rp.summary_zh || rp.display_description || rp.description || ""; const lang = rp.language || (Array.isArray(rp.display_topics) && rp.display_topics[0]) || ""; const href = rp.url; return (
+              <div key={rp.repo_full_name || i} onClick={() => { if (href) window.open(href, "_blank", "noopener,noreferrer"); }} className="cx-intel" style={{ border: "1px solid #1a2029", background: "#0b0e13", borderRadius: 11, padding: 12, display: "grid", gap: 6, cursor: href ? "pointer" : "default" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#e8ecf1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</b><span style={{ flex: "none", font: "600 9px 'IBM Plex Mono',monospace", color: sg.fg, background: sg.bg, borderRadius: 999, padding: "2px 8px" }}>{sg.sig}</span></div>{summary && <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "#8b94a0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{summary}</p>}<div style={{ display: "flex", gap: 12, font: "500 10px 'IBM Plex Mono',monospace", color: "#6b7480" }}>{lang && <span>{lang}</span>}<span>★ {compactNum(rp.stars)}</span>{speed > 0 && <span style={{ color: "#36d39a" }}>▲ {Math.round(speed)}/天</span>}</div></div>
+            ); })}
           </div>
         </div>
         <div style={col}>
@@ -580,17 +716,21 @@ function Intel() {
               <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "conic-gradient(from 0deg,rgba(255,122,69,.35),transparent 60%)", WebkitMaskImage: "radial-gradient(circle,transparent 0,#000 1px)", maskImage: "radial-gradient(circle,transparent 0,#000 1px)", animation: "cxSweep 4s linear infinite" }} />
               <span style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", font: "600 9px 'IBM Plex Mono'", color: "#6b7480", letterSpacing: ".1em" }}>SCAN</span>
             </div>
-            <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".12em", color: "#6b7480", marginBottom: 9 }}>已接入来源</div>
+            <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".12em", color: "#6b7480", marginBottom: 9 }}>已接入来源 · {sources.length}</div>
             <div style={{ display: "grid", gap: 7, marginBottom: 16 }}>
-              {sources.map((sc) => (<div key={sc.name} style={row(9)}><span style={{ width: 6, height: 6, borderRadius: "50%", background: sc.dot, flex: "none" }} /><span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "#aab2bd", flex: 1 }}>{sc.name}</span><span style={mono(10)}>{sc.count}</span></div>))}
+              {srcGroups.length === 0 && <div style={mono(10.5)}>{intelData === null ? "加载中…" : "暂无来源"}</div>}
+              {srcGroups.map((sc) => (<div key={sc.key} style={row(9)}><span style={{ width: 6, height: 6, borderRadius: "50%", background: sc.dot, flex: "none" }} /><span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "#aab2bd", flex: 1 }}>{sc.name}</span><span style={mono(10)}>{sc.count}</span></div>))}
             </div>
-            <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".12em", color: "#6b7480", marginBottom: 9 }}>关注项</div>
+            <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".12em", color: "#6b7480", marginBottom: 9 }}>关注项 · {targets.length}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {targets.map((tg) => (<span key={tg} style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "#aab2bd", background: "#0b0e13", border: "1px solid #1c222b", borderRadius: 999, padding: "5px 10px" }}>{tg}</span>))}
+              {targets.length === 0 && <span style={mono(10.5)}>{intelData === null ? "加载中…" : "暂无关注项"}</span>}
+              {targets.map((tg) => (<span key={tg.id || tg.label} style={{ font: "500 11px 'Space Grotesk',sans-serif", color: tg.enabled ? "#aab2bd" : "#6b7480", background: "#0b0e13", border: "1px solid #1c222b", borderRadius: 999, padding: "5px 10px" }}>{tg.label || tg.query}</span>))}
             </div>
           </div>
         </div>
       </div>
+
+      {selectedId && <IntelDetail id={selectedId} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }

@@ -137,10 +137,21 @@ def _info(spec: dict) -> dict:
     }
 
 
-def list_agents() -> list[dict]:
-    """检测本机所有已声明的 agent CLI（并发取版本，避免串行卡顿）。"""
+_AGENTS_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_AGENTS_TTL = 60.0
+
+
+def list_agents(*, max_age: float = _AGENTS_TTL) -> list[dict]:
+    """检测本机所有已声明的 agent CLI（并发取版本）。带 60s 缓存，避免每次页面加载都 spawn --version。"""
+    now = time.time()
+    cached = _AGENTS_CACHE.get("data")
+    if cached is not None and now - float(_AGENTS_CACHE.get("ts", 0)) < max_age:
+        return cached  # type: ignore[return-value]
     with ThreadPoolExecutor(max_workers=min(8, len(_SPECS))) as ex:
-        return list(ex.map(_info, _SPECS))
+        data = list(ex.map(_info, _SPECS))
+    _AGENTS_CACHE["data"] = data
+    _AGENTS_CACHE["ts"] = now
+    return data
 
 
 def _spec(name: str) -> dict | None:
