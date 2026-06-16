@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   agentChat, approveAction,
@@ -85,11 +85,114 @@ function JsonSummary({ value }: { value: unknown }) {
   );
 }
 
+function Pill({ text, tone = "neutral" }: { text: string; tone?: "ok" | "off" | "info" | "warn" | "neutral" }) {
+  const map: Record<string, [string, string]> = {
+    ok: ["rgba(40,167,69,0.16)", "#2ea043"],
+    off: ["rgba(225,75,75,0.14)", "#e14b4b"],
+    info: ["rgba(55,138,221,0.14)", "#378add"],
+    warn: ["rgba(186,117,23,0.16)", "#ba7517"],
+    neutral: ["rgba(127,127,127,0.14)", "var(--muted)"],
+  };
+  const [bg, color] = map[tone] || map.neutral;
+  return <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 6, background: bg, color, whiteSpace: "nowrap" }}>{text}</span>;
+}
+
+function CardGrid({ children }: { children: ReactNode }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>{children}</div>;
+}
+
+function Cell({ children }: { children: ReactNode }) {
+  return <div style={{ background: "rgba(127,127,127,0.08)", borderRadius: 8, padding: "9px 11px" }}>{children}</div>;
+}
+
+function AgentRosterCard({ agents }: { agents: any[] }) {
+  return (
+    <CardGrid>
+      {agents.map((a) => (
+        <Cell key={a.name}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{a.display || a.name}</div>
+          <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+            <Pill text={a.installed ? "已装" : "未装"} tone={a.installed ? "ok" : "neutral"} />
+            <Pill text={a.run_supported === "confirmed" ? "驱动✓" : a.run_supported || "—"} tone={a.run_supported === "confirmed" ? "info" : "warn"} />
+          </div>
+          {a.version && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>{String(a.version).slice(0, 30)}</div>}
+        </Cell>
+      ))}
+    </CardGrid>
+  );
+}
+
+function ServicesCard({ rows }: { rows: any[] }) {
+  return (
+    <CardGrid>
+      {rows.slice(0, 12).map((s, i) => (
+        <Cell key={s.name + i}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{s.display || s.name}{s.port ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> :{s.port}</span> : null}</div>
+          <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+            <Pill text={s.health === "online" ? "在线" : s.health === "offline" ? "离线" : "未知"} tone={s.health === "online" ? "ok" : s.health === "offline" ? "off" : "neutral"} />
+            {s.exposed && <Pill text="对外暴露" tone="warn" />}
+            {s.managed === false && <Pill text="待纳管" tone="neutral" />}
+          </div>
+        </Cell>
+      ))}
+    </CardGrid>
+  );
+}
+
+function CapsulesCard({ caps }: { caps: any[] }) {
+  return (
+    <CardGrid>
+      {caps.map((c) => (
+        <Cell key={c.key}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{c.flagship ? "🚩 " : ""}{c.name}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{c.desc}</div>
+          <div style={{ marginTop: 5 }}><Pill text={`${c.tool_count} 工具`} tone={c.installed ? "info" : "neutral"} /></div>
+        </Cell>
+      ))}
+    </CardGrid>
+  );
+}
+
+function HoroscopeCard({ h }: { h: any }) {
+  return (
+    <div style={{ background: "rgba(127,127,127,0.08)", borderRadius: 10, padding: "12px 14px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>{h.title || `今日星座 · ${h.sign || ""}`}</div>
+        {typeof h.score === "number" && <Pill text={`${h.score} 分 · ${h.level || ""}`} tone={h.score >= 60 ? "ok" : h.score >= 40 ? "info" : "warn"} />}
+      </div>
+      {h.advice && <p style={{ margin: "8px 0 0", fontSize: 13 }}>{h.advice}</p>}
+      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
+        {h.lucky_color && <span>幸运色 {h.lucky_color}</span>}
+        {h.lucky_number != null && <span>幸运数 {h.lucky_number}</span>}
+        {Array.isArray(h.yi) && h.yi.length > 0 && <span>宜 {h.yi.join("、")}</span>}
+        {Array.isArray(h.ji) && h.ji.length > 0 && <span>忌 {h.ji.join("、")}</span>}
+      </div>
+    </div>
+  );
+}
+
+// 生成式卡片：按工具输出的结构渲染成类型化卡片，识别不到就回退裸 JSON。
+function TypedCard({ value }: { value: unknown }) {
+  const arr = Array.isArray(value) ? (value as any[]) : null;
+  const obj = isPlainObject(value) ? (value as Record<string, any>) : null;
+  if (arr && arr.length && isPlainObject(arr[0]) && "run_supported" in arr[0] && "installed" in arr[0])
+    return <AgentRosterCard agents={arr} />;
+  if (obj && Array.isArray(obj.agents) && obj.agents[0] && "run_supported" in obj.agents[0])
+    return <AgentRosterCard agents={obj.agents} />;
+  if (arr && arr.length && isPlainObject(arr[0]) && "exposed" in arr[0] && "health" in arr[0])
+    return <ServicesCard rows={arr} />;
+  if (obj && Array.isArray(obj.capsules))
+    return <CapsulesCard caps={obj.capsules} />;
+  if (obj && obj.kind === "horoscope")
+    return <HoroscopeCard h={obj} />;
+  return <JsonSummary value={value} />;
+}
+
 function RichMessage({ text }: { text: string }) {
   const cleaned = cleanLLMText(text);
   if (!cleaned) return null;
   const json = tryJson(cleaned);
-  if (json) return <JsonSummary value={json} />;
+  if (json) return <TypedCard value={json} />;
   const blocks = cleaned.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
   return (
     <div className="rich-message">
