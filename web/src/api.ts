@@ -1,10 +1,10 @@
 // 后端 API：统一走 /api 前缀，避免和单页应用前端路由（如 /settings）冲突。
-// 如果页面由后端 8787 托管，使用同源 /api；如果是 Vite/preview/其它端口，回退到 8787/api。
+// 同源托管（后端单端口，无论 8787/8799/其它端口）一律用相对 /api；只有 Vite dev(5173) 才回退到绝对地址。
 const BASE = (() => {
-  if (typeof window === "undefined") return "http://127.0.0.1:8787/api";
+  if (typeof window === "undefined") return "/api";
   const explicit = localStorage.getItem("cortex-api-base");
   if (explicit) return explicit.replace(/\/$/, "");
-  return window.location.port === "8787" ? "/api" : "http://127.0.0.1:8787/api";
+  return window.location.port === "5173" ? "http://127.0.0.1:8787/api" : "/api";
 })();
 
 function apiUrl(path: string) {
