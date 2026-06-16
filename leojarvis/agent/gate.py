@@ -50,6 +50,11 @@ TOOL_BASE_RISK = {
     "stop_agent": "confirm",
     "search_journal": "auto",
     "search_personal_notes": "auto",
+    "discover_services": "auto",
+    "service_detail": "auto",
+    "list_cli_agents": "auto",
+    "cli_agent_detail": "auto",
+    "run_cli_agent": "confirm",
 }
 
 

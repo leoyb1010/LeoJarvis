@@ -345,6 +345,20 @@ def services_discover() -> list[dict]:
     return services.discover_services()
 
 
+@router.get("/agents/cli")
+def agents_cli() -> dict:
+    """本机 AI agent CLI 花名册：claude/codex/cursor/grok/gemini/opencode 的安装/版本/认证态。
+    驱动(run)不走裸 REST，必须经 /agent/chat 的 run_cli_agent 工具 + 行动闸门确认。"""
+    from ..agent import cli_agents
+    return {"agents": cli_agents.list_agents()}
+
+
+@router.get("/agents/cli/{name}")
+def agents_cli_detail(name: str) -> dict:
+    from ..agent import cli_agents
+    return cli_agents.agent_detail(name)
+
+
 @router.get("/cockpit/overview")
 def cockpit_overview() -> dict:
     from ..cockpit import overview

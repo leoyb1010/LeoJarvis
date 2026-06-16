@@ -13,7 +13,7 @@ from typing import Callable
 
 from .. import db
 from ..memory.store import recall
-from . import agents_ctrl, journal, services, sysinfo
+from . import agents_ctrl, cli_agents, journal, services, sysinfo
 
 
 @dataclass
@@ -80,6 +80,20 @@ def _t_discover_services(_: dict) -> str:
 
 def _t_service_detail(args: dict) -> str:
     return json_dumps(services.service_detail(str(args.get("name", ""))))
+
+
+def _t_list_cli_agents(_: dict) -> str:
+    return json_dumps({"agents": cli_agents.list_agents()})
+
+
+def _t_cli_agent_detail(args: dict) -> str:
+    return json_dumps(cli_agents.agent_detail(str(args.get("name", ""))))
+
+
+def _t_run_cli_agent(args: dict) -> str:
+    return json_dumps(cli_agents.run_agent(
+        str(args.get("name", "")), str(args.get("prompt", "")),
+        cwd=(args.get("cwd") or None), timeout=int(args.get("timeout", 180))))
 
 
 def _t_spawn_agent(args: dict) -> str:
@@ -217,6 +231,18 @@ TOOLBUS.register(Tool("discover_services",
 TOOLBUS.register(Tool("service_detail",
                       "查看某个已发现服务的详情：端口/进程/配置文件路径/日志路径/暴露面。",
                       {"name": "服务名（discover_services 返回的 name）"}, _t_service_detail))
+# CLI Agent 编排（驱动本机 AI agent CLI）
+TOOLBUS.register(Tool("list_cli_agents",
+                      "列出本机所有 AI agent CLI（claude/codex/cursor/grok/gemini/opencode）的安装/版本/认证状态。",
+                      {}, _t_list_cli_agents))
+TOOLBUS.register(Tool("cli_agent_detail",
+                      "查看某个 agent CLI 的详情：可执行路径/版本/认证/调用方式。",
+                      {"name": "agent 名（list_cli_agents 返回的 name）"}, _t_cli_agent_detail))
+TOOLBUS.register(Tool("run_cli_agent",
+                      "非交互驱动一个本机 agent CLI 执行任务（如让 codex 写测试、claude 修 bug）。"
+                      "属高风险（agent 能改文件），需确认。",
+                      {"name": "agent 名", "prompt": "要执行的任务", "cwd": "工作目录，可选", "timeout": "超时秒数，默认180"},
+                      _t_run_cli_agent))
 TOOLBUS.register(Tool("service_logs", "查看某个本地服务的最近日志。",
                       {"name": "服务名", "lines": "行数，默认 40"}, _t_service_logs))
 TOOLBUS.register(Tool("restart_service", "重启一个本地服务（需配置 start 命令）。属高风险，需确认。",
