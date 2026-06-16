@@ -359,6 +359,13 @@ def agents_cli_detail(name: str) -> dict:
     return cli_agents.agent_detail(name)
 
 
+@router.get("/capsules")
+def capsules() -> dict:
+    """能力胶囊花名册：我有哪些超能力、各自注册了哪些工具。"""
+    from .. import capsules as caps
+    return {"capsules": caps.capsule_manifest()}
+
+
 @router.get("/horoscope/{sign}")
 def horoscope_get(sign: str, date: str | None = None) -> dict:
     """某星座当天运势（离线确定性，只读）。date 可选 YYYY-MM-DD。"""
