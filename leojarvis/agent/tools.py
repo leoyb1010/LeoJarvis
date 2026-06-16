@@ -73,6 +73,15 @@ def _t_restart_service(args: dict) -> str:
     return services.restart_service(str(args.get("name", "")))
 
 
+def _t_discover_services(_: dict) -> str:
+    rows = services.discover_services()
+    return json_dumps(rows)
+
+
+def _t_service_detail(args: dict) -> str:
+    return json_dumps(services.service_detail(str(args.get("name", ""))))
+
+
 def _t_spawn_agent(args: dict) -> str:
     return agents_ctrl.spawn_agent(str(args.get("name", "")), str(args.get("command", "")),
                                    args.get("cwd"))
@@ -200,6 +209,14 @@ TOOLBUS.register(Tool("intelligence_scan", "运行个人情报扫描器：RSS、
 TOOLBUS.register(Tool("github_radar", "列出 GitHub 项目雷达结果，重点看 star 增速和冷启动动量。",
                       {"limit": "返回数量，默认 12"}, _t_github_radar))
 # ServiceOps
+TOOLBUS.register(Tool("discover_services",
+                      "自动发现本机所有常驻服务（合并监听端口/LaunchAgents/配置三路，去重）。"
+                      "每条含 name/display/port/pid/process/bind/exposed/health/managed/source，"
+                      "用来回答“本机现在跑着哪些服务、哪些对外暴露、哪些还没纳管”。",
+                      {}, _t_discover_services))
+TOOLBUS.register(Tool("service_detail",
+                      "查看某个已发现服务的详情：端口/进程/配置文件路径/日志路径/暴露面。",
+                      {"name": "服务名（discover_services 返回的 name）"}, _t_service_detail))
 TOOLBUS.register(Tool("service_logs", "查看某个本地服务的最近日志。",
                       {"name": "服务名", "lines": "行数，默认 40"}, _t_service_logs))
 TOOLBUS.register(Tool("restart_service", "重启一个本地服务（需配置 start 命令）。属高风险，需确认。",

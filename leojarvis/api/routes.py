@@ -338,6 +338,13 @@ def services_status() -> list[dict]:
     return services.status_all()
 
 
+@router.get("/services/discover")
+def services_discover() -> list[dict]:
+    """本机服务自动发现（三路发现 + 健康探测 + 暴露标注），不依赖手写清单。"""
+    from ..agent import services
+    return services.discover_services()
+
+
 @router.get("/cockpit/overview")
 def cockpit_overview() -> dict:
     from ..cockpit import overview

@@ -1,0 +1,423 @@
+import Foundation
+import SwiftData
+
+/// Orchestrates the on-device intelligence pipeline: fetch RSS + GitHub radar →
+/// score (Judge) → dedupe → persist `IntelItem` → optional LLM localize/enrich.
+/// Replaces the Mac bridge's scanner/briefing for iOS. Drives overview, briefing
+/// and widgets; results are cached in SwiftData so they read offline.
+@MainActor
+final class IntelEngine: ObservableObject {
+    @Published private(set) var isScanning = false
+    @Published private(set) var lastScan: Date?
+    @Published private(set) var lastError: String?
+    @Published var progressText: String?
+
+    private let context: ModelContext
+    private let llmConfig: LLMConfigStore
+    private let keychain = KeychainVault()
+
+    init(context: ModelContext, llmConfig: LLMConfigStore) {
+        self.context = context
+        self.llmConfig = llmConfig
+        self.lastScan = UserDefaults.standard.object(forKey: "intel.lastScan") as? Date
+    }
+
+    // MARK: - Detail helpers (on-demand localization + analyze-into-note)
+
+    /// On-demand high-quality Chinese localization for the article detail view,
+    /// cached onto `item.summaryZH`.
+    func localizeDetail(_ item: IntelItem) async {
+        guard item.summaryZH == nil, let client = llmConfig.makeClient() else { return }
+        let body = item.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? item.sourceText! : (item.summary ?? "")
+        if let zh = await Localizer.translateDetail(title: item.title, body: body, client: client) {
+            item.summaryZH = zh
+            try? context.save()
+        }
+    }
+
+    /// "AI 分析入笔记": summarize an article into a Note (with relation/next-step).
+    @discardableResult
+    func analyzeIntoNote(modelID: PersistentIdentifier) async throws -> Note? {
+        guard let item = context.model(for: modelID) as? IntelItem else { return nil }
+        return try await analyzeIntoNote(item)
+    }
+
+    /// "AI 分析入笔记": summarize an article into a Note (with relation/next-step).
+    @discardableResult
+    func analyzeIntoNote(_ item: IntelItem) async throws -> Note {
+        let store = NoteStore(context: context, llmConfig: llmConfig)
+        var body = "来源：\(item.sourceName)\n原文：\(item.url ?? "-")\n\n\(item.summary ?? item.title)"
+        if let client = llmConfig.makeClient() {
+            let analysis = try? await client.complete(
+                system: "你是中文情报分析助理。基于资讯给出：一段中文摘要、3 条要点(• 开头)、和我的关系、下一步建议。markdown 输出。",
+                user: "标题：\(item.displayTitle)\n摘要：\(item.summary ?? "")",
+                temperature: 0.3)
+            if let analysis { body = "\(analysis)\n\n---\n来源：\(item.sourceName) · \(item.url ?? "")" }
+        }
+        let note = store.create(title: item.displayTitle, content: body,
+                                tags: item.tags + ["资讯分析"], projectName: "资讯收藏", source: item.url ?? "intel")
+        item.isFavorite = true
+        try? context.save()
+        return note
+    }
+
+    // MARK: - Public scan
+
+    func scan(includeRSS: Bool = true, includeGitHub: Bool = true, includeMail: Bool = true) async {
+        guard !isScanning else { return }
+        isScanning = true
+        lastError = nil
+        if #available(iOS 16.1, *) { ScanActivityController.shared.start() }
+        defer { isScanning = false; progressText = nil }
+
+        let interests = (try? context.fetch(FetchDescriptor<ProfileInterest>())) ?? []
+        let judge = Judge(interests: interests)
+        var newItems: [IntelItem] = []
+
+        if includeRSS {
+            progressText = "扫描 RSS 信源…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 RSS 信源…", found: 0) }
+            newItems += await scanRSS(judge: judge)
+        }
+        if includeGitHub {
+            progressText = "扫描 GitHub 雷达…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 GitHub 雷达…", found: newItems.count) }
+            newItems += await scanGitHub(judge: judge)
+        }
+        if includeMail {
+            progressText = "扫描 Gmail 邮件…"
+            if #available(iOS 16.1, *) { await ScanActivityController.shared.update(phase: "扫描 Gmail 邮件…", found: newItems.count) }
+            newItems += await scanMail(judge: judge)
+        }
+        if #available(iOS 16.1, *) { await ScanActivityController.shared.finish(found: newItems.count) }
+        let pipelineError = lastError
+
+        // Optional LLM localization/enrichment for the top items (bounded for cost).
+        if llmConfig.settings.allowTranslation || llmConfig.settings.allowBriefingLLM,
+           let client = llmConfig.makeClient() {
+            progressText = "AI 本地化与简报…"
+            await enrich(items: newItems.sorted { $0.score > $1.score }.prefix(8).map { $0 }, client: client)
+        }
+
+        try? context.save()
+        lastScan = Date()
+        UserDefaults.standard.set(lastScan, forKey: "intel.lastScan")
+        let enabledSources = ((try? context.fetch(FetchDescriptor<FeedSource>())) ?? []).filter(\.enabled)
+        let failedSources = enabledSources.filter { ($0.lastError ?? "").isEmpty == false }
+        if newItems.isEmpty, let pipelineError, !pipelineError.isEmpty {
+            lastError = pipelineError
+        } else if newItems.isEmpty, !failedSources.isEmpty {
+            lastError = "扫描完成，但 \(failedSources.count)/\(enabledSources.count) 个 RSS 源失败。请到「设置 → 信源状态」查看错误。"
+        } else if newItems.isEmpty {
+            lastError = "扫描完成，过去 24 小时没有新的 RSS / GitHub / Gmail 情报。"
+        } else {
+            lastError = nil
+        }
+        pruneOld()
+    }
+
+    // MARK: - RSS
+
+    private func scanRSS(judge: Judge) async -> [IntelItem] {
+        let sources = ((try? context.fetch(FetchDescriptor<FeedSource>())) ?? []).filter(\.enabled)
+        let sourceByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+        let specs = sources.map {
+            RSSFeedSpec(
+                id: $0.id,
+                name: $0.name,
+                url: $0.url,
+                domain: $0.domain,
+                category: $0.category,
+                channel: $0.channel,
+                limit: $0.limit
+            )
+        }
+        let ingestor = RSSIngestor()
+        var existingByKey = existingItemsByDedupeKey()
+        var visibleItems: [IntelItem] = []
+        var visibleKeys = Set<String>()
+        let freshCutoff = IntelItem.freshCutoff()
+
+        await withTaskGroup(of: (RSSFeedSpec, [RawFeedItem], String?).self) { group in
+            for source in specs {
+                group.addTask {
+                    do { return (source, try await ingestor.fetch(source), nil) }
+                    catch { return (source, [], error.localizedDescription) }
+                }
+            }
+            for await (source, items, err) in group {
+                if let model = sourceByID[source.id] {
+                    model.lastFetched = Date()
+                    model.lastError = err
+                }
+                for raw in items {
+                    let key = Self.dedupeKey(raw.title)
+                    if let existing = existingByKey[key] {
+                        existing.sourceName = source.name
+                        existing.summary = raw.summary.isEmpty ? existing.summary : raw.summary
+                        existing.url = raw.link.isEmpty ? existing.url : raw.link
+                        existing.tags = [source.category]
+                        existing.channel = source.channel
+                        existing.domain = source.domain
+                        existing.coverURL = CoverExtractor.cover(for: raw) ?? existing.coverURL
+                        existing.publishedAt = raw.published ?? existing.publishedAt
+                        existing.sourceError = nil
+                        if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                            visibleItems.append(existing)
+                            visibleKeys.insert(key)
+                        }
+                        continue
+                    }
+                    let verdict = judge.evaluate(title: raw.title, summary: raw.summary)
+                    guard verdict.triage != "ignore" else { continue }
+                    // Cheap inline Chinese localization for readability (no network).
+                    let zh = Localizer.isMostlyChinese(raw.title) ? nil : Localizer.localizeInline(raw.title)
+                    let item = IntelItem(
+                        kind: "rss",
+                        domain: source.domain,
+                        sourceName: source.name,
+                        title: raw.title,
+                        titleZH: (zh != raw.title) ? zh : nil,
+                        summary: raw.summary.isEmpty ? nil : raw.summary,
+                        url: raw.link.isEmpty ? nil : raw.link,
+                        tags: [source.category],
+                        score: verdict.score,
+                        triage: verdict.triage,
+                        priority: verdict.priority,
+                        coverURL: CoverExtractor.cover(for: raw),
+                        channel: source.channel,
+                        publishedAt: raw.published,
+                        dedupeKey: key
+                    )
+                    context.insert(item)
+                    existingByKey[key] = item
+                    if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(item)
+                        visibleKeys.insert(key)
+                    }
+                }
+            }
+        }
+        return visibleItems
+    }
+
+    // MARK: - Gmail
+
+    private func scanMail(judge: Judge) async -> [IntelItem] {
+        let config = GmailConfigStore.load(keychain: keychain)
+        guard config.enabled else { return [] }
+        guard let password = try? keychain.gmailPassword(), !password.isEmpty else {
+            lastError = "Gmail 未配置 App Password。"
+            return []
+        }
+
+        do {
+            let messages = try await GmailIMAPClient().fetchUnread(config: config, password: password)
+            var existingByKey = existingItemsByDedupeKey()
+            var visibleItems: [IntelItem] = []
+            var visibleKeys = Set<String>()
+            let freshCutoff = IntelItem.freshCutoff()
+            for message in messages {
+                let key = Self.dedupeKey("email:" + (message.messageID?.isEmpty == false ? message.messageID! : message.uid))
+                let summary = [
+                    "发件人：\(message.sender)",
+                    message.date.map { "邮件时间：\($0.formatted(.dateTime.month().day().hour().minute()))" },
+                    "状态：Gmail IMAP 未读邮件，只读取邮件头部。"
+                ].compactMap { $0 }.joined(separator: "\n")
+                let verdict = judge.evaluate(title: message.subject, summary: summary, extraSignal: 0.18)
+                if let existing = existingByKey[key] {
+                    existing.title = message.subject
+                    existing.summary = summary
+                    existing.sourceName = "Gmail"
+                    existing.tags = ["Gmail", "邮件"]
+                    existing.score = max(existing.score, verdict.score)
+                    existing.triage = verdict.triage == "ignore" ? "digest" : verdict.triage
+                    existing.priority = Judge.priority(score: max(existing.score, 0.52), triage: existing.triage)
+                    existing.publishedAt = message.date
+                    existing.collectedAt = Date()
+                    existing.sourceError = nil
+                    if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(existing)
+                        visibleKeys.insert(key)
+                    }
+                    continue
+                }
+                let item = IntelItem(
+                    kind: "email",
+                    domain: "business",
+                    sourceName: "Gmail",
+                    title: message.subject,
+                    summary: summary,
+                    url: nil,
+                    tags: ["Gmail", "邮件"],
+                    score: max(verdict.score, 0.52),
+                    triage: verdict.triage == "ignore" ? "digest" : verdict.triage,
+                    priority: Judge.priority(score: max(verdict.score, 0.52), triage: verdict.triage),
+                    whyImportant: "这是 Gmail 未读邮件，已进入 Jarvis 本机邮件观察区。",
+                    relation: "邮件来自 \(message.sender)，可在 Gmail 中继续处理。",
+                    nextStep: "打开 Gmail 查看正文，或把邮件主题转成记事和待办。",
+                    channel: "mail",
+                    publishedAt: message.date,
+                    dedupeKey: key
+                )
+                context.insert(item)
+                existingByKey[key] = item
+                if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                    visibleItems.append(item)
+                    visibleKeys.insert(key)
+                }
+            }
+            return visibleItems
+        } catch {
+            lastError = "Gmail 扫描失败：\(error.localizedDescription)"
+            return []
+        }
+    }
+
+    // MARK: - GitHub
+
+    private func scanGitHub(judge: Judge) async -> [IntelItem] {
+        let radar = GitHubRadar(token: keychain.gitHubToken())
+        let snapshots = (try? context.fetch(FetchDescriptor<GitHubRepoSnapshot>())) ?? []
+        var snapByName = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.repoFullName, $0) })
+        var existingByKey = existingItemsByDedupeKey()
+        var visibleItems: [IntelItem] = []
+        var visibleKeys = Set<String>()
+        let freshCutoff = IntelItem.freshCutoff()
+        var seenRepos = Set<String>()
+
+        for query in SeedData.githubQueries.prefix(8) {
+            let repos = await radar.search(query: query, perPage: 6)
+            for repo in repos {
+                guard !seenRepos.contains(repo.fullName) else { continue }
+                seenRepos.insert(repo.fullName)
+
+                let prev = snapByName[repo.fullName]
+                let m = radar.momentum(for: repo, previousStars: prev?.stars, previousSeen: prev?.lastSeen)
+
+                // Update / create the star snapshot.
+                if let existing = prev {
+                    existing.previousStars = existing.stars
+                    existing.stars = repo.stars
+                    existing.lastSeen = Date()
+                    existing.topics = repo.topics
+                    existing.pushedAt = repo.pushedAt
+                } else {
+                    let snap = GitHubRepoSnapshot(
+                        repoFullName: repo.fullName, stars: repo.stars,
+                        description_: repo.description, topics: repo.topics,
+                        language: repo.language, url: repo.url,
+                        pushedAt: repo.pushedAt, createdAt: repo.createdAt
+                    )
+                    context.insert(snap)
+                    snapByName[repo.fullName] = snap
+                }
+
+                guard radar.isRecentSignal(m) else { continue }
+                let key = Self.dedupeKey("gh:" + repo.fullName)
+
+                let velocityText: String
+                if let measured = m.starsPerDay { velocityText = "实测 \(measured) star/天" }
+                else if let cold = m.coldStarsPerDay { velocityText = "冷启动 \(cold) star/天" }
+                else { velocityText = "动量未知" }
+
+                let tags = TopicLabels.labels(for: repo.topics, language: repo.language)
+                let verdict = judge.evaluate(title: repo.fullName + " " + (repo.description ?? ""),
+                                             summary: tags.joined(separator: " "),
+                                             extraSignal: min(m.bestVelocity / 100, 0.3))
+                if let existing = existingByKey[key] {
+                    existing.summary = [repo.description, "⭐️ \(repo.stars) · \(velocityText)"].compactMap { $0 }.joined(separator: "\n")
+                    existing.tags = tags
+                    existing.score = max(verdict.score, existing.score)
+                    existing.triage = verdict.triage == "ignore" ? existing.triage : verdict.triage
+                    existing.priority = Judge.priority(score: max(existing.score, 0.5), triage: existing.triage)
+                    existing.publishedAt = repo.pushedAt ?? existing.publishedAt
+                    existing.url = repo.url
+                    existing.sourceError = nil
+                    if existing.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                        visibleItems.append(existing)
+                        visibleKeys.insert(key)
+                    }
+                    continue
+                }
+                let item = IntelItem(
+                    kind: "github_repo",
+                    domain: "business",
+                    sourceName: "GitHub 雷达",
+                    title: repo.fullName,
+                    summary: [repo.description, "⭐️ \(repo.stars) · \(velocityText)"].compactMap { $0 }.joined(separator: "\n"),
+                    url: repo.url,
+                    tags: tags,
+                    score: max(verdict.score, 0.5),
+                    triage: verdict.triage == "ignore" ? "digest" : verdict.triage,
+                    priority: Judge.priority(score: max(verdict.score, 0.5), triage: verdict.triage),
+                    channel: "github",
+                    publishedAt: repo.pushedAt,
+                    dedupeKey: key
+                )
+                context.insert(item)
+                existingByKey[key] = item
+                if item.contentDate >= freshCutoff, !visibleKeys.contains(key) {
+                    visibleItems.append(item)
+                    visibleKeys.insert(key)
+                }
+            }
+        }
+        return visibleItems
+    }
+
+    // MARK: - LLM enrichment (localize title + why/relation/next)
+
+    private func enrich(items: [IntelItem], client: LLMClient) async {
+        for item in items {
+            if llmConfig.settings.allowTranslation, item.titleZH == nil, Self.hasNoisyEnglish(item.title) {
+                if let zh = try? await client.complete(
+                    system: "你是严格的中英翻译。只输出译文，不要解释。",
+                    user: "把下面的标题翻译成简洁中文：\n\(item.title)",
+                    temperature: 0.1) {
+                    item.titleZH = zh.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+            if llmConfig.settings.allowBriefingLLM, item.priority == "高优先", item.whyImportant == nil {
+                let context = "标题：\(item.displayTitle)\n摘要：\(item.summary ?? "")"
+                if let text = try? await client.complete(
+                    system: "你是中文情报助理。基于内容，用一句话分别给出：为什么重要 / 和我有什么关系 / 下一步建议。输出 JSON {\"why\":\"\",\"relation\":\"\",\"next\":\"\"}，不要多余文字。",
+                    user: context, temperature: 0.3),
+                   let data = NoteStore.extractJSON(text)?.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    item.whyImportant = obj["why"] as? String
+                    item.relation = obj["relation"] as? String
+                    item.nextStep = obj["next"] as? String
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func existingItemsByDedupeKey() -> [String: IntelItem] {
+        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<IntelItem>())) ?? []).map { ($0.dedupeKey, $0) })
+    }
+
+    private func pruneOld(keepDays: Int = 10, maxItems: Int = 400) {
+        let all = (try? context.fetch(
+            FetchDescriptor<IntelItem>(sortBy: [SortDescriptor(\.collectedAt, order: .reverse)])
+        )) ?? []
+        let cutoff = Calendar.current.date(byAdding: .day, value: -keepDays, to: Date()) ?? Date.distantPast
+        for (index, item) in all.enumerated() where index >= maxItems || item.collectedAt < cutoff {
+            context.delete(item)
+        }
+        try? context.save()
+    }
+
+    static func dedupeKey(_ title: String) -> String {
+        let lower = title.lowercased()
+        let stripped = lower.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0.value > 0x3400 }
+        return String(String.UnicodeScalarView(stripped)).prefix(72).description
+    }
+
+    static func hasNoisyEnglish(_ text: String) -> Bool {
+        let latin = text.unicodeScalars.filter { ($0.value >= 65 && $0.value <= 90) || ($0.value >= 97 && $0.value <= 122) }.count
+        return latin >= 8
+    }
+}

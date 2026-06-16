@@ -5,10 +5,13 @@
 """
 from __future__ import annotations
 
+import glob
 import os
 import re
 import socket
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from ..config import settings
 
@@ -401,3 +404,346 @@ def restart_service(name: str) -> str:
         subprocess.Popen(start, shell=True, stdout=f, stderr=f,
                          cwd=os.path.expanduser("~"), start_new_session=True)
     return f"已重启 {name}（{'先杀掉 pid=' + pid + '，' if pid else ''}执行: {start}）。"
+
+
+# ======================================================================
+# Phase 5a · 本机服务自动发现（三路发现 + 健康探测 + 暴露标注）
+# 不再依赖手写清单：合并「监听端口 / LaunchAgents / 配置覆盖层」三个来源，
+# 按物理身份(进程名+端口)去重，自动让本机常驻服务出现。
+# ======================================================================
+
+# 这些进程名属于系统/桌面噪音，发现时直接丢弃（避免把 ControlCenter、
+# rapportd、微信、ToDesk 之类塞进服务区）。注意：cloudcli/codex 等真实
+# 服务在 lsof 里以 node/codex 出现，靠完整命令再识别，这里不屏蔽它们。
+_DISCOVER_NOISE = {
+    "rapportd", "controlcenter", "sharingd", "wechat", "popo_mac",
+    "popomeeting", "poporecorder", "wpslaunchhelper", "todesk",
+    "marvis", "identityservicesd", "remoted", "appleavd",
+}
+
+# launchd plist label 常见前缀，剥掉后得到更干净的服务名
+_LAUNCHD_LABEL_PREFIXES = (
+    "com.leoyuan.", "com.leo.", "ai.", "com.apple.", "com.",
+)
+
+# launchd label -> 规范服务名 的别名（处理 label 与进程名对不齐的情况）
+_LAUNCHD_NAME_ALIASES = {
+    "cliproxyapi.local": "cliproxyapi",
+    "cliproxyapi": "cliproxyapi",
+    "leojarvis": "leojarvis",
+    "cloudcli": "cloudcli",
+    "coze.bridge": "coze",
+    "hermes.gateway": "hermes",
+    "openclaw.gateway": "openclaw",
+    "agent-studio-content-os": "agent-studio",
+}
+
+
+def _bind_info(address: str) -> tuple[str, bool]:
+    """解析 lsof 的监听地址 -> (绑定地址, 是否对外暴露)。
+
+    *:38473 / 0.0.0.0:x / [::]:x => 对外暴露(exposed=True)
+    127.0.0.1:x / [::1]:x        => 仅本机(exposed=False)
+    """
+    addr = (address or "").strip()
+    # 去掉尾部 :port，保留主机部分；兼容 IPv6 [::1]:port
+    host = addr
+    if addr.startswith("["):
+        host = addr.split("]", 1)[0].lstrip("[")
+    else:
+        host = addr.rsplit(":", 1)[0] if ":" in addr else addr
+    host = host or "*"
+    exposed = host in ("*", "0.0.0.0", "::", "") or host.endswith("%")
+    # 规范化展示
+    if host in ("", "*"):
+        bind = "0.0.0.0"
+    elif host in ("::1",):
+        bind = "127.0.0.1"
+    else:
+        bind = host
+    return bind, exposed
+
+
+def _probe_http(port: int) -> str:
+    """对一个端口做 HTTP 健康探测，返回 online/offline/unknown。
+
+    2xx/3xx/4xx 都算 online（端口活着、有 HTTP 栈在应答）；
+    连接被拒/超时 => 先回退到裸 TCP 探活，TCP 通则 online（非 HTTP 服务），
+    否则 offline。
+    """
+    try:
+        import httpx
+    except Exception:  # noqa: BLE001  httpx 理论上一定在，兜底防御
+        return "online" if _port_alive(port, timeout=0.6) else "offline"
+
+    for path in ("/", "/health"):
+        try:
+            resp = httpx.get(
+                f"http://127.0.0.1:{port}{path}",
+                timeout=2.0,
+                follow_redirects=False,
+            )
+            # 任意有效 HTTP 应答都说明端口活着
+            if 200 <= resp.status_code < 600:
+                return "online"
+        except httpx.HTTPStatusError:
+            return "online"
+        except Exception:  # noqa: BLE001  连接被拒/超时/读错，继续试下一个 path
+            continue
+    # HTTP 没应答：可能是非 HTTP 协议（如纯 ws / gRPC / 数据库）。
+    # 端口在 LISTEN 且裸 TCP 能连上 => 端口活着，记 online。
+    if _port_alive(port, timeout=0.6):
+        return "online"
+    return "offline"
+
+
+def _launchd_labels() -> dict[str, str]:
+    """扫描 LaunchAgents/LaunchDaemons 目录，返回 {规范服务名: 原始label}。
+
+    只读文件名(label)，不解析 plist 全文。用于补充「常驻但此刻可能没监听端口」
+    的服务名。
+    """
+    dirs = [
+        os.path.expanduser("~/Library/LaunchAgents"),
+        "/Library/LaunchAgents",
+        "/Library/LaunchDaemons",
+    ]
+    out: dict[str, str] = {}
+    for d in dirs:
+        try:
+            for path in glob.glob(os.path.join(d, "*.plist")):
+                label = os.path.basename(path)[: -len(".plist")]
+                norm = _normalize_launchd_label(label)
+                if not norm:
+                    continue
+                # 已有则保留先发现的（用户级优先于系统级，因 dirs 顺序）
+                out.setdefault(norm, label)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _normalize_launchd_label(label: str) -> str:
+    """把 launchd label 收敛成服务名。返回 '' 表示属于系统噪音、忽略。"""
+    raw = label.strip()
+    if not raw:
+        return ""
+    low = raw.lower()
+    # 明显的系统/第三方桌面噪音（更新器、代理工具、IM 助手、各种 *Helper/daemon），跳过
+    noise_markers = (
+        "google", "keystone", "canva", "tencent", "marvis", "todesk",
+        "sparkle", "cloudflared", "tailscale", "clash", "omlx",
+        "桌面版", "availability-check", "popo", "netease", "west2online",
+        "clawpilot", "docker", "proxyconfig", "confighelper",
+        "xpcservice", "vmnetd", "daemonxpc",
+    )
+    if any(m in low for m in noise_markers):
+        return ""
+    stripped = low
+    for prefix in _LAUNCHD_LABEL_PREFIXES:
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
+    stripped = stripped.strip(".")
+    if stripped in _LAUNCHD_NAME_ALIASES:
+        return _LAUNCHD_NAME_ALIASES[stripped]
+    # 取第一段作为名字（coze.bridge -> coze），并规范化字符
+    head = re.split(r"[.\s]", stripped, 1)[0]
+    head = re.sub(r"[^a-z0-9_-]+", "-", head).strip("-")
+    return head
+
+
+def _display_name(name: str, command: str, configs: dict) -> str:
+    """中文显示名：配置/别名表有就用，否则退回进程名。"""
+    cfg = configs.get(name) or {}
+    desc = cfg.get("display") or cfg.get("desc")
+    if desc:
+        return str(desc)
+    if name in _PROJECT_DESCS:
+        return _PROJECT_DESCS[name]
+    # _PORT_ALIASES 第二项是中文描述
+    return command or name
+
+
+def _start_cmd(name: str, configs: dict) -> str | None:
+    cfg = configs.get(name) or {}
+    start = cfg.get("start")
+    return str(start) if start else None
+
+
+def discover_services() -> list[dict]:
+    """三路发现本机所有常驻服务，按物理身份(进程名+端口)去重。
+
+    来源：
+      1. 监听端口（lsof -nP -iTCP -sTCP:LISTEN）—— 真正在跑、绑了端口的服务，
+         并区分绑 127.0.0.1(仅本机) vs *(对外暴露)。
+      2. LaunchAgents/LaunchDaemons 的 plist label —— 补充常驻但此刻没监听端口
+         的服务名。
+      3. 配置覆盖层（settings.toml [services.*] + 别名表）—— 仅用于给已发现服务
+         起中文名/写描述/补 start 命令，不再作为来源。
+
+    返回字段见模块/任务说明：name/display/port/pid/process/bind/exposed/
+    health/managed/source。
+    """
+    configs = service_configs()
+    configured_names = set(configs.keys())
+
+    # ---- 来源 1：监听端口 ----
+    records: dict[tuple[str, int | None], dict] = {}
+    for row in _listening_ports():
+        command = str(row.get("command") or "")
+        if command.lower() in _DISCOVER_NOISE:
+            continue
+        full_command = str(row.get("full_command") or "")
+        cwd = str(row.get("cwd") or "")
+        port = int(row.get("port") or 0) or None
+        if not port:
+            continue
+        haystack = f"{command} {full_command} {cwd}".lower()
+        # 丢弃明显的桌面/系统噪音命令行（微信、popo 等多端口刷屏）
+        if any(n in haystack for n in ("wechat", "popo", "rapportd", "controlcenter")):
+            continue
+        name = _friendly_name(port, command, full_command, cwd)
+        bind, exposed = _bind_info(str(row.get("address") or ""))
+        # 物理身份去重键：进程名 + 端口（同一进程多端口各占一行，符合需求）
+        key = (name, port)
+        prev = records.get(key)
+        # 同名同端口时，优先保留对外暴露的那条（更值得关注），否则保留先到的
+        if prev and not (exposed and not prev.get("exposed")):
+            continue
+        records[key] = {
+            "name": name,
+            "display": "",  # 稍后统一填
+            "port": port,
+            "pid": int(row["pid"]) if str(row.get("pid") or "").isdigit() else None,
+            "process": command or "未知进程",
+            "bind": bind,
+            "exposed": exposed,
+            "health": "unknown",
+            "managed": name in configured_names,
+            "source": "port",
+            "_command": full_command[:240],
+            "_cwd": cwd,
+            "_address": str(row.get("address") or ""),
+        }
+
+    # ---- 来源 2：LaunchAgents / LaunchDaemons ----
+    discovered_names = {n for (n, _p) in records.keys()}
+    for norm, label in _launchd_labels().items():
+        # 已经在监听端口里出现（无论端口几）就不重复加 launchd 行
+        if norm in discovered_names:
+            continue
+        key = (norm, None)
+        if key in records:
+            continue
+        records[key] = {
+            "name": norm,
+            "display": "",
+            "port": None,
+            "pid": None,
+            "process": label,
+            "bind": "",
+            "exposed": False,
+            "health": "unknown",  # 没端口，无法探活
+            "managed": norm in configured_names,
+            "source": "launchd",
+            "_command": label,
+            "_cwd": "",
+            "_address": "",
+        }
+        discovered_names.add(norm)
+
+    # ---- 来源 3（覆盖层）：把 settings.toml 里登记但既没监听端口、也没 launchd
+    #      的服务补一行（标 managed=True，方便看「已纳管但当前未运行」）----
+    for name, cfg in configs.items():
+        if name in discovered_names:
+            # 已发现：把 managed 标记补上（端口源默认就算了，这里兜底）
+            for key in list(records.keys()):
+                if key[0] == name:
+                    records[key]["managed"] = True
+            continue
+        port = int(cfg.get("port", 0)) or None
+        records[(name, port)] = {
+            "name": name,
+            "display": "",
+            "port": port,
+            "pid": None,
+            "process": name,
+            "bind": "",
+            "exposed": False,
+            "health": "unknown",
+            "managed": True,
+            "source": "config",
+            "_command": "",
+            "_cwd": "",
+            "_address": "",
+        }
+        discovered_names.add(name)
+
+    services_list = list(records.values())
+
+    # ---- 健康探测（并发，避免串行卡住）----
+    probe_targets = [s for s in services_list if s.get("port") and s.get("source") == "port"]
+    if probe_targets:
+        with ThreadPoolExecutor(max_workers=min(16, len(probe_targets))) as pool:
+            results = pool.map(lambda s: _probe_http(int(s["port"])), probe_targets)
+            for svc, health in zip(probe_targets, results):
+                svc["health"] = health
+
+    # ---- 填中文显示名 ----
+    for s in services_list:
+        s["display"] = _display_name(s["name"], s["process"], configs)
+    # 排序：对外暴露优先 -> 在线优先 -> 有端口优先 -> 名字
+    services_list.sort(key=lambda s: (
+        not s.get("exposed"),
+        s.get("health") != "online",
+        s.get("port") is None,
+        s.get("name", ""),
+    ))
+    return services_list
+
+
+def service_detail(name: str) -> dict:
+    """返回某个已发现服务的详情：端口/进程/配置文件路径/日志路径/暴露面。"""
+    name = (name or "").strip()
+    if not name:
+        return {"ok": False, "error": "服务名为空"}
+    matches = [s for s in discover_services() if s.get("name") == name]
+    if not matches:
+        return {"ok": False, "error": f"未发现服务: {name}"}
+
+    configs = service_configs()
+    cfg = configs.get(name, {}) or {}
+    ports = sorted({s["port"] for s in matches if s.get("port")})
+    pids = sorted({s["pid"] for s in matches if s.get("pid")})
+    primary = matches[0]
+
+    # 配置文件 / 日志路径：优先 settings.toml 配置，其次从进程命令行里推断
+    config_path = cfg.get("config") or ""
+    log_path = cfg.get("log") or ""
+    if not config_path:
+        m = re.search(r"(?:-c|--config|-config)\s+(\S+)", primary.get("_command", ""))
+        if m:
+            config_path = m.group(1)
+    cmd = primary.get("_command", "")
+
+    return {
+        "ok": True,
+        "name": name,
+        "display": primary.get("display", name),
+        "process": primary.get("process", ""),
+        "command": cmd,
+        "cwd": primary.get("_cwd", ""),
+        "ports": ports,
+        "pids": pids,
+        "bind": primary.get("bind", ""),
+        "address": primary.get("_address", ""),
+        "exposed": any(s.get("exposed") for s in matches),
+        "exposure": "对外暴露 (0.0.0.0)" if any(s.get("exposed") for s in matches) else "仅本机 (127.0.0.1)",
+        "health": primary.get("health", "unknown"),
+        "managed": any(s.get("managed") for s in matches),
+        "source": primary.get("source", ""),
+        "config_path": os.path.expanduser(config_path) if config_path else "",
+        "log_path": os.path.expanduser(log_path) if log_path else "",
+        "start": cfg.get("start") or "",
+    }
