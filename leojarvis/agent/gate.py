@@ -55,6 +55,13 @@ TOOL_BASE_RISK = {
     "list_cli_agents": "auto",
     "cli_agent_detail": "auto",
     "run_cli_agent": "confirm",
+    # 星座运势：只读、离线
+    "horoscope": "auto",
+    # 终端应用管家：列表只读；开/关/切前台改系统状态
+    "list_running_apps": "auto",
+    "open_app": "confirm",
+    "quit_app": "confirm",
+    "focus_app": "confirm",
 }
 
 

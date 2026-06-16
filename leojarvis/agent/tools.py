@@ -13,7 +13,7 @@ from typing import Callable
 
 from .. import db
 from ..memory.store import recall
-from . import agents_ctrl, cli_agents, journal, services, sysinfo
+from . import agents_ctrl, app_manager, cli_agents, horoscope, journal, services, sysinfo
 
 
 @dataclass
@@ -94,6 +94,27 @@ def _t_run_cli_agent(args: dict) -> str:
     return json_dumps(cli_agents.run_agent(
         str(args.get("name", "")), str(args.get("prompt", "")),
         cwd=(args.get("cwd") or None), timeout=int(args.get("timeout", 180))))
+
+
+def _t_horoscope(args: dict) -> str:
+    return json_dumps(horoscope.horoscope(
+        str(args.get("sign", "")), (args.get("date") or None)))
+
+
+def _t_list_running_apps(_: dict) -> str:
+    return json_dumps({"apps": app_manager.list_running_apps()})
+
+
+def _t_open_app(args: dict) -> str:
+    return json_dumps(app_manager.open_app(str(args.get("name", ""))))
+
+
+def _t_quit_app(args: dict) -> str:
+    return json_dumps(app_manager.quit_app(str(args.get("name", ""))))
+
+
+def _t_focus_app(args: dict) -> str:
+    return json_dumps(app_manager.focus_app(str(args.get("name", ""))))
 
 
 def _t_spawn_agent(args: dict) -> str:
@@ -243,6 +264,22 @@ TOOLBUS.register(Tool("run_cli_agent",
                       "属高风险（agent 能改文件），需确认。",
                       {"name": "agent 名", "prompt": "要执行的任务", "cwd": "工作目录，可选", "timeout": "超时秒数，默认180"},
                       _t_run_cli_agent))
+# 星座运势（离线确定性，只读）
+TOOLBUS.register(Tool("horoscope",
+                      "查某星座当天运势（离线确定性：综合评分/幸运色/幸运数字/宜忌/一句话建议）。"
+                      "支持中文（白羊/金牛…）与英文星座名。",
+                      {"sign": "星座名（中文或英文）", "date": "日期 YYYY-MM-DD，可选，默认今天"},
+                      _t_horoscope))
+# 终端应用管家（macOS）—— 列表只读；开/关/切前台改系统状态，需确认
+TOOLBUS.register(Tool("list_running_apps",
+                      "列出当前运行的 GUI 应用（含 name，尽力附 pid）。只读。",
+                      {}, _t_list_running_apps))
+TOOLBUS.register(Tool("open_app", "打开一个 macOS 应用（open -a）。属改系统状态，需确认。",
+                      {"name": "应用名，如 Safari / 备忘录"}, _t_open_app))
+TOOLBUS.register(Tool("quit_app", "关闭一个 macOS 应用（tell app to quit）。属改系统状态，需确认。",
+                      {"name": "应用名"}, _t_quit_app))
+TOOLBUS.register(Tool("focus_app", "把一个 macOS 应用切到前台（activate）。属改系统状态，需确认。",
+                      {"name": "应用名"}, _t_focus_app))
 TOOLBUS.register(Tool("service_logs", "查看某个本地服务的最近日志。",
                       {"name": "服务名", "lines": "行数，默认 40"}, _t_service_logs))
 TOOLBUS.register(Tool("restart_service", "重启一个本地服务（需配置 start 命令）。属高风险，需确认。",

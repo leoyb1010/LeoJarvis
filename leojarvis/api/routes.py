@@ -359,6 +359,21 @@ def agents_cli_detail(name: str) -> dict:
     return cli_agents.agent_detail(name)
 
 
+@router.get("/horoscope/{sign}")
+def horoscope_get(sign: str, date: str | None = None) -> dict:
+    """某星座当天运势（离线确定性，只读）。date 可选 YYYY-MM-DD。"""
+    from ..agent import horoscope
+    return horoscope.horoscope(sign, date)
+
+
+@router.get("/apps/running")
+def apps_running() -> dict:
+    """当前运行的 GUI 应用列表（只读）。
+    open/quit/focus 不开裸 REST 写口，必须经 /agent/chat 的工具 + 行动闸门确认。"""
+    from ..agent import app_manager
+    return {"apps": app_manager.list_running_apps()}
+
+
 @router.get("/cockpit/overview")
 def cockpit_overview() -> dict:
     from ..cockpit import overview
