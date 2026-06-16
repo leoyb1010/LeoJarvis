@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { getCliAgents, getCliSessions, runCliAgent, stopCliSession, fmtAgo, type CliAgent, type CliSession } from "./live";
+import {
+  getCliAgents, getCliSessions, runCliAgent, stopCliSession, fmtAgo,
+  getVitals, getServices, getSystemOverview, getBriefing, getNotes, getNotifications,
+  agentChat, approveAction,
+  type CliAgent, type CliSession, type Vitals, type Service, type SystemOverview,
+  type Briefing, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
+} from "./live";
 
 const TAG: Record<string, [string, string]> = { claude: ["CC", "#ff7a45"], codex: ["CX", "#36d39a"], cursor: ["CU", "#4da3ff"], grok: ["GK", "#b69cff"], gemini: ["GM", "#ffb454"], opencode: ["OC", "#9aa6b2"] };
 
@@ -57,6 +63,7 @@ export default function CommandCenter() {
   const [sync, setSync] = useState(true);
   const [scan, setScan] = useState(true);
   const alive = useRef(true);
+  const [vitals, setVitals] = useState<Vitals>({ health: null, cpu: null, online: 0, total: 0 });
 
   useWave("cx-cpu", 5, alive);
   useWave("cx-orch", 8, alive);
@@ -64,7 +71,10 @@ export default function CommandCenter() {
   useEffect(() => {
     alive.current = true;
     const clock = setInterval(() => setNow(new Date()), 1000);
-    return () => { alive.current = false; clearInterval(clock); };
+    const pull = () => getVitals().then((v) => { if (alive.current) setVitals(v); }).catch(() => {});
+    pull();
+    const t = setInterval(pull, 10000);
+    return () => { alive.current = false; clearInterval(clock); clearInterval(t); };
   }, []);
 
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -106,9 +116,9 @@ export default function CommandCenter() {
             <kbd style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: "#6b7480", border: "1px solid #2a323d", borderRadius: 5, padding: "2px 6px" }}>⌘K</kbd>
           </div>
           <div style={{ flex: "none", ...row(9), font: "600 11px 'IBM Plex Mono',monospace" }}>
-            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "#36d39a", display: "inline-block", animation: "cxBreathe 4s ease infinite" }} />健康 <b style={{ color: "#e8ecf1" }}>86</b></span>
-            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}>CPU <b style={{ color: "#e8ecf1" }}>27%</b></span>
-            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}>服务 <b style={{ color: "#36d39a" }}>5/6</b></span>
+            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "#36d39a", display: "inline-block", animation: "cxBreathe 4s ease infinite" }} />健康 <b style={{ color: "#e8ecf1" }}>{vitals.health ?? "—"}</b></span>
+            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}>CPU <b style={{ color: "#e8ecf1" }}>{vitals.cpu != null ? `${vitals.cpu}%` : "—"}</b></span>
+            <span style={{ ...row(5), background: "#0e1218", border: "1px solid #1c222b", borderRadius: 8, padding: "5px 9px", color: "#aab2bd" }}>服务 <b style={{ color: "#36d39a" }}>{vitals.online}/{vitals.total}</b></span>
             <span style={{ width: 1, height: 20, background: "#262d37" }} />
             <span style={{ color: "#e8ecf1", letterSpacing: ".04em" }}>{clock}</span>
           </div>
@@ -128,21 +138,165 @@ export default function CommandCenter() {
 }
 
 // ============ COCKPIT ============
+// 优先级 → [文字色, 背景色]。后端返回 高优先/中优先/观察；未知归为"观察"样式。
+const PRI: Record<string, [string, string]> = { 高优先: ["#fff", "#ff5d5d"], 中优先: ["#ff7a45", "rgba(255,122,69,.16)"], 简报: ["#ff7a45", "rgba(255,122,69,.16)"], 观察: ["#aab2bd", "rgba(255,255,255,.06)"] };
+const priStyle = (p?: string): [string, string] => PRI[p || "观察"] || PRI["观察"];
+// 步骤状态 → 左边条颜色 + 中文标签。done=完成(绿)；pending/await/awaiting=待确认(琥珀)；其它原样。
+function stepTone(status?: string): { bar: string; label: string } {
+  const s = (status || "").toLowerCase();
+  if (s === "done" || s === "ok" || s === "success" || s === "完成") return { bar: "#36d39a", label: "完成" };
+  if (s === "error" || s === "failed" || s === "失败") return { bar: "#ff5d5d", label: "失败" };
+  if (s.includes("pend") || s.includes("await") || s === "待确认") return { bar: "#ffb454", label: "待确认" };
+  return { bar: "#36d39a", label: status || "完成" };
+}
+// 毫秒/秒时间戳 → HH:MM。
+function tsToTime(ts?: number): string {
+  if (!ts) return "";
+  const ms = ts > 1e12 ? ts : ts * 1000;
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 中枢对话的一轮一轮内容（直接映射到设计里的四种气泡/卡片样式）
+type Turn =
+  | { kind: "user"; text: string }
+  | { kind: "steps"; steps: ChatStep[] }
+  | { kind: "assistant"; text: string }
+  | { kind: "pending"; actions: PendingAction[] }
+  | { kind: "system"; text: string };
+
 function Cockpit({ goIntel }: { goIntel: () => void }) {
-  const svc = (name: string, port: number, online: boolean) => ({ name, port, dot: online ? "#36d39a" : "#ff5d5d", glow: online ? "rgba(54,211,154,.6)" : "rgba(255,93,93,.5)" });
-  const services = [svc("LeoJarvis", 8787, true), svc("Ollama", 11434, true), svc("LeoNote", 3000, true), svc("LeoAPI", 8000, true), svc("LeoMoney", 5001, false), svc("CloudCLI", 7070, true)];
-  const PRI: Record<string, [string, string]> = { 高优先: ["#fff", "#ff5d5d"], 简报: ["#ff7a45", "rgba(255,122,69,.16)"], 观察: ["#aab2bd", "rgba(255,255,255,.06)"] };
-  const intelTop = [
-    { pri: "高优先", source: "Hacker News", time: "08:12", title: "Anthropic 发布新一代本地代理协议" },
-    { pri: "高优先", source: "邮件", time: "07:58", title: "投资人回信：下周见面确认" },
-    { pri: "简报", source: "GitHub Trending", time: "07:40", title: "local-first AI agent 框架一周 star 翻倍" },
-  ];
-  const steps = [{ cmd: "disk_hotspots", status: "完成", bar: "#36d39a" }, { cmd: "system_status", status: "完成", bar: "#36d39a" }, { cmd: "rm -rf caches", status: "待确认", bar: "#ffb454" }];
-  const suggestions = ["本地服务都还活着吗", "今天有什么高优先情报", "派 3 个子智能体并行", "整理今天的记事"];
-  const mails = [{ f: "mail.png", n: "Mail", c: 3 }, { f: "wechat.png", n: "微信", c: 12 }, { f: "telegram.png", n: "Telegram", c: 5 }, { f: "popo.png", n: "POPO", c: 0 }, { f: "mailmaster.png", n: "网易邮箱", c: 1 }];
-  const notes = [{ when: "今天 09:02", title: "LeoJarvis V2 重构要点", body: "中枢对话 + 工具总线 + 行动闸门；驾驶舱并入记事小区域。" }, { when: "昨天 22:14", title: "情报源清单", body: "补充 arXiv、雪球、V2EX 三个源到 sources.toml。" }];
-  const T = (time: string, title: string, done: boolean) => ({ time, title, check: done ? "✓" : "", box: done ? "#ff7a45" : "#3a424d", fill: done ? "#ff7a45" : "transparent", timeFg: done ? "#6b7480" : "#ff7a45", titleFg: done ? "#6b7480" : "#e8ecf1" });
-  const todos = [T("10:00", "评估 Claude 本地代理协议", false), T("14:30", "修复 LeoMoney 掉线", false), T("已完成", "巡检磁盘热点", true)];
+  // ---- 左下：本机服务（真实） ----
+  const [services, setServices] = useState<Service[]>([]);
+  // ---- 左上：系统健康 + SSD/RAM（真实） ----
+  const [overview, setOverview] = useState<SystemOverview | null>(null);
+  // ---- 右栏：情报 / 记事 / 通知（真实） ----
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
+  const [notes, setNotes] = useState<PersonalNote[]>([]);
+  const [notifApps, setNotifApps] = useState<NotifApp[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    const pull = () => {
+      getServices().then((d) => { if (live && Array.isArray(d)) setServices(d); }).catch(() => {});
+      getSystemOverview().then((d) => { if (live) setOverview(d); }).catch(() => {});
+    };
+    pull();
+    const t = setInterval(pull, 10000);
+    // 情报 / 记事 / 通知刷新可慢一些
+    getBriefing().then((d) => { if (live) setBriefing(d); }).catch(() => {});
+    getNotes().then((d) => { if (live) setNotes(Array.isArray(d?.notes) ? d.notes : []); }).catch(() => {});
+    getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {});
+    const t2 = setInterval(() => {
+      getBriefing().then((d) => { if (live) setBriefing(d); }).catch(() => {});
+      getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {});
+    }, 30000);
+    return () => { live = false; clearInterval(t); clearInterval(t2); };
+  }, []);
+
+  // 服务瓦片：取活跃（online）优先的前 ~8 个；不足则补其它。
+  const svcShown = (() => {
+    const online = services.filter((s) => s.health === "online");
+    const rest = services.filter((s) => s.health !== "online");
+    return [...online, ...rest].slice(0, 8).map((s) => ({
+      name: s.display && !/^(Python|Electron|node)$/i.test(s.display) ? s.display : s.name,
+      port: s.port ?? 0,
+      online: s.health === "online",
+      dot: s.health === "online" ? "#36d39a" : "#ff5d5d",
+      glow: s.health === "online" ? "rgba(54,211,154,.6)" : "rgba(255,93,93,.5)",
+    }));
+  })();
+  const svcOnline = services.filter((s) => s.health === "online").length;
+  const svcTotal = services.length;
+
+  // 系统健康环 + 条
+  const health = typeof overview?.score === "number" ? Math.round(overview.score) : null;
+  const mod = (id: string) => overview?.modules?.find((m) => m.id === id);
+  const pctOf = (id: string): number | null => {
+    const v = mod(id)?.metrics?.used_pct;
+    return typeof v === "number" ? Math.round(v) : null;
+  };
+  const ssdPct = pctOf("disk");
+  const ramPct = pctOf("memory");
+  const CIRC = 251.3; // 2πr, r=40
+  const ringOffset = health != null ? +(CIRC * (1 - health / 100)).toFixed(1) : CIRC;
+  const cpuMod = mod("cpu");
+  const cpuLoad1 = typeof cpuMod?.metrics?.load_1 === "number" ? cpuMod.metrics.load_1 : null;
+  const cpuCores = typeof cpuMod?.metrics?.cores === "number" ? cpuMod.metrics.cores : null;
+
+  // 今日情报 top3（真实）
+  const intelItems = briefing?.items ?? [];
+  const intelTotal = briefing?.counts?.total ?? intelItems.length;
+  const intelTop = intelItems.slice(0, 3);
+
+  // 应用与邮件徽标（真实未读数）。把后端 id 映射到本地图标。
+  const ICON: Record<string, string> = { mail: "mail.png", gmail: "mail.png", wechat: "wechat.png", telegram: "telegram.png", popo: "popo.png", mailmaster: "mailmaster.png" };
+  const mails = notifApps
+    .filter((a) => ICON[a.id])
+    .map((a) => ({ id: a.id, n: a.name || a.id, icon: a.icon || A(ICON[a.id]), c: typeof a.count === "number" ? a.count : 0 }));
+
+  // ====== AGENT 中枢：真实对话 ======
+  const greeting = "我是你的中枢。问我本机服务、系统状态、今日情报或让我整理记事都可以——左下是真实服务、右边是真实情报与通知。";
+  const [turns, setTurns] = useState<Turn[]>([{ kind: "assistant", text: greeting }]);
+  const [history, setHistory] = useState<ChatMsg[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [approving, setApproving] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const suggestions = ["本地服务都还活着吗", "看看我磁盘为什么快满了", "今天有什么高优先情报", "系统现在状态怎么样"];
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, busy]);
+
+  // 把一次 chat 响应（reply/steps/pending_actions）追加成对话气泡。
+  function appendReply(res: ChatReply | null | undefined) {
+    const add: Turn[] = [];
+    if (res?.steps && res.steps.length) add.push({ kind: "steps", steps: res.steps });
+    if (res?.reply) add.push({ kind: "assistant", text: String(res.reply) });
+    if (res?.pending_actions && res.pending_actions.length) add.push({ kind: "pending", actions: res.pending_actions });
+    if (add.length) setTurns((t) => [...t, ...add]);
+    if (res?.reply) setHistory((h) => [...h, { role: "assistant", content: String(res.reply) }]);
+  }
+
+  async function send(text: string) {
+    const msg = text.trim();
+    if (!msg || busy) return;
+    setDraft("");
+    setTurns((t) => [...t, { kind: "user", text: msg }]);
+    const nextHistory: ChatMsg[] = [...history, { role: "user", content: msg }];
+    setHistory(nextHistory);
+    setBusy(true);
+    try {
+      const res = await agentChat(nextHistory);
+      appendReply(res);
+    } catch {
+      setTurns((t) => [...t, { kind: "system", text: "中枢暂时无法连接，请稍后再试。" }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approve(id: string) {
+    if (approving) return;
+    setApproving(id);
+    try {
+      const res = await approveAction(id, "approve");
+      // 标记该待确认卡已执行：从对话里把含此 id 的 pending 卡移除，并接回执行结果。
+      setTurns((t) => t
+        .map((tn) => tn.kind === "pending" ? { ...tn, actions: tn.actions.filter((a) => a.id !== id) } : tn)
+        .filter((tn) => !(tn.kind === "pending" && tn.actions.length === 0)));
+      appendReply(res);
+      if (!res?.reply && !res?.steps?.length) setTurns((t) => [...t, { kind: "system", text: "已执行。" }]);
+    } catch {
+      setTurns((t) => [...t, { kind: "system", text: "执行失败，请重试。" }]);
+    } finally {
+      setApproving(null);
+    }
+  }
 
   return (
     <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateColumns: "298px minmax(0,1fr) 330px", gap: 14, padding: 16, minHeight: 0 }}>
@@ -152,28 +306,29 @@ function Cockpit({ goIntel }: { goIntel: () => void }) {
           <div style={{ ...row(8), marginBottom: 13 }}><span style={lbl}>SYSTEM HEALTH</span><span style={flex1} /><span style={mono(10, "#36d39a")}>● 平稳</span></div>
           <div style={row(16)}>
             <div style={{ position: "relative", width: 92, height: 92, flex: "none" }}>
-              <svg width="92" height="92" viewBox="0 0 92 92" style={{ transform: "rotate(-90deg)" }}><circle cx="46" cy="46" r="40" fill="none" stroke="#1c222b" strokeWidth="7" /><circle cx="46" cy="46" r="40" fill="none" stroke="#ff7a45" strokeWidth="7" strokeLinecap="round" strokeDasharray="251.3" strokeDashoffset="35.2" style={{ filter: "drop-shadow(0 0 5px rgba(255,122,69,.6))" }} /></svg>
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center" }}><div style={{ font: "700 30px 'Space Grotesk',sans-serif", color: "#e8ecf1", lineHeight: 1, animation: "cxGlow 5s ease infinite" }}>86</div></div>
+              <svg width="92" height="92" viewBox="0 0 92 92" style={{ transform: "rotate(-90deg)" }}><circle cx="46" cy="46" r="40" fill="none" stroke="#1c222b" strokeWidth="7" /><circle cx="46" cy="46" r="40" fill="none" stroke="#ff7a45" strokeWidth="7" strokeLinecap="round" strokeDasharray="251.3" strokeDashoffset={ringOffset} style={{ filter: "drop-shadow(0 0 5px rgba(255,122,69,.6))", transition: "stroke-dashoffset .6s ease" }} /></svg>
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center" }}><div style={{ font: "700 30px 'Space Grotesk',sans-serif", color: "#e8ecf1", lineHeight: 1, animation: "cxGlow 5s ease infinite" }}>{health ?? "—"}</div></div>
             </div>
             <div style={{ display: "grid", gap: 8, flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", font: "500 11px 'IBM Plex Mono',monospace" }}><span style={{ color: "#aab2bd" }}>SSD</span><b style={{ color: "#e8ecf1" }}>74%</b></div>
-              <div style={{ height: 4, borderRadius: 4, background: "#1c222b", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: "74%", background: "#ffb454", borderRadius: 4 }} /></div>
-              <div style={{ display: "flex", justifyContent: "space-between", font: "500 11px 'IBM Plex Mono',monospace" }}><span style={{ color: "#aab2bd" }}>RAM</span><b style={{ color: "#e8ecf1" }}>68%</b></div>
-              <div style={{ height: 4, borderRadius: 4, background: "#1c222b", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: "68%", background: "#36d39a", borderRadius: 4 }} /></div>
+              <div style={{ display: "flex", justifyContent: "space-between", font: "500 11px 'IBM Plex Mono',monospace" }}><span style={{ color: "#aab2bd" }}>SSD</span><b style={{ color: "#e8ecf1" }}>{ssdPct != null ? `${ssdPct}%` : "—"}</b></div>
+              <div style={{ height: 4, borderRadius: 4, background: "#1c222b", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${ssdPct ?? 0}%`, background: "#ffb454", borderRadius: 4, transition: "width .6s ease" }} /></div>
+              <div style={{ display: "flex", justifyContent: "space-between", font: "500 11px 'IBM Plex Mono',monospace" }}><span style={{ color: "#aab2bd" }}>RAM</span><b style={{ color: "#e8ecf1" }}>{ramPct != null ? `${ramPct}%` : "—"}</b></div>
+              <div style={{ height: 4, borderRadius: 4, background: "#1c222b", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${ramPct ?? 0}%`, background: "#36d39a", borderRadius: 4, transition: "width .6s ease" }} /></div>
             </div>
           </div>
         </div>
 
         <div style={panel}>
-          <div style={{ ...row(8), marginBottom: 4 }}><span style={lbl}>CPU · LIVE</span><span style={flex1} /><b style={{ font: "700 15px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>2.14<i style={{ font: "500 10px 'IBM Plex Mono'", color: "#6b7480", fontStyle: "normal" }}> /8核</i></b></div>
+          <div style={{ ...row(8), marginBottom: 4 }}><span style={lbl}>CPU · LIVE</span><span style={flex1} /><b style={{ font: "700 15px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{cpuLoad1 != null ? cpuLoad1.toFixed(2) : "—"}<i style={{ font: "500 10px 'IBM Plex Mono'", color: "#6b7480", fontStyle: "normal" }}> /{cpuCores ?? 8}核</i></b></div>
           <canvas id="cx-cpu" style={{ width: "100%", height: 44, display: "block" }} />
         </div>
 
         <div style={{ ...panel, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0 }}>
-          <div style={{ ...row(8), marginBottom: 12 }}><span style={lbl}>LOCAL SERVICES</span><span style={flex1} /><span style={mono(10, "#aab2bd")}>5/6</span></div>
+          <div style={{ ...row(8), marginBottom: 12 }}><span style={lbl}>LOCAL SERVICES</span><span style={flex1} /><span style={mono(10, "#aab2bd")}>{svcOnline}/{svcTotal}</span></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, overflowY: "auto", minHeight: 0, alignContent: "start" }}>
-            {services.map((s) => (
-              <div key={s.name} style={{ ...row(8), background: "#0b0e13", border: "1px solid #1a2029", borderRadius: 10, padding: "9px 10px" }}>
+            {svcShown.length === 0 && <div style={{ ...mono(10), gridColumn: "1 / -1", padding: "4px 2px" }}>检测本机服务中…</div>}
+            {svcShown.map((s, i) => (
+              <div key={`${s.name}-${s.port}-${i}`} style={{ ...row(8), background: "#0b0e13", border: "1px solid #1a2029", borderRadius: 10, padding: "9px 10px" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.dot, flex: "none", boxShadow: `0 0 7px ${s.glow}` }} />
                 <div style={{ minWidth: 0 }}><div style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "#e8ecf1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div><div style={mono(9)}>:{s.port}</div></div>
               </div>
@@ -185,40 +340,59 @@ function Cockpit({ goIntel }: { goIntel: () => void }) {
       {/* MID — AGENT 中枢 */}
       <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0, overflow: "hidden" }}>
         <div style={{ ...row(9), padding: "16px 18px 12px", borderBottom: "1px solid #161b22" }}><img src={A("brand-mark.png")} alt="" style={{ width: 26, height: 26, borderRadius: 7, objectFit: "cover" }} /><div><div style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "#ff7a45" }}>AGENT 中枢</div></div><span style={flex1} /><span style={mono(10)}>工具总线 · 行动闸门</span></div>
-        <div style={{ overflowY: "auto", minHeight: 0, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 11 }}>
-          <div style={{ alignSelf: "flex-end", maxWidth: "78%", background: "#ff7a45", color: "#1a0f08", font: "500 13.5px 'Space Grotesk',sans-serif", padding: "10px 14px", borderRadius: 13, borderBottomRightRadius: 4, lineHeight: 1.5 }}>看看我磁盘为什么快满了</div>
-          <div style={{ alignSelf: "flex-start", display: "grid", gap: 6, width: "90%" }}>
-            {steps.map((st) => (
-              <div key={st.cmd} style={{ ...row(9), background: "#0b0e13", border: "1px solid #1a2029", borderLeft: `3px solid ${st.bar}`, borderRadius: 9, padding: "8px 11px" }}><code style={{ font: "600 11.5px 'IBM Plex Mono',monospace", color: st.bar }}>{st.cmd}</code><span style={flex1} /><span style={mono(10)}>{st.status}</span></div>
-            ))}
-          </div>
-          <div style={{ alignSelf: "flex-start", maxWidth: "90%", background: "#0b0e13", border: "1px solid #1c222b", color: "#cdd3db", font: "400 13.5px/1.62 'Space Grotesk',sans-serif", padding: "12px 15px", borderRadius: 13, borderBottomLeftRadius: 4 }}>已扫描系统盘：占用 74%。最大三个热点是 ~/Library/Caches (18G)、Docker 镜像 (12G)、Xcode DerivedData (9G)。需要我清理可回收的缓存吗？</div>
-          <div style={{ alignSelf: "flex-start", ...row(9), background: "rgba(255,180,84,.07)", border: "1px solid rgba(255,180,84,.3)", borderRadius: 11, padding: "10px 13px", maxWidth: "90%" }}><span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: "#ffb454", whiteSpace: "nowrap" }}>⚠ 待确认</span><code style={{ font: "500 11.5px 'IBM Plex Mono',monospace", color: "#ffd9a0", overflow: "hidden", textOverflow: "ellipsis" }}>rm -rf ~/Library/Caches/*</code><button style={{ border: 0, cursor: "pointer", background: "#ffb454", color: "#1a0f08", font: "600 10.5px 'Space Grotesk'", padding: "5px 11px", borderRadius: 6, whiteSpace: "nowrap" }}>确认</button></div>
+        <div ref={scrollRef} style={{ overflowY: "auto", minHeight: 0, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 11 }}>
+          {turns.map((tn, i) => {
+            if (tn.kind === "user")
+              return <div key={i} style={{ alignSelf: "flex-end", maxWidth: "78%", background: "#ff7a45", color: "#1a0f08", font: "500 13.5px 'Space Grotesk',sans-serif", padding: "10px 14px", borderRadius: 13, borderBottomRightRadius: 4, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{tn.text}</div>;
+            if (tn.kind === "steps")
+              return (
+                <div key={i} style={{ alignSelf: "flex-start", display: "grid", gap: 6, width: "90%" }}>
+                  {tn.steps.map((st, j) => { const tone = stepTone(st.status); return (
+                    <div key={j} style={{ ...row(9), background: "#0b0e13", border: "1px solid #1a2029", borderLeft: `3px solid ${tone.bar}`, borderRadius: 9, padding: "8px 11px" }}><code style={{ font: "600 11.5px 'IBM Plex Mono',monospace", color: tone.bar }}>{st.tool}</code><span style={flex1} /><span style={mono(10)}>{tone.label}</span></div>
+                  ); })}
+                </div>
+              );
+            if (tn.kind === "assistant")
+              return <div key={i} style={{ alignSelf: "flex-start", maxWidth: "90%", background: "#0b0e13", border: "1px solid #1c222b", color: "#cdd3db", font: "400 13.5px/1.62 'Space Grotesk',sans-serif", padding: "12px 15px", borderRadius: 13, borderBottomLeftRadius: 4, whiteSpace: "pre-wrap" }}>{tn.text}</div>;
+            if (tn.kind === "system")
+              return <div key={i} style={{ alignSelf: "center", ...mono(10.5, "#ff8a8a") }}>{tn.text}</div>;
+            // pending：每个待确认动作一张琥珀卡
+            return (
+              <div key={i} style={{ alignSelf: "flex-start", display: "grid", gap: 6, maxWidth: "90%" }}>
+                {tn.actions.map((act) => (
+                  <div key={act.id} style={{ ...row(9), background: "rgba(255,180,84,.07)", border: "1px solid rgba(255,180,84,.3)", borderRadius: 11, padding: "10px 13px" }}><span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: "#ffb454", whiteSpace: "nowrap" }}>⚠ 待确认</span><code style={{ font: "500 11.5px 'IBM Plex Mono',monospace", color: "#ffd9a0", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{act.reason || act.tool || act.id}</code><button onClick={() => approve(act.id)} disabled={approving === act.id} style={{ border: 0, cursor: approving === act.id ? "default" : "pointer", background: "#ffb454", color: "#1a0f08", font: "600 10.5px 'Space Grotesk'", padding: "5px 11px", borderRadius: 6, whiteSpace: "nowrap", opacity: approving === act.id ? 0.6 : 1 }}>{approving === act.id ? "执行中" : "确认"}</button></div>
+                ))}
+              </div>
+            );
+          })}
+          {busy && <div style={{ alignSelf: "flex-start", ...mono(10.5, "#6b7480") }}>中枢思考中…</div>}
         </div>
         <div style={{ padding: "12px 18px 16px", borderTop: "1px solid #161b22" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 11 }}>
-            {suggestions.map((sug) => (<button key={sug} className="cx-chip" style={{ border: "1px solid #232a33", background: "#0b0e13", color: "#aab2bd", cursor: "pointer", font: "500 11.5px 'Space Grotesk',sans-serif", padding: "6px 11px", borderRadius: 999 }}>{sug}</button>))}
+            {suggestions.map((sug) => (<button key={sug} onClick={() => send(sug)} disabled={busy} className="cx-chip" style={{ border: "1px solid #232a33", background: "#0b0e13", color: "#aab2bd", cursor: busy ? "default" : "pointer", font: "500 11.5px 'Space Grotesk',sans-serif", padding: "6px 11px", borderRadius: 999, opacity: busy ? 0.5 : 1 }}>{sug}</button>))}
           </div>
-          <div style={{ ...row(10), background: "#0b0e13", border: "1px solid #232a33", borderRadius: 11, padding: "0 14px", height: 42 }}><span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>&gt;</span><input placeholder="继续对话…" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "#e8ecf1", font: "500 13px 'Space Grotesk',sans-serif" }} /><button style={{ border: 0, cursor: "pointer", background: "#ff7a45", color: "#1a0f08", font: "600 11px 'Space Grotesk'", padding: "6px 13px", borderRadius: 7 }}>发送</button></div>
+          <div style={{ ...row(10), background: "#0b0e13", border: "1px solid #232a33", borderRadius: 11, padding: "0 14px", height: 42 }}><span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>&gt;</span><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(draft); }} placeholder="继续对话…" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "#e8ecf1", font: "500 13px 'Space Grotesk',sans-serif" }} /><button onClick={() => send(draft)} disabled={busy} style={{ border: 0, cursor: busy ? "default" : "pointer", background: "#ff7a45", color: "#1a0f08", font: "600 11px 'Space Grotesk'", padding: "6px 13px", borderRadius: 7, opacity: busy ? 0.6 : 1 }}>发送</button></div>
         </div>
       </div>
 
       {/* RIGHT */}
       <div style={{ display: "grid", gap: 14, overflowY: "auto", minHeight: 0, alignContent: "start", paddingRight: 2 }}>
         <div style={panel}>
-          <div style={{ ...row(8), marginBottom: 12 }}><span style={lbl}>今日情报</span><span style={flex1} /><button onClick={goIntel} style={{ border: 0, background: "transparent", cursor: "pointer", font: "500 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>查看全部 28 →</button></div>
+          <div style={{ ...row(8), marginBottom: 12 }}><span style={lbl}>今日情报</span><span style={flex1} /><button onClick={goIntel} style={{ border: 0, background: "transparent", cursor: "pointer", font: "500 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>查看全部 {intelTotal} →</button></div>
           <div style={{ display: "grid", gap: 10 }}>
-            {intelTop.map((it, i) => (
-              <button key={i} className="cx-intel" style={{ textAlign: "left", border: 0, cursor: "pointer", background: "transparent", padding: "0 0 10px", borderBottom: "1px solid #161b22", display: "grid", gap: 4 }}><div style={row(7)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: PRI[it.pri][0], background: PRI[it.pri][1], borderRadius: 999, padding: "2px 7px" }}>{it.pri}</span><span style={mono(9.5)}>{it.source} · {it.time}</span></div><b style={{ font: "600 12.5px/1.4 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{it.title}</b></button>
-            ))}
+            {intelTop.length === 0 && <div style={{ ...mono(10.5), padding: "2px 0" }}>暂无情报</div>}
+            {intelTop.map((it, i) => { const [pf, pb] = priStyle(it.priority); const time = tsToTime(it.ts); return (
+              <button key={it.event_id || i} onClick={goIntel} className="cx-intel" style={{ textAlign: "left", border: 0, cursor: "pointer", background: "transparent", padding: "0 0 10px", borderBottom: "1px solid #161b22", display: "grid", gap: 4 }}><div style={row(7)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "2px 7px" }}>{it.priority || "观察"}</span><span style={mono(9.5)}>{it.source || ""}{time ? ` · ${time}` : ""}</span></div><b style={{ font: "600 12.5px/1.4 'Space Grotesk',sans-serif", color: "#e8ecf1", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.title}</b></button>
+            ); })}
           </div>
         </div>
         <div style={panel}>
           <div style={{ ...row(8), marginBottom: 13 }}><span style={lbl}>应用与邮件</span><span style={flex1} /><span style={mono(9)}>仅读计数</span></div>
-          <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {mails.length === 0 && <span style={mono(10.5)}>暂无应用通知</span>}
             {mails.map((m) => (
-              <div key={m.n} style={{ position: "relative" }}>
-                <img src={A(m.f)} alt={m.n} style={{ width: 38, height: 38, borderRadius: 10, display: "block", boxShadow: "0 0 0 1px #1c222b", opacity: m.c ? 1 : 0.5 }} />
+              <div key={m.id} style={{ position: "relative" }}>
+                <img src={m.icon} alt={m.n} style={{ width: 38, height: 38, borderRadius: 10, display: "block", boxShadow: "0 0 0 1px #1c222b", opacity: m.c ? 1 : 0.5 }} />
                 {m.c > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px", borderRadius: 9, background: "#ff5d5d", color: "#fff", font: "700 9px 'IBM Plex Mono'", display: "grid", placeContent: "center", border: "2px solid #0e1218" }}>{m.c}</span>}
               </div>
             ))}
@@ -226,17 +400,14 @@ function Cockpit({ goIntel }: { goIntel: () => void }) {
         </div>
         <div style={panel}>
           <div style={{ ...row(8), marginBottom: 12 }}><img src={A("leonote-icon.png")} alt="" style={{ width: 15, height: 15, borderRadius: 4 }} /><span style={lbl}>个人记事</span><span style={flex1} /><span style={{ font: "500 15px 'IBM Plex Mono',monospace", color: "#ff7a45", lineHeight: 0.6 }}>+</span></div>
-          {notes.map((nt, i) => (
-            <div key={i} style={{ borderLeft: "2px solid #232a33", padding: "0 0 9px 10px", marginBottom: 8 }}><div style={{ ...mono(9), marginBottom: 3 }}>{nt.when}</div><b style={{ font: "600 12px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{nt.title}</b><p style={{ margin: "3px 0 0", font: "400 11px/1.5 'Space Grotesk',sans-serif", color: "#8b94a0" }}>{nt.body}</p></div>
-          ))}
+          {notes.length === 0 && <div style={{ ...mono(10.5), padding: "2px 0 2px 2px" }}>暂无记事</div>}
+          {notes.slice(0, 4).map((nt, i) => { const when = nt.updated_ts ? fmtAgo(nt.updated_ts) : ""; return (
+            <div key={nt.id || i} style={{ borderLeft: "2px solid #232a33", padding: "0 0 9px 10px", marginBottom: 8 }}><div style={{ ...mono(9), marginBottom: 3 }}>{when ? `${when}前` : ""}</div><b style={{ font: "600 12px 'Space Grotesk',sans-serif", color: "#e8ecf1" }}>{nt.title || "未命名记事"}</b>{nt.excerpt && <p style={{ margin: "3px 0 0", font: "400 11px/1.5 'Space Grotesk',sans-serif", color: "#8b94a0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{nt.excerpt}</p>}</div>
+          ); })}
         </div>
         <div style={panel}>
           <div style={{ ...row(8), marginBottom: 12 }}><span style={lbl}>今日日程</span></div>
-          <div style={{ display: "grid", gap: 9 }}>
-            {todos.map((td, i) => (
-              <div key={i} style={row(10)}><span style={{ width: 14, height: 14, borderRadius: 5, border: `1.5px solid ${td.box}`, background: td.fill, flex: "none", display: "grid", placeContent: "center", font: "700 8px 'IBM Plex Mono'", color: "#0a0c10" }}>{td.check}</span><b style={{ font: "500 11.5px 'IBM Plex Mono',monospace", color: td.timeFg, flex: "none", width: 56 }}>{td.time}</b><span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: td.titleFg }}>{td.title}</span></div>
-            ))}
-          </div>
+          <div style={{ ...mono(10.5), padding: "2px 0" }}>暂无日程</div>
         </div>
       </div>
     </div>
