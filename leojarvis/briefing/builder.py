@@ -13,8 +13,11 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from .. import db
-from ..config import DATA_DIR
+from ..config import DATA_DIR, profile as _profile
 from ..localize import chinese_tags as _chinese_tags, has_noisy_english, to_chinese as _to_chinese
+
+# 用户星座默认值：profile.toml 的 [life].zodiac 没配时用「双子」。
+_DEFAULT_ZODIAC = "双子"
 
 
 # 简报在每次请求时构建。标题、摘要等展示路径默认不实时调用 LLM；
@@ -724,6 +727,56 @@ def _today_focus_text(items: list[dict]) -> str:
     return "".join(parts)
 
 
+def _user_zodiac() -> str:
+    """从 profile.toml 的 [life].zodiac 读用户星座；没配就用默认（双子）。
+
+    兼容几种放法：[life].zodiac / 顶层 zodiac / 顶层 sign，任意一个有效即可。
+    读取或解析失败一律回落默认，绝不让简报因为缺配置而崩。
+    """
+    try:
+        prof = _profile() or {}
+    except Exception:
+        return _DEFAULT_ZODIAC
+    life = prof.get("life") if isinstance(prof.get("life"), dict) else {}
+    raw = (life or {}).get("zodiac") or prof.get("zodiac") or prof.get("sign")
+    sign = str(raw).strip() if raw else ""
+    return sign or _DEFAULT_ZODIAC
+
+
+def life_horoscope(date: str | None = None) -> dict:
+    """晨间简报「生活段」的今日星座条目（离线、确定性、不依赖网络/LLM）。
+
+    取用户星座（profile.toml [life].zodiac，缺省双子）→ horoscope.horoscope()，
+    包装成一个简报条目：标题 / 评分 / 一句话建议 / 宜忌。
+    任何异常都吞掉并返回 {"ok": False, ...}，保证不破坏 build_today。
+    """
+    sign = _user_zodiac()
+    try:
+        from ..agent.horoscope import horoscope as _horoscope
+        h = _horoscope(sign, date)
+    except Exception as exc:  # noqa: BLE001 —— 星座是锦上添花，绝不拖垮简报
+        return {"ok": False, "sign": sign, "error": str(exc)}
+    if not h.get("ok"):
+        return {"ok": False, "sign": sign, "error": h.get("error", "星座计算失败")}
+    return {
+        "ok": True,
+        "kind": "horoscope",
+        "domain": "life",
+        "sign": h["sign"],
+        "sign_en": h.get("sign_en"),
+        "date": h.get("date"),
+        "title": f"今日星座 · {h['sign']}座",
+        "score": h.get("score"),
+        "level": h.get("level"),
+        "advice": h.get("advice"),
+        "lucky_color": h.get("lucky_color"),
+        "lucky_number": h.get("lucky_number"),
+        "yi": h.get("yi", []),
+        "ji": h.get("ji", []),
+        "summary": h.get("summary"),
+    }
+
+
 def _build_today_raw() -> dict:
     global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
     _SOURCE_FETCH_BUDGET = 5
@@ -787,6 +840,8 @@ def _build_today_raw() -> dict:
         "generated_at": int(time.time()),
         "business": business,
         "life": life,
+        # 生活段附加：今日星座（离线确定性，不进 items 主流，避免影响去重/配额/聚类）。
+        "horoscope": life_horoscope(),
         "items": items,
         "mail": mail_items,
         "x": x_items,
@@ -899,6 +954,8 @@ def _compact_today(data: dict, *, limit: int = 0) -> dict:
         "compact": True,
         "business": compact_rows("business"),
         "life": compact_rows("life"),
+        # 星座是独立小条目（非 event），原样带过 compact，不参与 item 裁剪。
+        "horoscope": data.get("horoscope"),
         "items": items,
         "mail": compact_rows("mail", cap=8),
         "x": compact_rows("x", cap=8),
