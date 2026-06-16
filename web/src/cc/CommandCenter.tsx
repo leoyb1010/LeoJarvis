@@ -646,8 +646,9 @@ function Intel() {
     return () => { live = false; clearInterval(t); };
   }, []);
 
-  const items: BriefItem[] = Array.isArray(brief?.items) ? brief!.items! : [];
-  const total = (typeof brief?.counts?.total === "number" ? brief!.counts!.total : items.length);
+  // 信号流只显示新闻/资讯/X 动态；GitHub 项目归到中间的"GitHub 雷达"专列，避免刷屏盖过新闻。
+  const items: BriefItem[] = (Array.isArray(brief?.items) ? brief!.items! : []).filter((it) => it.kind !== "github_repo" && it.kind !== "repo");
+  const total = items.length;
   // 优先级真实统计
   const countPri = (p: string) => items.filter((it) => (it.priority || "观察") === p).length;
   const nHigh = countPri("高优先"), nMid = countPri("中优先"), nWatch = items.length - nHigh - nMid;
@@ -691,7 +692,7 @@ function Intel() {
             {brief !== null && shown.length === 0 && <div style={{ ...mono(11), padding: "20px 0", textAlign: "center" }}>暂无{filter === "全部" ? "" : filter}信号</div>}
             {shown.map((it, i) => { const [pf, pb] = priStyle(it.priority); const time = tsToTime(it.ts); const id = it.event_id; return (
               <button key={id || i} onClick={() => { if (id) setSelectedId(id); }} className="cx-intel" style={{ textAlign: "left", width: "100%", border: 0, cursor: id ? "pointer" : "default", background: "transparent", padding: "13px 0", borderBottom: "1px solid #161b22", display: "grid", gap: 6 }}>
-                <div style={row(8)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "2px 8px" }}>{it.priority || "观察"}</span><span style={mono(10)}>{it.source || ""}{time ? ` · ${time}` : ""}</span><span style={flex1} />{typeof it.score === "number" && <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>评分 {it.score.toFixed(2)}</span>}</div>
+                <div style={row(8)}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "2px 8px" }}>{it.priority || "观察"}</span><span style={mono(10)}>{it.source || ""}{time ? ` · ${time}` : ""}</span>{(it as any).category && <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "#8b94a0", background: "rgba(255,255,255,.05)", borderRadius: 999, padding: "2px 7px" }}>{(it as any).category}</span>}<span style={flex1} />{typeof it.score === "number" && <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "#ff7a45" }}>评分 {it.score.toFixed(2)}</span>}</div>
                 <b style={{ font: "600 14px/1.4 'Space Grotesk',sans-serif", color: "#e8ecf1", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.title}</b>
                 {it.take && <p style={{ margin: 0, font: "400 12px/1.55 'Space Grotesk',sans-serif", color: "#8b94a0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.take}</p>}
               </button>

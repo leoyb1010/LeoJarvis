@@ -472,9 +472,10 @@ def _source_detail_from(row: dict, repo_name: str, repo_snapshot: dict, *, trans
         display, translated = _translate_source_detail(raw, allow_request=translate)
         return {"display": display, "raw": raw, "translated": translated}
     detail = _clean_source_detail(row.get("content"))
-    if len(detail) < 120:
+    if len(detail) < 400:
+        # 摘要太短时抓原文正文，保证"打开详情能看全信息"（受 _SOURCE_FETCH_BUDGET 约束，仅打开的这条）。
         fetched = _fetch_url_source_detail(row.get("url"))
-        if fetched:
+        if fetched and len(fetched) > len(detail):
             detail = fetched
     display, translated = _translate_source_detail(detail, allow_request=translate)
     return {"display": display, "raw": detail, "translated": translated}

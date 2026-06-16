@@ -228,6 +228,72 @@ category = "科技"
 fulltext = false
 limit = 10
 
+# ---------- 军事 / 国防 ----------
+[[rss]]
+name = "War on the Rocks"
+url = "https://warontherocks.com/feed/"
+domain = "business"
+category = "军事"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "The War Zone"
+url = "https://www.twz.com/feed"
+domain = "business"
+category = "军事"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "Defense One"
+url = "https://www.defenseone.com/rss/all/"
+domain = "business"
+category = "军事"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "环球网 · 军事"
+url = "https://mil.huanqiu.com/rss"
+domain = "business"
+category = "军事"
+fulltext = false
+limit = 10
+
+# ---------- 财经 / 金融 ----------
+[[rss]]
+name = "华尔街见闻"
+url = "https://dedicated.wallstreetcn.com/rss.xml"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "MarketWatch"
+url = "http://feeds.marketwatch.com/marketwatch/topstories/"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "FT 中文网"
+url = "http://www.ftchinese.com/rss/news"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "CNBC · Top News"
+url = "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 10
+
 [[rss]]
 name = "阮一峰的网络日志"
 url = "https://www.ruanyifeng.com/blog/atom.xml"
