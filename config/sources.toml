@@ -115,6 +115,119 @@ category = "中文科技"
 fulltext = false
 limit = 10
 
+# ---------- 扩充：中文资讯 / 全球 AI 科技 ----------
+[[rss]]
+name = "Solidot 奇客资讯"
+url = "https://www.solidot.org/index.rss"
+domain = "business"
+category = "中文科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "机器之心"
+url = "https://www.jiqizhixin.com/rss"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "IT之家"
+url = "https://www.ithome.com/rss/"
+domain = "business"
+category = "中文科技"
+fulltext = false
+limit = 12
+
+[[rss]]
+name = "虎嗅"
+url = "https://www.huxiu.com/rss/0.xml"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "InfoQ 中文"
+url = "https://www.infoq.cn/feed"
+domain = "business"
+category = "开发"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "钛媒体"
+url = "https://www.tmtpost.com/rss.xml"
+domain = "business"
+category = "财经"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "Anthropic · News"
+url = "https://www.anthropic.com/rss.xml"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "Hugging Face Blog"
+url = "https://huggingface.co/blog/feed.xml"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 8
+
+[[rss]]
+name = "Latent Space"
+url = "https://www.latent.space/feed"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 8
+
+[[rss]]
+name = "Import AI"
+url = "https://importai.substack.com/feed"
+domain = "business"
+category = "AI科技"
+fulltext = false
+limit = 8
+
+[[rss]]
+name = "Ars Technica"
+url = "https://feeds.arstechnica.com/arstechnica/index"
+domain = "business"
+category = "科技"
+fulltext = false
+limit = 10
+
+[[rss]]
+name = "MIT Technology Review"
+url = "https://www.technologyreview.com/feed/"
+domain = "business"
+category = "科技"
+fulltext = false
+limit = 8
+
+[[rss]]
+name = "GitHub Blog"
+url = "https://github.blog/feed/"
+domain = "business"
+category = "开发"
+fulltext = false
+limit = 8
+
+[[rss]]
+name = "The Register"
+url = "https://www.theregister.com/headlines.atom"
+domain = "business"
+category = "科技"
+fulltext = false
+limit = 10
+
 [[rss]]
 name = "阮一峰的网络日志"
 url = "https://www.ruanyifeng.com/blog/atom.xml"

@@ -18,12 +18,19 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI.sub("", s or "")
 
 # 每个 provider 的声明式规格。run 里的 "{prompt}" 在调用时替换为用户输入。
 _SPECS: list[dict[str, Any]] = [
@@ -167,10 +174,12 @@ def run_agent(name: str, prompt: str, cwd: str | None = None, timeout: int = 120
     if not prompt or not prompt.strip():
         return {"ok": False, "error": "prompt 为空"}
     argv = [binpath] + [a.replace("{prompt}", prompt) for a in spec["run"]]
+    # 用登录 shell 继承用户完整环境（代理/认证/PATH），保证 launchd 服务里也能真正驱动。
+    shell_argv = ["/bin/zsh", "-lc", " ".join(shlex.quote(x) for x in argv)]
     started = time.time()
     try:
         r = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout,
+            shell_argv, capture_output=True, text=True, timeout=timeout,
             cwd=_expand(cwd) if cwd else None,
             stdin=subprocess.DEVNULL,  # 非交互：别让 agent 卡在等待 stdin（codex exec 会读 stdin）
         )
@@ -203,7 +212,9 @@ def spawn_cli_agent(name: str, prompt: str, cwd: str | None = None) -> dict:
     if not prompt or not prompt.strip():
         return {"ok": False, "error": "prompt 为空"}
     args = [a.replace("{prompt}", prompt) for a in spec["run"]]
-    command = " ".join(shlex.quote(x) for x in [binpath, *args])
+    inner = " ".join(shlex.quote(x) for x in [binpath, *args])
+    # 用登录 shell 继承用户完整环境（代理/认证/PATH）——launchd 的精简环境跑不通模型调用。
+    command = f"zsh -lc {shlex.quote(inner)}"
     from . import agents_ctrl
     row = agents_ctrl.spawn(spec["display"], command, cwd=cwd,
                             meta={"kind": "cli-agent", "agent": name, "prompt": prompt[:240]})
@@ -221,7 +232,7 @@ def cli_sessions(output_lines: int = 60) -> list[dict]:
             "id": r["id"], "agent": r.get("agent"), "name": r.get("name"),
             "prompt": r.get("prompt", ""), "status": r["status"],
             "started": r.get("started"), "pid": r.get("pid"),
-            "output": agents_ctrl.agent_log(r["id"], output_lines),
+            "output": _strip_ansi(agents_ctrl.agent_log(r["id"], output_lines)),
         })
     out.sort(key=lambda x: x.get("started") or 0, reverse=True)
     return out

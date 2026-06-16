@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import httpx
 import feedparser
 import trafilatura
@@ -88,16 +90,25 @@ class RSSCollector(Collector):
     name = "rss"
 
     def collect(self) -> list[RawItem]:
+        feeds = _all_feeds()
+        if not feeds:
+            return []
+        # 并行抓取所有源：14+ 个源不再串行累加，总耗时≈最慢一个源，大幅提速。
+        with ThreadPoolExecutor(max_workers=min(16, len(feeds))) as ex:
+            batches = list(ex.map(self._fetch_feed, feeds))
+        items: list[RawItem] = []
+        for b in batches:
+            items.extend(b)
+        return items
+
+    def _fetch_feed(self, feed: dict) -> list[RawItem]:
         items: list[RawItem] = []
         timeout = httpx.Timeout(8.0, connect=4.0)
-        with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False) as client:
-            for feed in _all_feeds():
-                try:
-                    res = client.get(feed["url"])
-                    res.raise_for_status()
-                    parsed = feedparser.parse(res.content)
-                except Exception:
-                    continue
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False) as client:
+                res = client.get(feed["url"])
+                res.raise_for_status()
+                parsed = feedparser.parse(res.content)
                 for entry in parsed.entries[: int(feed.get("limit", 15))]:
                     content = getattr(entry, "summary", "") or ""
                     link = getattr(entry, "link", "") or ""
@@ -127,4 +138,6 @@ class RSSCollector(Collector):
                             **(feed.get("meta") or {}),
                         },
                     ))
+        except Exception:
+            return items
         return items
