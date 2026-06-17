@@ -104,6 +104,30 @@ def _pid_map() -> dict[str, int]:
         return {}
 
 
+# 通知 id / 中文名 → 真实可打开目标（app 走 open -a，web 走 open <url>）。
+# 解决「点图标打不开（本机邮件→其实是 Mail、Gmail 是网页）」的真实路由问题。
+_APP_ROUTE: dict[str, dict[str, str]] = {
+    "wechat": {"app": "WeChat"}, "微信": {"app": "WeChat"},
+    "popo": {"app": "POPO"},
+    "telegram": {"app": "Telegram"},
+    "mailmaster": {"app": "网易邮箱大师"}, "网易邮箱大师": {"app": "网易邮箱大师"},
+    "mail": {"app": "Mail"}, "本机邮件": {"app": "Mail"},
+    "gmail": {"url": "https://mail.google.com/mail/u/0/"},
+}
+
+
+def open_routed(key: str) -> dict:
+    """按已知 id/名路由到真实 app 或 URL 打开；未知则当 app 名直接 open。"""
+    route = _APP_ROUTE.get((key or "").strip()) or _APP_ROUTE.get((key or "").strip().lower())
+    if route and route.get("url"):
+        try:
+            r = _run(["open", route["url"]])
+            return {"ok": r.returncode == 0, "opened": route["url"]}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    return open_app((route or {}).get("app") or key)
+
+
 def open_app(name: str) -> dict:
     """打开应用：open -a "<name>"。改系统状态（需闸门确认）。"""
     n = _safe_name(name)

@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -75,6 +76,20 @@ _SPECS: list[dict[str, Any]] = [
         "run": ["run", "{prompt}"], "run_supported": "best-effort",
         "auth": ["~/.local/share/opencode", "~/.config/opencode"],
         "docs": "opencode · opencode run <prompt>",
+    },
+    {
+        "name": "hermes", "display": "Hermes Agent",
+        "bins": ["hermes", "hermes-agent"], "extra_paths": ["~/.local/bin", "~/.hermes/bin"],
+        "run": ["-z", "{prompt}"], "run_supported": "confirmed",
+        "auth": ["~/.hermes"], "gateway_port": 8642,
+        "docs": "Hermes Agent · hermes -z <prompt>（本机常驻网关 :8642）",
+    },
+    {
+        "name": "openclaw", "display": "OpenClaw",
+        "bins": ["openclaw"], "extra_paths": ["~/.local/bin"],
+        "run": ["agent", "{prompt}"], "run_supported": "best-effort",
+        "auth": ["~/.openclaw", "~/openclaw"], "gateway_port": 18789,
+        "docs": "OpenClaw · openclaw agent <prompt>（本机常驻网关 :18789）",
     },
 ]
 
@@ -209,9 +224,86 @@ def run_agent(name: str, prompt: str, cwd: str | None = None, timeout: int = 120
         return {"ok": False, "name": name, "error": str(exc), "argv": argv}
 
 
-def spawn_cli_agent(name: str, prompt: str, cwd: str | None = None) -> dict:
+# 各 agent 真实支持的「模型」清单（用于 /model 快捷菜单）+ 注入 CLI 的模型参数名。
+_AGENT_MODELS: dict[str, list[str]] = {
+    "claude": ["sonnet", "opus", "haiku", "opusplan", "sonnet[1m]", "opus[1m]"],
+    "codex": ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex", "o3", "o4-mini"],
+    "cursor": ["auto", "sonnet-4.5", "opus-4.5", "gpt-5.2", "gemini-3-pro", "composer-1"],
+    "grok": ["grok-4", "grok-4-fast", "grok-3"],
+}
+_MODEL_FLAG: dict[str, str] = {"claude": "--model", "codex": "--model", "cursor": "--model", "grok": "--model"}
+
+# 各 agent 的内建斜杠命令。只列「在非交互 -p 模式下真实生效」的：
+#   /model → 弹真实模型菜单，选中后注入 --model（实测有效）
+#   /clear → 清空当前会话视图（我们的控制命令）
+# 像 /cost /help /config 这类是 CLI 交互模式专属，-p 下会回 "isn't available"，故不列（避免假指令）。
+# 自定义命令（~/.claude/commands/*.md）是 prompt 展开，-p 下可用，由 _custom_commands 动态补。
+_BUILTIN_SLASH: dict[str, list[tuple[str, str, str]]] = {
+    "claude": [("/model", "切换模型（弹真实模型菜单）", "model"), ("/clear", "清空当前会话视图", "clear")],
+    "codex": [("/model", "切换模型", "model"), ("/clear", "清空视图", "clear")],
+    "cursor": [("/model", "切换模型", "model"), ("/clear", "清空视图", "clear")],
+    "grok": [("/model", "切换模型", "model"), ("/clear", "清空视图", "clear")],
+    "hermes": [("/clear", "清空视图", "clear")],
+    "openclaw": [("/clear", "清空视图", "clear")],
+}
+
+
+def _md_desc(text: str) -> str:
+    """从自定义命令 .md 的 frontmatter 或首行提取描述（同 cloudcli）。"""
+    body = text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            fm = text[3:end]
+            for line in fm.splitlines():
+                if line.strip().lower().startswith("description:"):
+                    return line.split(":", 1)[1].strip().strip('"').strip("'")
+            body = text[end + 4:]
+    for line in body.strip().splitlines():
+        s = line.strip()
+        if s:
+            return re.sub(r"^#+\s*", "", s)[:80]
+    return ""
+
+
+def _custom_commands() -> list[dict]:
+    """扫描 ~/.claude/commands 与 项目 .claude/commands 下的 .md 自定义命令（同 cloudcli）。"""
+    out: list[dict] = []
+    seen: set[str] = set()
+    dirs = [_expand("~/.claude/commands"), os.path.join(os.getcwd(), ".claude", "commands")]
+    for base in dirs:
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, files in os.walk(base):
+            for f in files:
+                if not f.endswith(".md"):
+                    continue
+                rel = os.path.relpath(os.path.join(root, f), base)
+                cmd = "/" + rel[:-3].replace(os.sep, ":")
+                if cmd in seen:
+                    continue
+                seen.add(cmd)
+                try:
+                    text = open(os.path.join(root, f), encoding="utf-8").read()
+                except Exception:  # noqa: BLE001
+                    text = ""
+                out.append({"cmd": cmd, "label": cmd[1:], "desc": _md_desc(text) or "自定义命令", "kind": "send", "custom": True})
+    return out
+
+
+def agent_commands(name: str) -> dict:
+    """某 agent 真实可用的斜杠命令（内建 + 自定义）+ 模型清单，供前端做 / 快捷菜单。"""
+    builtins = _BUILTIN_SLASH.get(name, [("/clear", "清空视图", "clear")])
+    cmds = [{"cmd": c, "label": c[1:], "desc": d, "kind": k} for (c, d, k) in builtins]
+    if name == "claude":  # 自定义命令目前主要是 Claude Code 体系
+        cmds += _custom_commands()
+    return {"ok": True, "agent": name, "commands": cmds, "models": _AGENT_MODELS.get(name, [])}
+
+
+def spawn_cli_agent(name: str, prompt: str, cwd: str | None = None, model: str | None = None) -> dict:
     """真实后台运行一个 CLI agent，输出流式写入日志，可在智能体页实时观察。
 
+    model：可选，给支持的 agent 注入 --model（来自 /model 快捷菜单）。
     返回会话 id；用 cli_sessions() 读实时状态与输出，stop_cli_session() 停止。
     """
     spec = _spec(name)
@@ -223,6 +315,8 @@ def spawn_cli_agent(name: str, prompt: str, cwd: str | None = None) -> dict:
     if not prompt or not prompt.strip():
         return {"ok": False, "error": "prompt 为空"}
     args = [a.replace("{prompt}", prompt) for a in spec["run"]]
+    if model and _MODEL_FLAG.get(name):
+        args = [_MODEL_FLAG[name], model, *args]  # /model 选的模型，注入到 CLI
     inner = " ".join(shlex.quote(x) for x in [binpath, *args])
     # 用登录 shell 继承用户完整环境（代理/认证/PATH）——launchd 的精简环境跑不通模型调用。
     command = f"zsh -lc {shlex.quote(inner)}"
@@ -252,3 +346,40 @@ def cli_sessions(output_lines: int = 60) -> list[dict]:
 def stop_cli_session(sid: str) -> dict:
     from . import agents_ctrl
     return {"ok": True, "message": agents_ctrl.stop_agent(sid)}
+
+
+def clear_finished_sessions() -> dict:
+    """清理已结束的 CLI agent 会话（运行中的保留）。"""
+    from . import agents_ctrl
+    return {"ok": True, "removed": agents_ctrl.remove_finished(kind="cli-agent")}
+
+
+def _port_alive(port: int, timeout: float = 0.3) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def external_running() -> list[dict]:
+    """探测本机已常驻运行的 agent 网关（Hermes :8642 / OpenClaw :18789 …）。
+
+    这些不是 cortex spawn 的会话，但用户视角它们就是"正在运行的 agent"——
+    编排页要把它们显示为运行中，运行计数才真实（解决"明明在用却显示 0 个运行"）。
+    """
+    out: list[dict] = []
+    for spec in _SPECS:
+        port = spec.get("gateway_port")
+        if not port:
+            continue
+        if _port_alive(int(port)):
+            out.append({
+                "agent": spec["name"],
+                "display": spec["display"],
+                "kind": "gateway",
+                "port": int(port),
+                "status": "running",
+                "docs": spec.get("docs", ""),
+            })
+    return out

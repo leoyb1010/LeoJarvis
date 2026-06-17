@@ -78,6 +78,16 @@ def list_agents() -> list[dict]:
     return rows
 
 
+def remove_finished(kind: str | None = None) -> int:
+    """从注册表移除已结束的会话（保留运行中的）。kind 限定只清某类（如 cli-agent）。返回清理条数。"""
+    rows = list_agents()  # 先刷新状态
+    keep = [r for r in rows if r.get("status") == "running" or (kind is not None and r.get("kind") != kind)]
+    removed = len(rows) - len(keep)
+    if removed:
+        _save(keep)
+    return removed
+
+
 def list_agents_text() -> str:
     rows = list_agents()
     if not rows:

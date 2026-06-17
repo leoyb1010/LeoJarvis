@@ -1,38 +1,125 @@
-/* Cortex · 指挥台 — command-center theme (ported pixel-faithfully from the design) */
+/* Cortex · 指挥台 — 主题系统：深/浅双模式 + 酒红强调色（CSS 变量驱动）。
+   组件里一律用 var(--xxx)，不再写死颜色；切换 data-theme 即整体换肤。 */
+
+:root, [data-theme="dark"] {
+  --bg: #0e1116;          /* 整体底色（较原 #0a0c10 提亮一档，不再死黑） */
+  --bg-2: #11151c;        /* 页面区底 */
+  --panel: #161b24;       /* 卡片 */
+  --panel-2: #1b212b;     /* 次级卡片 / 输入 */
+  --panel-3: #0f141b;     /* 终端/代码块底 */
+  --border: #242c38;
+  --border-soft: #1b222d;
+  --text: #e9edf2;
+  --text-dim: #9aa4b2;
+  --text-mute: #6b7480;
+  --accent: #c23b54;      /* 酒红 burgundy（深色模式下够亮） */
+  --accent-2: #d9536b;    /* hover / 高亮 */
+  --accent-soft: rgba(194,59,84,.14);
+  --accent-line: rgba(194,59,84,.5);
+  --good: #36d39a;
+  --warn: #ffb454;
+  --bad: #ff5d5d;
+  --info: #4da3ff;
+  --shadow: 0 18px 50px rgba(0,0,0,.5);
+  --scan: rgba(194,59,84,.16);  /* 扫描光带颜色（细、淡） */
+}
+
+[data-theme="light"] {
+  --bg: #eceef2;
+  --bg-2: #f4f5f8;
+  --panel: #ffffff;
+  --panel-2: #f6f7fa;
+  --panel-3: #0f141b;     /* 终端块在浅色下仍保持深底，便于读输出 */
+  --border: #dfe3ea;
+  --border-soft: #e9ecf1;
+  --text: #1a1e25;
+  --text-dim: #586273;
+  --text-mute: #8a94a2;
+  --accent: #a82740;      /* 浅底用更深的酒红，保证对比度 */
+  --accent-2: #c23b54;
+  --accent-soft: rgba(168,39,64,.10);
+  --accent-line: rgba(168,39,64,.45);
+  --good: #1aa179;
+  --warn: #c77f12;
+  --bad: #d83a3a;
+  --info: #2b7fd6;
+  --shadow: 0 18px 50px rgba(20,30,50,.12);
+  --scan: rgba(168,39,64,.10);
+}
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; padding: 0; height: 100%; }
 body {
-  background: #0a0c10;
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-wrap: pretty;
   overflow: hidden;
   font-family: 'Space Grotesk', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  transition: background .3s ease, color .3s ease;
 }
 #root { height: 100vh; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #232a33; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #2f3742; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-mute); }
 ::-webkit-scrollbar-track { background: transparent; }
-::placeholder { color: #5a626d; }
+::placeholder { color: var(--text-mute); }
 input, button, textarea { font-family: inherit; }
 
-@keyframes cxScan { 0% { transform: translateY(-100%); } 100% { transform: translateY(160%); } }
-@keyframes cxBreathe { 0%,100% { box-shadow: 0 0 0 0 rgba(54,211,154,.5); } 55% { box-shadow: 0 0 0 6px rgba(54,211,154,0); } }
+/* P5 扫描特效：光束更细、节奏更慢、更淡 —— 不再刺眼/挡视线。
+   原 cxScan 1.x 带宽且快；现走极淡细带、缓慢通过，仅作氛围。 */
+@keyframes cxScan { 0% { transform: translateY(-60%); opacity: 0; } 12%,88% { opacity: 1; } 100% { transform: translateY(420%); opacity: 0; } }
+@keyframes cxBreathe { 0%,100% { box-shadow: 0 0 0 0 rgba(54,211,154,.45); } 55% { box-shadow: 0 0 0 5px rgba(54,211,154,0); } }
 @keyframes cxBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
 @keyframes cxType { 0%,60%,100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 @keyframes cxPulse { 0%,100% { opacity: .5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
 @keyframes cxSweep { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 @keyframes cxGrid { 0% { background-position: 0 0; } 100% { background-position: 38px 38px; } }
-@keyframes cxGlow { 0%,100% { text-shadow: 0 0 10px rgba(255,122,69,.25); } 50% { text-shadow: 0 0 22px rgba(255,122,69,.6); } }
+@keyframes cxGlow { 0%,100% { text-shadow: 0 0 10px var(--accent-soft); } 50% { text-shadow: 0 0 20px var(--accent-line); } }
 @keyframes cxShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
 @keyframes cxRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes cxBar { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+@keyframes cxRadar { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+/* 首页重构 design 稿用到的关键帧 */
+@keyframes cxSpin { to { transform: rotate(360deg); } }
+@keyframes cxSpinR { to { transform: rotate(-360deg); } }
+@keyframes cxPing { 0% { transform: scale(.75); opacity: .7; } 100% { transform: scale(1.45); opacity: 0; } }
+@keyframes cxCorePulse { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 14px rgba(194,59,84,.45)); } 50% { transform: scale(1.035); filter: drop-shadow(0 0 26px rgba(194,59,84,.7)); } }
+@keyframes cxRiseL { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes cxGridDrift { 0% { background-position: 0 0,0 0,0 0; } 100% { background-position: 0 0,46px 46px,46px 46px; } }
+@keyframes cxGlowText { 0%,100% { text-shadow: 0 0 12px rgba(194,59,84,.25); } 50% { text-shadow: 0 0 22px rgba(194,59,84,.6); } }
+@keyframes cxSheen { 0% { transform: translateX(-130%); } 55%,100% { transform: translateX(340%); } }
+@keyframes cxProg { 0% { width: 0%; } 100% { width: 100%; } }
+@keyframes cxFeedIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes cxNew { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
-/* hover utilities (ported from style-hover holes in the design) */
+/* 极细扫描线（hairline）：只剩 2px 发光线，缓慢通过，绝不挡内容。 */
+.cx-scanline { position: absolute; left: 0; right: 0; height: 2px; pointer-events: none; z-index: 5;
+  background: linear-gradient(90deg, transparent, var(--accent-line), transparent);
+  box-shadow: 0 0 8px var(--accent-soft);
+  animation: cxScan 11s linear infinite; opacity: .55; }
+
 .cx-chip { transition: all .16s; }
-.cx-chip:hover { border-color: #ff7a45 !important; color: #e8ecf1 !important; }
-.cx-link:hover { opacity: .82; }
-.cx-intel:hover { opacity: .78; }
-.cx-dash:hover { border-color: #ff7a45 !important; color: #ff7a45 !important; }
+.cx-chip:hover { border-color: var(--accent) !important; color: var(--text) !important; transform: translateY(-1px); }
+.cx-link { transition: opacity .16s, color .16s; }
+.cx-link:hover { opacity: .82; color: var(--accent-2); }
+.cx-intel { transition: background .16s, border-color .16s, transform .16s; }
+.cx-intel:hover { background: var(--accent-soft); }
+.cx-dash:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
 .cx-nav { transition: all .18s; }
+.cx-nav:hover { transform: scale(1.05); color: var(--text-dim); }
 .cx-page { animation: cxRise .3s ease both; }
+
+/* R9 动效：信号流条目入场 + 悬停揭示，列表行悬停，图标缩放，卡片抬升 */
+@keyframes cxFeedIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+.cx-feed { animation: cxFeedIn .36s ease both; transition: background .16s, padding-left .16s; }
+.cx-feed:hover { background: var(--accent-soft); padding-left: 12px; }
+.cx-feed:hover .cx-feed-cta { opacity: 1 !important; }
+.cx-row { transition: background .15s, border-color .15s, transform .15s; }
+.cx-row:hover { background: var(--accent-soft) !important; border-color: var(--accent) !important; transform: translateX(2px); }
+.cx-app { transition: transform .15s ease; }
+.cx-app:hover { transform: scale(1.09) translateY(-1px); }
+.cx-lift { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.cx-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--accent) !important; }
+@keyframes cxPop { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+.cx-pop-in { animation: cxPop .22s cubic-bezier(.34,1.56,.64,1) both; }

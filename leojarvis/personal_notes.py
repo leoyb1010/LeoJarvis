@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import db
-from .config import DATA_DIR
+from .config import DATA_DIR, LEGACY_DATA_DIR
 from .localize import to_chinese
 
 _SENSITIVE_PATTERNS = [
@@ -477,13 +477,15 @@ def attachment_path(attachment: dict) -> Path | None:
     if not raw:
         return None
     path = Path(raw).resolve()
-    attachment_root = (DATA_DIR / "attachments").resolve()
-    if attachment_root not in path.parents:
+    # 容忍新旧两个 attachments 根：数据目录搬到 Application Support 后，DB 里历史绝对路径
+    # 仍指向旧位（仓库内 data/attachments），文件也还在那（迁移是复制不删），照样能解析。
+    roots = [(DATA_DIR / "attachments").resolve(), (LEGACY_DATA_DIR / "attachments").resolve()]
+    if not any(r in path.parents for r in roots):
         return None
     return path if path.exists() else None
 
 
-def import_url(url: str) -> dict:
+def import_url(url: str, notebook: str = "") -> dict:
     import httpx
     import trafilatura
 
@@ -513,13 +515,14 @@ def import_url(url: str) -> dict:
         "source": "link_import",
         "source_url": cleaned_url,
         "source_title": raw_title,
-        "import_meta": {"kind": "url", "domain": urlparse(cleaned_url).netloc},
+        "project_name": (notebook or "").strip(),
+        "import_meta": {"kind": "url", "domain": urlparse(cleaned_url).netloc, "role": "source"},
     })
     return note
 
 
 def attach_file(*, file_name: str, mime_type: str = "", data_base64: str = "",
-                note_id: str | None = None, text_content: str = "") -> dict:
+                note_id: str | None = None, text_content: str = "", notebook: str = "") -> dict:
     if not file_name.strip():
         raise ValueError("file_name is required")
     now = db.now_ms()
@@ -555,7 +558,8 @@ def attach_file(*, file_name: str, mime_type: str = "", data_base64: str = "",
             "tags": ["附件导入", safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else "文件"],
             "source": "attachment_import",
             "source_title": safe_name,
-            "import_meta": {"kind": "attachment", "mime_type": mime_type, "size": len(raw)},
+            "project_name": (notebook or "").strip(),
+            "import_meta": {"kind": "attachment", "mime_type": mime_type, "size": len(raw), "role": "source"},
         })
         note_id = note["id"]
     with db.conn() as c:

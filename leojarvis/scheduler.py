@@ -165,6 +165,19 @@ def run_maintenance() -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+async def run_heartbeat() -> None:
+    """把本机设备摘要写进 device_heartbeats —— 舰队页 / 远程只读状态的数据源。
+
+    每台 Mac 定时登记自己「此刻的健康摘要」（只读快照，不含命令输出/个人数据）。
+    多设备同步上线后，这张表会随同步面汇总，舰队页即可列出你所有 Mac。
+    """
+    try:
+        from .agent import sysinfo
+        db.upsert_device_heartbeat(sysinfo.device_summary())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[heartbeat] failed: {exc}")
+
+
 def setup_scheduler() -> AsyncIOScheduler:
     cfg = user_settings.effective("schedule")
     intel_cfg = user_settings.effective("intelligence")
@@ -193,4 +206,8 @@ def setup_scheduler() -> AsyncIOScheduler:
                   replace_existing=True, misfire_grace_time=3600, coalesce=True)
     sched.add_job(run_maintenance, "date", id="maintenance_boot",
                   run_date=datetime.now() + timedelta(seconds=60), replace_existing=True)
+    # 设备心跳：每 60s 登记本机摘要（舰队页据此判在线/离线），启动后 ~8s 先跑一次。
+    sched.add_job(run_heartbeat, "interval", seconds=60, id="heartbeat", replace_existing=True)
+    sched.add_job(run_heartbeat, "date", id="heartbeat_boot",
+                  run_date=datetime.now() + timedelta(seconds=8), replace_existing=True)
     return sched

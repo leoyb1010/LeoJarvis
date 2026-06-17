@@ -35,3 +35,4 @@ xcuserdata/
 
 # 含真实密钥，不入库
 config/models.toml
+config/settings.toml

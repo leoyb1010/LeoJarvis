@@ -22,13 +22,11 @@ _DEFAULTS = {
 }
 
 _PORT_ALIASES = {
-    8787: ("leojarvis", "LeoJarvis 本地中枢服务"),
-    11434: ("ollama", "Ollama 本地大模型运行时"),
-    8080: ("leoapi", "个人 API 网关 / 自建后端服务"),
-    3000: ("leonote", "个人记事 / 知识沉淀服务"),
-    3210: ("leomoney", "个人资产与财务情报服务"),
-    5173: ("web-preview", "前端开发预览服务"),
-    4173: ("web-preview", "前端构建预览服务"),
+    8787: ("leojarvis", "LeoJarvis 指挥台"),
+    8642: ("hermes", "Hermes Agent 网关"),
+    18789: ("openclaw", "OpenClaw 网关"),
+    5173: ("web-preview", "前端开发预览"),
+    4173: ("web-preview", "前端构建预览"),
 }
 
 _NOISY_COMMANDS = {
@@ -70,17 +68,26 @@ _PROJECT_MARKERS = (
 )
 
 _PROJECT_DESCS = {
-    "leojarvis": "LeoJarvis 本地中枢服务",
-    "leonote": "个人记事 / 知识沉淀服务",
-    "leomoney": "个人资产与财务情报服务",
-    "leoapi": "个人 API 网关 / 自建后端服务",
-    "openclaw": "OpenClaw 本地 Agent 网关",
-    "hermes-agent": "Hermes Agent 本地网关 / 控制台",
-    "agent-studio": "Agent Studio 本地服务",
-    "growth-system": "Growth System 本地服务",
-    "chinabridge": "ChinaBridge 本地服务",
-    "cloudcli": "CloudCLI 本地服务",
-    "claude-code-ui": "Claude Code UI 插件服务",
+    "leojarvis": "LeoJarvis 指挥台",
+    "openclaw": "OpenClaw 网关",
+    "hermes": "Hermes Agent 网关",
+    "hermes-agent": "Hermes Agent 网关",
+    "agent-studio": "Agent Studio",
+    "growth-system": "Growth System",
+    "chinabridge": "ChinaBridge",
+    "cloudcli": "CloudCLI",
+    "claude-code-ui": "Claude Code UI",
+    "cliproxyapi": "CLI 代理 (cli-proxy-api)",
+    "cli-proxy-api": "CLI 代理 (cli-proxy-api)",
+    "clash-verge": "Clash 网络代理",
+    "cloudflared": "Cloudflare 隧道",
+    "m5stack-stackchan": "StackChan 桌面机器人",
+    "stackchan": "StackChan 桌面机器人",
+    "workbuddy": "WorkBuddy",
+    "ardot": "Ardot",
+    "tailscaled": "Tailscale 组网",
+    "codex": "Codex CLI",
+    "grok": "Grok CLI",
 }
 
 
@@ -553,16 +560,34 @@ def _normalize_launchd_label(label: str) -> str:
     return head
 
 
-def _display_name(name: str, command: str, configs: dict) -> str:
-    """中文显示名：配置/别名表有就用，否则退回进程名。"""
+def _humanize_service(name: str, command: str, port: int) -> str:
+    """把进程名 / 带哈希日期的内部名，清成人一看就懂的标签。"""
+    raw = (name or "").strip().lstrip(".")
+    base = re.sub(r"^(builtin|app|com|ai|local|org)[-_.]", "", raw)
+    base = re.sub(r"[-_](\d{4}-\d{2}-\d{2}|\d{8}|[0-9a-f]{6,})$", "", base)
+    base = base.replace("_", " ").replace("-", " ").replace(".", " ").strip()
+    low = base.lower()
+    generic = {"python", "python3", "electron", "node", "java", "ruby", "port", ""}
+    if base and not re.fullmatch(r"port\s*\d+", low) and low not in generic:
+        key = low.replace(" ", "-")
+        if key in _PROJECT_DESCS:
+            return _PROJECT_DESCS[key]
+        return base if not base.isascii() else base.title()
+    proc = (command or "").strip()
+    if proc and proc.lower() not in generic:
+        return _PROJECT_DESCS.get(proc.lower(), proc.title() if proc.isascii() else proc)
+    return f"本机服务 :{port}"
+
+
+def _display_name(name: str, command: str, configs: dict, port: int = 0) -> str:
+    """中文显示名：配置/别名表有就用，否则清洗成可读名（不再裸露进程名）。"""
     cfg = configs.get(name) or {}
     desc = cfg.get("display") or cfg.get("desc")
     if desc:
         return str(desc)
     if name in _PROJECT_DESCS:
         return _PROJECT_DESCS[name]
-    # _PORT_ALIASES 第二项是中文描述
-    return command or name
+    return _humanize_service(name, command, port)
 
 
 def _start_cmd(name: str, configs: dict) -> str | None:
@@ -692,7 +717,7 @@ def discover_services() -> list[dict]:
 
     # ---- 填中文显示名 ----
     for s in services_list:
-        s["display"] = _display_name(s["name"], s["process"], configs)
+        s["display"] = _display_name(s["name"], s["process"], configs, int(s.get("port") or 0))
     # 排序：对外暴露优先 -> 在线优先 -> 有端口优先 -> 名字
     services_list.sort(key=lambda s: (
         not s.get("exposed"),

@@ -481,6 +481,24 @@ def _source_detail_from(row: dict, repo_name: str, repo_snapshot: dict, *, trans
     return {"display": display, "raw": detail, "translated": translated}
 
 
+def _published_ts(meta: dict, fallback_ts: Any) -> int:
+    """把 RSS 的 published 字符串解析成毫秒时间戳，作为情报的『发布时间』。
+    信号流按它排序（最新滚动在最前），解析不了再用入库时间兜底。"""
+    raw = meta.get("published") if isinstance(meta, dict) else None
+    if raw:
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(str(raw))
+            if dt is not None:
+                return int(dt.timestamp() * 1000)
+        except Exception:  # noqa: BLE001 —— 各种奇葩日期格式，解析失败就兜底
+            pass
+    try:
+        return int(fallback_ts or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict] | None = None, *, translate_source_detail: bool = False) -> dict:
     meta = _loads(row.get("meta"), {})
     reasons = _loads(row.get("reasons"), [])
@@ -567,7 +585,8 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         "relation": relation,
         "next_step": next_step,
         "tags": item_tags,
-        "ts": row.get("ts"),
+        "ts": _published_ts(meta, row.get("ts")),
+        "ingested_ts": row.get("ts"),
         "repo_stars": (repo_snapshot.get("stars") or meta.get("stars")) if _is_github(row) else None,
         "repo_speed": (repo_snapshot.get("stars_per_day") or velocity.get("stars_per_day")) if _is_github(row) else None,
         "channel": "x_monitor" if _is_x(row) else ("mail" if _is_email(row) else meta.get("channel")),
@@ -778,11 +797,55 @@ def life_horoscope(date: str | None = None) -> dict:
     }
 
 
+# 用户在 sources.toml 明确配置的分类 = 明确想看的新闻品类。判官按个人画像
+# （偏 AI/科技）可能把外语军事/财经判成 ignore，导致简报里整类消失。这里在
+# 简报层给这些分类保底：每类至少补到下限（按当日分数取最好的），不触碰判官逻辑。
+_CATEGORY_FLOORS = {"军事": 8, "财经": 8, "科技": 6, "AI科技": 10, "中文科技": 8}
+_FLOOR_COLS = (
+    "e.id AS event_id, e.title, e.content, e.url, e.domain, e.source, e.kind, e.meta, "
+    "j.score, j.take, j.triage, j.reasons, j.analysis, j.ts"
+)
+
+
+def _supplement_category_floor(c, rows: list, since: int) -> list:
+    """分类保底：把用户配置的新闻品类补到下限，避免单一品类（AI/GitHub）刷屏、
+    其它品类整类消失。只新增、不删除已选条目；补进来的低分项后续会被排成「观察」。"""
+    out = list(rows)
+    have = {r["event_id"] for r in out}
+    present: Counter = Counter()
+    for r in out:
+        meta = _loads(r["meta"], {}) if isinstance(r["meta"], str) else (r["meta"] or {})
+        cat = meta.get("category") if isinstance(meta, dict) else None
+        if cat:
+            present[cat] += 1
+    for cat, floor in _CATEGORY_FLOORS.items():
+        deficit = floor - present.get(cat, 0)
+        if deficit <= 0:
+            continue
+        cand = c.execute(
+            f"SELECT {_FLOOR_COLS} FROM judgments j JOIN events e ON e.id=j.event_id "
+            "WHERE j.ts>=? AND json_extract(e.meta,'$.category')=? AND e.kind!='github_repo' "
+            "ORDER BY j.score DESC, j.ts DESC LIMIT ?",
+            (since, cat, floor * 4),
+        ).fetchall()
+        for row in cand:
+            if row["event_id"] in have:
+                continue
+            have.add(row["event_id"])
+            out.append(row)
+            deficit -= 1
+            if deficit <= 0:
+                break
+    return out
+
+
 def _build_today_raw() -> dict:
     global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
     _SOURCE_FETCH_BUDGET = 5
     _SOURCE_TRANSLATE_BUDGET = 0
-    since = int((time.time() - 24 * 3600) * 1000)
+    # 情报是「按发布时间滚动的最新流」，不再死卡 24 小时——给一个宽窗口（7 天），
+    # 真正的排序在 Python 里按 published 时间倒序（最新在最前），重要性只作次级信号。
+    since = int((time.time() - 7 * 24 * 3600) * 1000)
     with db.conn() as c:
         rows = c.execute(
             """
@@ -790,10 +853,11 @@ def _build_today_raw() -> dict:
                    j.score, j.take, j.triage, j.reasons, j.analysis, j.ts
             FROM judgments j JOIN events e ON e.id=j.event_id
             WHERE j.ts>=? AND j.triage IN ('notify','digest')
-            ORDER BY j.score DESC, j.ts DESC
+            ORDER BY e.ts DESC
             """,
             (since,),
         ).fetchall()
+        rows = _supplement_category_floor(c, rows, since)
 
     memories = _active_memory_snippets()
     try:
@@ -828,6 +892,9 @@ def _build_today_raw() -> dict:
     clustered_away -= len(items)
     duplicate_count += clustered_away
     _apply_priority_quota(items)
+    # 主排序：发布时间倒序（最新滚动在最前）。重要性只体现在优先级标签上，不左右顺序。
+    # GitHub 项目没有 published、且有独立版块，沉到最后不参与新闻流的时间排序。
+    items.sort(key=lambda it: (0 if it.get("kind") == "github_repo" else 1, it.get("ts") or 0), reverse=True)
 
     business = [it for it in items if it["domain"] == "business"]
     life = [it for it in items if it["domain"] == "life"]

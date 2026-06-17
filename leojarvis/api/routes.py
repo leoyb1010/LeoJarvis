@@ -183,6 +183,41 @@ def device_summary() -> dict:
     return sysinfo.device_summary()
 
 
+@router.get("/devices")
+def devices_list() -> dict:
+    """舰队：列出已登记的设备（含本机），标注在线/离线 + 是否当前设备。
+
+    数据源是 device_heartbeats（每台 Mac 定时登记自己的只读健康摘要）。当前为单机，
+    列表只有本机；多设备同步（F1）上线后，这张表随同步面汇总，这里就会列出你所有 Mac。
+    顺手清掉旧 remote_cortex 留下的 `rc-` 幽灵行（修历史「显示好几台、实际两台」的 bug）。
+    """
+    from ..agent import sysinfo
+    me = sysinfo.device_summary()
+    db.upsert_device_heartbeat(me)  # 确保本机始终在册、且是最新
+    cur = str(me.get("device_id") or "")
+    now = int(time.time())
+    out: list[dict] = []
+    for r in db.list_device_heartbeats(limit=100):
+        did = str(r.get("device_id") or "")
+        if did.startswith("rc-"):           # 旧远端连接幽灵 → 直接清理
+            db.delete_device_heartbeat(did)
+            continue
+        last = int(r.get("last_seen_ts") or 0)
+        r["online"] = (now - last) <= 120     # 2 分钟内有心跳算在线
+        r["is_current"] = did == cur
+        r["seen_ago_s"] = max(0, now - last)
+        out.append(r)
+    out.sort(key=lambda d: (not d.get("is_current"), not d.get("online"), -(d.get("last_seen_ts") or 0)))
+    return {"ok": True, "current": cur, "devices": out, "count": len(out)}
+
+
+@router.delete("/devices/{device_id}")
+def devices_delete(device_id: str) -> dict:
+    """从舰队移除一台设备（清它的心跳行）。本机会在下次心跳重新登记。"""
+    db.delete_device_heartbeat(device_id)
+    return {"ok": True}
+
+
 # ---------- Agent 中枢 ----------
 
 class ChatMessage(BaseModel):
@@ -356,26 +391,43 @@ class CliRunIn(BaseModel):
     name: str
     prompt: str
     cwd: str | None = None
+    model: str | None = None
 
 
 @router.post("/agents/cli/run")
 def agents_cli_run(req: CliRunIn) -> dict:
-    """真实后台运行一个本机 CLI agent（用户在智能体页主动发起即确认），输出流式写日志。"""
+    """真实后台运行一个本机 CLI agent（用户在智能体页主动发起即确认），输出流式写日志。
+    model：可选，/model 快捷菜单选的模型，注入到 CLI。"""
     from ..agent import cli_agents
-    return cli_agents.spawn_cli_agent(req.name, req.prompt, cwd=req.cwd)
+    return cli_agents.spawn_cli_agent(req.name, req.prompt, cwd=req.cwd, model=req.model)
 
 
 @router.get("/agents/cli/sessions")
 def agents_cli_sessions() -> dict:
-    """所有真实 CLI agent 会话及实时状态/输出（智能体页轮询此端点做真实流式观察）。"""
+    """所有真实 CLI agent 会话及实时状态/输出（智能体页轮询此端点做真实流式观察）。
+    external：本机已常驻运行的 agent 网关（Hermes/OpenClaw），用户视角的"运行中 agent"。"""
     from ..agent import cli_agents
-    return {"sessions": cli_agents.cli_sessions()}
+    return {"sessions": cli_agents.cli_sessions(), "external": cli_agents.external_running()}
 
 
 @router.post("/agents/cli/sessions/{sid}/stop")
 def agents_cli_session_stop(sid: str) -> dict:
     from ..agent import cli_agents
     return cli_agents.stop_cli_session(sid)
+
+
+@router.post("/agents/cli/clear-finished")
+def agents_cli_clear_finished() -> dict:
+    """清理已结束的 CLI agent 会话（运行中保留）。"""
+    from ..agent import cli_agents
+    return cli_agents.clear_finished_sessions()
+
+
+@router.get("/agents/cli/{name}/commands")
+def agents_cli_commands(name: str) -> dict:
+    """某 agent 真实可用的斜杠命令（内建 + 自定义）+ 模型清单，供前端 / 快捷菜单。"""
+    from ..agent import cli_agents
+    return cli_agents.agent_commands(name)
 
 
 @router.get("/agents/cli/{name}")
@@ -398,12 +450,55 @@ def horoscope_get(sign: str, date: str | None = None) -> dict:
     return horoscope.horoscope(sign, date)
 
 
+@router.get("/amap/config")
+def amap_config() -> dict:
+    """前端小地图初始化配置：JS key + 默认中心城市坐标（只读）。"""
+    from ..agent import amap
+    from ..config import settings
+    home_city = (settings().get("amap", {}) or {}).get("home_city", "北京")
+    center = None
+    if amap.configured():
+        g = amap.geocode(home_city)
+        if g.get("ok"):
+            center = g.get("location")
+    return {"configured": amap.configured(), "js_key": amap.js_key(),
+            "home_city": home_city, "center": center}
+
+
+@router.get("/amap/weather")
+def amap_weather(city: str = "北京") -> dict:
+    """城市天气（实况 + 预报，只读）。"""
+    from ..agent import amap
+    return amap.weather(city)
+
+
+@router.get("/amap/poi")
+def amap_poi(keywords: str, city: str | None = None, limit: int = 8) -> dict:
+    """POI 搜索（只读）。"""
+    from ..agent import amap
+    return amap.poi_search(keywords, city, limit)
+
+
 @router.get("/apps/running")
 def apps_running() -> dict:
     """当前运行的 GUI 应用列表（只读）。
-    open/quit/focus 不开裸 REST 写口，必须经 /agent/chat 的工具 + 行动闸门确认。"""
+    quit/focus 仍走 /agent/chat 工具 + 行动闸门；open 是用户在界面上主动点击的最温和动作，开直接口。"""
     from ..agent import app_manager
     return {"apps": app_manager.list_running_apps()}
+
+
+class AppOpenIn(BaseModel):
+    name: str
+
+
+@router.post("/apps/open")
+def apps_open(req: AppOpenIn) -> dict:
+    """打开一个本机应用 / 网页（按 id 真实路由）。用户在「应用与邮件」主动点击触发，仅 open。"""
+    from ..agent import app_manager
+    try:
+        return {"ok": True, "result": app_manager.open_routed(req.name)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
 
 
 @router.get("/cockpit/overview")
@@ -454,6 +549,7 @@ class PersonalNoteIn(BaseModel):
 
 class ImportUrlIn(BaseModel):
     url: str
+    notebook: str = ""
 
 
 class AttachmentImportIn(BaseModel):
@@ -462,10 +558,31 @@ class AttachmentImportIn(BaseModel):
     data_base64: str = ""
     text_content: str = ""
     note_id: str | None = None
+    notebook: str = ""
 
 
 class NoteTransformIn(BaseModel):
     template: str = "summary"
+
+
+# ── open-notebook 能力（笔记本 / 来源 / RAG 对话 / 工作室）──
+class NotebookChatIn(BaseModel):
+    notebook: str = ""
+    question: str
+    source_ids: list[str] = Field(default_factory=list)
+    history: list[dict] = Field(default_factory=list)
+
+
+class NotebookStudioIn(BaseModel):
+    notebook: str = ""
+    kind: str = "overview"
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class NotebookTextSourceIn(BaseModel):
+    notebook: str = ""
+    title: str = ""
+    text: str
 
 
 @router.get("/personal-notes")
@@ -523,7 +640,7 @@ def personal_note_delete(note_id: str) -> dict:
 @router.post("/personal-notes/import-url")
 def personal_note_import_url(req: ImportUrlIn) -> dict:
     from .. import personal_notes
-    return {"ok": True, "note": personal_notes.import_url(req.url)}
+    return {"ok": True, "note": personal_notes.import_url(req.url, notebook=req.notebook)}
 
 
 @router.post("/personal-notes/import-attachment")
@@ -535,7 +652,42 @@ def personal_note_import_attachment(req: AttachmentImportIn) -> dict:
         data_base64=req.data_base64,
         text_content=req.text_content,
         note_id=req.note_id,
+        notebook=req.notebook,
     )}
+
+
+# ── open-notebook：工作区 / 来源 / RAG 对话 / 工作室 ──
+@router.get("/notebook/workspace")
+def notebook_workspace(notebook: str = "") -> dict:
+    from .. import notebook as nb
+    return {"ok": True, **nb.list_workspace(notebook), "studio_templates": nb.studio_templates()}
+
+
+@router.post("/notebook/source-text")
+def notebook_source_text(req: NotebookTextSourceIn) -> dict:
+    from .. import notebook as nb
+    try:
+        return {"ok": True, "note": nb.add_text_source(req.notebook, req.title, req.text)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/notebook/chat")
+def notebook_chat(req: NotebookChatIn) -> dict:
+    from .. import notebook as nb
+    try:
+        return {"ok": True, **nb.notebook_chat(req.notebook, req.question, req.source_ids or None, req.history)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/notebook/studio")
+def notebook_studio(req: NotebookStudioIn) -> dict:
+    from .. import notebook as nb
+    try:
+        return {"ok": True, **nb.notebook_studio(req.notebook, req.kind, req.source_ids or None)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/personal-notes/attachments/{attachment_id}")
@@ -742,3 +894,88 @@ async def ws_notify(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         hub.disconnect(ws)
+
+
+@router.websocket("/ws/term")
+async def ws_term(ws: WebSocket):
+    """真实交互终端桥：浏览器 xterm.js ←→ PTY 里以交互模式运行的 agent。
+
+    首帧 {type:"start", agent, cwd, cols, rows} 起一个 PTY；之后：
+      - 浏览器键盘  → {type:"input", data} / 原始文本 / 二进制 → 写进 PTY
+      - {type:"resize", cols, rows}                         → 同步窗口大小
+      - PTY 输出（含 ANSI）                                   → 二进制帧回浏览器
+    这样 claude 的 /model、codex 的斜杠命令等**原生 TUI** 在这里完整执行。
+    """
+    import asyncio
+    import json as _json
+
+    from ..agent import pty_term
+
+    await ws.accept()
+    pid = None
+    fd = None
+    reader_task = None
+    try:
+        init = await ws.receive_json()
+        agent = str(init.get("agent", "claude"))
+        cols = int(init.get("cols", 120) or 120)
+        rows = int(init.get("rows", 32) or 32)
+        spawned = pty_term.spawn(agent, cwd=init.get("cwd") or "~", cols=cols, rows=rows)
+        if not spawned:
+            await ws.send_json({"type": "error", "msg": f"未知或不支持交互的 agent: {agent}"})
+            await ws.close()
+            return
+        pid, fd = spawned
+        loop = asyncio.get_event_loop()
+
+        async def pump() -> None:
+            # 在线程池里非阻塞 select PTY，把输出二进制帧回推浏览器
+            while True:
+                data = await loop.run_in_executor(None, pty_term.read_available, fd, 0.05)
+                if data is None:
+                    try:
+                        await ws.send_json({"type": "exit"})
+                    except Exception:
+                        pass
+                    return
+                if data:
+                    try:
+                        await ws.send_bytes(data)
+                    except Exception:
+                        return
+                else:
+                    await asyncio.sleep(0.01)
+
+        reader_task = asyncio.create_task(pump())
+
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if msg.get("bytes") is not None:
+                pty_term.write(fd, msg["bytes"])
+                continue
+            txt = msg.get("text")
+            if txt is None:
+                continue
+            obj = None
+            if txt[:1] == "{":
+                try:
+                    obj = _json.loads(txt)
+                except Exception:
+                    obj = None
+            if obj and obj.get("type") == "resize":
+                pty_term.set_winsize(fd, int(obj.get("rows", rows) or rows), int(obj.get("cols", cols) or cols))
+            elif obj and obj.get("type") == "input":
+                pty_term.write(fd, str(obj.get("data", "")).encode("utf-8", "ignore"))
+            else:
+                pty_term.write(fd, txt.encode("utf-8", "ignore"))
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if reader_task is not None:
+            reader_task.cancel()
+        if pid is not None and fd is not None:
+            pty_term.kill(pid, fd)

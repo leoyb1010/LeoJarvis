@@ -21,9 +21,13 @@ SHELL_AUTO_PREFIXES = {
 _GIT_WRITE = {"push", "commit", "reset", "rebase", "merge", "clean", "checkout", "stash", "rm"}
 _BREW_WRITE = {"install", "uninstall", "upgrade", "remove", "cleanup", "reinstall"}
 
-# 明确危险 → deny
+# 明确危险 → deny（硬拒，连「确认后执行」都不给——这些没有任何正当用途）
+# 注意：每条用 [^&|;] 限定在单段内，避免跨 `&&`/`;` 误伤（如 `rm -r foo && echo ~`）。
+# 只拦「整个家目录 / 根」，不拦 `rm -rf ~/子目录`（那种仍走 confirm）。
 SHELL_DENY = [
     re.compile(r"\brm\s+-rf\s+/(?:\s|$)"),
+    re.compile(r"\brm\b[^&|;]*\s-\w*r\w*\b[^&|;]*\s(?:~|\$HOME)(?:/?\s|/?$)", re.I),  # rm -r… ~ / $HOME（整个家目录）
+    re.compile(r"\brm\b[^&|;]*\s-\w*r\w*\b[^&|;]*\s/\*(?:\s|$)"),                       # rm -r… /*（根通配）
     re.compile(r":\(\)\s*\{.*\}\s*;"),       # fork bomb
     re.compile(r"\bmkfs\b"), re.compile(r"\bdd\b.*of=/dev/"),
     re.compile(r">\s*/dev/sd"), re.compile(r"\bshutdown\b"), re.compile(r"\breboot\b"),
@@ -62,6 +66,11 @@ TOOL_BASE_RISK = {
     "open_app": "confirm",
     "quit_app": "confirm",
     "focus_app": "confirm",
+    # 高德地图：只读查询，直接执行
+    "map_weather": "auto",
+    "map_search_poi": "auto",
+    "map_geocode": "auto",
+    "map_route": "auto",
 }
 
 

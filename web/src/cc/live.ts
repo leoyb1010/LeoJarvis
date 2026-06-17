@@ -18,14 +18,38 @@ async function jpost<T>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${path} ${r.status}`);
   return r.json();
 }
+async function jpatch<T>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(BASE + path, {
+    method: "PATCH",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return r.json();
+}
 
 // ---- CLI agent 编排（真实）----
 export type CliAgent = { name: string; display: string; installed: boolean; version: string | null; auth: string; run_supported: string };
 export type CliSession = { id: string; agent: string; name: string; prompt: string; status: string; started: number; pid: number; output: string };
+export type ExternalAgent = { agent: string; display: string; kind: string; port: number; status: string; docs?: string };
+export type CliCommand = { cmd: string; label: string; desc: string; kind: string };
 export const getCliAgents = () => jget<{ agents: CliAgent[] }>("/agents/cli");
-export const runCliAgent = (name: string, prompt: string, cwd?: string) => jpost<{ ok: boolean; id?: string; error?: string }>("/agents/cli/run", { name, prompt, cwd });
-export const getCliSessions = () => jget<{ sessions: CliSession[] }>("/agents/cli/sessions");
+export const getCliCommands = (agent: string) => jget<{ ok?: boolean; agent: string; commands: CliCommand[]; models: string[] }>(`/agents/cli/${encodeURIComponent(agent)}/commands`);
+export const runCliAgent = (name: string, prompt: string, cwd?: string, model?: string) => jpost<{ ok: boolean; id?: string; error?: string }>("/agents/cli/run", { name, prompt, cwd, model });
+export const getCliSessions = () => jget<{ sessions: CliSession[]; external?: ExternalAgent[] }>("/agents/cli/sessions");
 export const stopCliSession = (id: string) => jpost<{ ok: boolean }>(`/agents/cli/sessions/${id}/stop`);
+export const clearFinishedSessions = () => jpost<{ ok: boolean; removed: number }>("/agents/cli/clear-finished");
+
+// ---- 高德地图（真实）----
+export type AmapConfig = { configured: boolean; js_key: string; home_city: string; center: string | null };
+export type AmapWeather = { ok?: boolean; city?: string; weather?: string; temperature?: string; winddirection?: string; windpower?: string; humidity?: string; reporttime?: string; forecast?: { date: string; day: string; night: string; temp: string }[]; error?: string };
+export const getAmapConfig = () => jget<AmapConfig>("/amap/config");
+export const getAmapWeather = (city?: string) => jget<AmapWeather>(`/amap/weather${city ? `?city=${encodeURIComponent(city)}` : ""}`);
+
+// ---- 设置（真实读写）----
+export type Settings = Record<string, any>;
+export const getSettings = () => jget<Settings>("/settings");
+export const patchSettings = (settings: Settings) => jpatch<{ ok?: boolean } & Record<string, any>>("/settings", { settings });
 
 // ---- 系统 / 服务 ----
 // overview: { score, modules:[{ id, name, value, level, metrics:{ used_pct, load_pct, load_1, cores, ... } }], ... }
@@ -62,13 +86,53 @@ export type ChatReply = { reply?: string; steps?: ChatStep[]; pending_actions?: 
 export const agentChat = (messages: ChatMsg[]) => jpost<ChatReply>("/agent/chat", { messages });
 export const approveAction = (id: string, decision: "approve" | "reject") => jpost<ChatReply>("/agent/approve", { id, decision });
 
-// ---- 记事 / 通知 ----
-// notes: { ok, notes:[{ id, title, excerpt, created_ts, updated_ts, ... }], stats }
-export type PersonalNote = { id?: string; title?: string; excerpt?: string; content?: string; created_ts?: number; updated_ts?: number } & Record<string, any>;
-export const getNotes = () => jget<{ ok?: boolean; notes?: PersonalNote[]; stats?: any }>("/personal-notes");
+// ---- 记事（完整 CRUD + 链接导入 + 附件/图片）----
+export type PersonalNote = { id?: string; title?: string; excerpt?: string; content?: string; tags?: string[]; pinned?: boolean; favorite?: boolean; source?: string; source_url?: string; created_ts?: number; updated_ts?: number } & Record<string, any>;
+export type NoteAttachment = { id?: string; file_name?: string; mime_type?: string; size?: number } & Record<string, any>;
+export type NoteInput = { title?: string; content?: string; excerpt?: string; tags?: string[]; pinned?: boolean; favorite?: boolean; source?: string };
+export const getNotes = (q = "") => jget<{ ok?: boolean; notes?: PersonalNote[]; stats?: any }>(`/personal-notes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getNote = (id: string) => jget<{ ok?: boolean; note?: PersonalNote; revisions?: any[]; attachments?: NoteAttachment[] }>(`/personal-notes/${encodeURIComponent(id)}`);
+export const createNote = (note: NoteInput) => jpost<{ ok?: boolean; note?: PersonalNote }>("/personal-notes", note);
+export const updateNote = (id: string, note: NoteInput) => jpatch<{ ok?: boolean; note?: PersonalNote }>(`/personal-notes/${encodeURIComponent(id)}`, note);
+export const deleteNote = (id: string) => fetch(`${BASE}/personal-notes/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
+export const importNoteUrl = (url: string, notebook = "") => jpost<{ ok?: boolean; note?: PersonalNote }>("/personal-notes/import-url", { url, notebook });
+export const importNoteAttachment = (p: { file_name: string; mime_type?: string; data_base64?: string; text_content?: string; note_id?: string; notebook?: string }) => jpost<{ ok?: boolean; attachment?: NoteAttachment; note?: PersonalNote }>("/personal-notes/import-attachment", p);
+export const attachmentUrl = (id: string) => `${BASE}/personal-notes/attachments/${encodeURIComponent(id)}`;
+
+// ── open-notebook 能力（笔记本 / 来源 / RAG 对话 / 工作室）──
+export type NbSource = { id: string; title?: string; excerpt?: string; tags?: string[]; source?: string; source_url?: string; chars?: number; updated_ts?: number; pinned?: boolean };
+export type NbCitation = { n: number; note_id: string; title: string; snippet: string };
+export type StudioTpl = { id: string; label: string; tag: string };
+export type NbWorkspace = { ok?: boolean; notebook?: string; sources: NbSource[]; notes: NbSource[]; source_count: number; note_count: number; studio_templates: StudioTpl[] };
+export type NotebookMeta = { name: string; note_count?: number; source_count?: number; updated_ts?: number; tags?: { tag: string; count: number }[] };
+export const getNotebooks = () => jget<{ ok?: boolean; notebooks?: NotebookMeta[]; templates?: any[] }>("/personal-notes/notebooks");
+export const getNotebookWorkspace = (notebook = "") => jget<NbWorkspace>(`/notebook/workspace?notebook=${encodeURIComponent(notebook)}`);
+export const addNotebookText = (notebook: string, title: string, text: string) => jpost<{ ok?: boolean; note?: PersonalNote }>("/notebook/source-text", { notebook, title, text });
+export const notebookChat = (notebook: string, question: string, source_ids: string[] = [], history: { role: string; content: string }[] = []) =>
+  jpost<{ ok?: boolean; answer: string; citations: NbCitation[]; used_chunks: number; grounded: boolean }>("/notebook/chat", { notebook, question, source_ids, history });
+export const notebookStudio = (notebook: string, kind: string, source_ids: string[] = []) =>
+  jpost<{ ok?: boolean; note?: PersonalNote; kind?: string }>("/notebook/studio", { notebook, kind, source_ids });
+
+// ---- 设备 / 舰队（F2：本机登记心跳，列出所有设备只读状态）----
+export type FleetDevice = {
+  device_id: string; device_name?: string; host_name?: string; model?: string; role?: string;
+  online?: boolean; is_current?: boolean; seen_ago_s?: number; last_seen_ts?: number;
+  health?: number; status?: string;
+  metrics?: { cpu_load_pct?: number; ram_used_pct?: number; ram_total_gb?: number; ssd_used_pct?: number; ssd_free_gb?: number; battery_percent?: number; battery_plugged?: boolean };
+  services?: { online?: number; total?: number };
+  risks?: { level?: string; title?: string; detail?: string }[];
+} & Record<string, any>;
+export const getDevices = () => jget<{ ok?: boolean; current?: string; devices?: FleetDevice[]; count?: number }>("/devices");
+export const deleteDevice = (id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
+
+// ---- 星座运势（离线确定性）----
+export type Horoscope = { ok?: boolean; sign?: string; sign_en?: string; score?: number; level?: string; advice?: string; lucky_color?: string; lucky_number?: number; yi?: string[]; ji?: string[]; summary?: string } & Record<string, any>;
+export const getHoroscope = (sign: string) => jget<Horoscope>(`/horoscope/${encodeURIComponent(sign)}`);
+
 // notifications: { apps:[{ id, name, count, has_new, icon(base64 dataurl), ... }] }
 export type NotifApp = { id: string; name?: string; count?: number; has_new?: boolean; icon?: string } & Record<string, any>;
 export const getNotifications = () => jget<{ apps?: NotifApp[] } & Record<string, any>>("/system/notifications");
+export const openApp = (name: string) => jpost<{ ok: boolean; message?: string; error?: string }>("/apps/open", { name });
 
 // 顶部 header vitals：健康分 + CPU% + 在线/总服务数（一次组合）
 export type Vitals = { health: number | null; cpu: number | null; online: number; total: number };

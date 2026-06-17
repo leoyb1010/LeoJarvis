@@ -36,9 +36,10 @@ load_per_core = 2.5
 [services.leojarvis]
 port = 8787
 
-[services.ollama]
-port = 11434
-start = "ollama serve"
-
-[services.leoapi]
-port = 8080
+# 高德地图 Web 服务（地理编码 / POI / 天气 / 路线）+ 前端 JS 小地图。
+# js_key 可单独配 Web 端(JS API) 平台的 key；留空则复用下面这个 key。
+[amap]
+key = "your-amap-key-here"
+js_key = "your-amap-key-here"
+# 默认地图中心（城市名）。自然语言查询会临时改写中心。
+home_city = "深圳"
