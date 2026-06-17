@@ -625,31 +625,32 @@ function AppsWidget({ apps }: { apps: NotifApp[] }) {
 
 // ============ COCKPIT（P10 新布局）============
 // 中枢核心：旋转轨道 + 品牌核 + 均衡器（design 稿装饰中枢）
-function CoreOrb({ online }: { online: boolean }) {
+// 中枢核心（动态头像）—— 缩小 ~30%，点击即呼出 Jarvis 对话气泡。
+function CoreOrb({ online, onClick }: { online: boolean; onClick?: () => void }) {
   return (
-    <div style={{ position: "relative", display: "grid", placeItems: "center", animation: "cxRise .6s ease both" }}>
-      <div style={{ position: "relative", width: 216, height: 216, display: "grid", placeItems: "center" }}>
-        <div style={{ position: "absolute", width: 216, height: 216, borderRadius: "50%", border: "1px solid rgba(194,59,84,.18)", animation: "cxSpin 26s linear infinite" }} />
-        <div style={{ position: "absolute", width: 216, height: 216, animation: "cxSpin 26s linear infinite" }}><span style={{ position: "absolute", top: -3, left: "50%", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", transform: "translateX(-50%)", boxShadow: "0 0 8px var(--accent)" }} /></div>
-        <div style={{ position: "absolute", width: 174, height: 174, borderRadius: "50%", border: "1px dashed rgba(194,59,84,.28)", animation: "cxSpinR 18s linear infinite" }} />
-        <div style={{ position: "absolute", width: 138, height: 138, borderRadius: "50%", border: "1px solid rgba(194,59,84,.4)", animation: "cxPing 3.4s ease-out infinite" }} />
-        <div style={{ position: "relative", width: 110, height: 110, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%,#1d232e,#0f141b)", boxShadow: "inset 0 0 22px rgba(0,0,0,.6),0 0 0 1px var(--border)", animation: "cxCorePulse 4.5s ease infinite", overflow: "hidden" }}>
-          <img src={A("brand-mark.png")} alt="" style={{ width: 110, height: 110, objectFit: "cover", opacity: .92 }} />
+    <button onClick={onClick} title="点击和 Jarvis 对话" className="cx-orb" style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, animation: "cxRise .6s ease both", padding: 0, justifySelf: "center" }}>
+      <div style={{ position: "relative", width: 124, height: 124, display: "grid", placeItems: "center", flex: "none" }}>
+        <div style={{ position: "absolute", width: 124, height: 124, borderRadius: "50%", border: "1px solid rgba(194,59,84,.18)", animation: "cxSpin 26s linear infinite" }} />
+        <div style={{ position: "absolute", width: 124, height: 124, animation: "cxSpin 26s linear infinite" }}><span style={{ position: "absolute", top: -3, left: "50%", width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", transform: "translateX(-50%)", boxShadow: "0 0 8px var(--accent)" }} /></div>
+        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: "1px dashed rgba(194,59,84,.28)", animation: "cxSpinR 18s linear infinite" }} />
+        <div style={{ position: "absolute", width: 80, height: 80, borderRadius: "50%", border: "1px solid rgba(194,59,84,.4)", animation: "cxPing 3.4s ease-out infinite" }} />
+        <div className="cx-orb-core" style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%,#1d232e,#0f141b)", boxShadow: "inset 0 0 14px rgba(0,0,0,.6),0 0 0 1px var(--border)", animation: "cxCorePulse 4.5s ease infinite", overflow: "hidden" }}>
+          <img src={A("brand-mark.png")} alt="" style={{ width: 64, height: 64, objectFit: "cover", opacity: .92 }} />
           <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 120%,rgba(194,59,84,.4),transparent 60%)" }} />
         </div>
       </div>
-      <div style={{ position: "absolute", bottom: -2, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 18 }}>
-          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 3, height: "100%", background: "linear-gradient(#d9536b,var(--accent))", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` }} />)}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, flex: "none" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 2.5, height: 13 }}>
+          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 2.5, height: "100%", background: "linear-gradient(#d9536b,var(--accent))", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` }} />)}
         </div>
-        <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".18em", color: "var(--text-dim)" }}>{online ? "中枢在线 · 工具总线就绪" : "中枢连接中…"}</span>
+        <span style={{ ...row(4), font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--accent)", whiteSpace: "nowrap" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: online ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: online ? "0 0 5px var(--good)" : "none" }} />点我 · 和 Jarvis 对话</span>
       </div>
-    </div>
+    </button>
   );
 }
 
-// 中枢对话框（首页正中长方体）—— 直接和 Jarvis 对话，占据原 CoreOrb 的中心位
-function CenterChat() {
+// 中枢对话气泡 —— 点击动态头像呼出的浮层对话框（不再占首页固定版面）。
+function JarvisChat({ onClose }: { onClose: () => void }) {
   const greeting = "我是你的中枢 Jarvis。问本机状态、今日情报、天气路线，或让我跑个 agent、记一笔。";
   const tips = ["磁盘为什么满了", "今天高优先情报", "让 codex 看这个项目", "记一笔"];
   const [turns, setTurns] = useState<Turn[]>([{ kind: "assistant", text: greeting }]);
@@ -658,7 +659,9 @@ function CenterChat() {
   const [busy, setBusy] = useState(false);
   const [approving, setApproving] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [turns, busy]);
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80); const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   function appendReply(res: ChatReply | null | undefined) {
     const add: Turn[] = [];
     if (res?.steps && res.steps.length) add.push({ kind: "steps", steps: res.steps });
@@ -688,12 +691,14 @@ function CenterChat() {
   }
   const single = turns.length <= 1;
   return (
-    <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0, overflow: "hidden", position: "relative", animation: "cxRise .6s ease both", background: "linear-gradient(180deg,var(--panel),var(--panel-2))" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,.34)", display: "grid", placeItems: "start center", paddingTop: 84, animation: "cxFade .16s ease both" }}>
+      <div onClick={(e) => e.stopPropagation()} className="cx-pop-in" style={{ width: "min(580px,92vw)", height: "min(64vh,560px)", ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0, overflow: "hidden", position: "relative", background: "linear-gradient(180deg,var(--panel),var(--panel-2))", boxShadow: "var(--shadow)" }}>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}><span style={{ position: "absolute", top: 0, left: 0, width: "32%", height: "100%", background: "linear-gradient(90deg,transparent,rgba(194,59,84,.06),transparent)", animation: "cxSheen 7s ease-in-out infinite" }} /></div>
-      <div style={{ ...row(9), padding: "12px 15px 10px", borderBottom: "1px solid var(--border-soft)", position: "relative" }}>
+      <div style={{ ...row(9), padding: "12px 14px 11px", borderBottom: "1px solid var(--border-soft)", position: "relative" }}>
         <img src={A("brand-mark.png")} alt="" style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover", flex: "none" }} />
         <div style={{ minWidth: 0, flex: 1 }}><div style={{ font: "700 13.5px 'Space Grotesk',sans-serif", color: "var(--text)" }}>和 Jarvis 对话</div><div style={{ ...row(4), ...mono(8.5, "var(--good)") }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />中枢在线 · 工具总线就绪</div></div>
         <span style={{ font: "700 15px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>&gt;_</span>
+        <button onClick={onClose} title="关闭(Esc)" style={{ border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text-mute)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "grid", placeContent: "center", flex: "none" }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
       </div>
       <div ref={scrollRef} style={{ overflowY: "auto", minHeight: 0, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9, position: "relative" }}>
         {turns.map((tn, i) => {
@@ -707,8 +712,9 @@ function CenterChat() {
         {busy && <div style={{ alignSelf: "flex-start", ...mono(10, "var(--text-mute)") }}>中枢思考中…</div>}
       </div>
       <div style={{ ...row(8), padding: "10px 12px", borderTop: "1px solid var(--border-soft)", position: "relative" }}>
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(draft); }} placeholder="和 Jarvis 说点什么…" style={{ flex: 1, background: "var(--panel-3)", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 12px", color: "var(--text)", font: "500 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
+        <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(draft); }} placeholder="和 Jarvis 说点什么…" style={{ flex: 1, background: "var(--panel-3)", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 12px", color: "var(--text)", font: "500 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
         <button onClick={() => send(draft)} disabled={busy || !draft.trim()} style={{ border: 0, cursor: busy || !draft.trim() ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "8px 15px", borderRadius: 9, flex: "none", opacity: busy || !draft.trim() ? 0.5 : 1 }}>发送</button>
+      </div>
       </div>
     </div>
   );
@@ -784,6 +790,7 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
   const [horos, setHoros] = useState<Record<string, Horoscope>>({});
   const [now, setNow] = useState(new Date());
   const [leadIdx, setLeadIdx] = useState(0);  // 头条卡片在 Top3 重要消息间轮播
+  const [chatOpen, setChatOpen] = useState(false);  // 点动态头像呼出 Jarvis 对话气泡
   const [detailId, setDetailId] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<{ open: boolean; id?: string }>({ open: false });
 
@@ -837,72 +844,63 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
   const todoNotes = notes.filter((n) => Array.isArray(n.tags) && n.tags.some((t: string) => /待办|todo|日程/i.test(t)));
 
   return (
-    <div className="cx-page" style={{ position: "relative", height: "100%", display: "grid", gridTemplateRows: "auto 196px minmax(0,1fr)", gap: 16, padding: "18px 20px", minHeight: 0 }}>
+    <div className="cx-page" style={{ position: "relative", height: "100%", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 18, padding: "16px 20px", minHeight: 0 }}>
       <style>{"@keyframes cxSlideIn{from{transform:translateX(28px);opacity:.4}to{transform:translateX(0);opacity:1}}@keyframes cxFade{from{opacity:0}to{opacity:1}}"}</style>
 
       {/* ROW 1 — 中枢综述 / 核心 / 时间天气健康 */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 268px 240px", gap: 20, alignItems: "stretch" }}>
         <div style={{ animation: "cxRiseL .5s ease both", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
-          <div style={{ ...row(9), marginBottom: 10 }}>
-            <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".24em", color: "var(--accent)" }}>中枢综述</span>
-            <span style={{ font: "500 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--text-mute)" }}>{now.getFullYear()}.{pad(now.getMonth() + 1)}.{pad(now.getDate())}</span>
-            <span style={{ ...row(5), font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />已综合 {signalCount} 信号 · {totalUnread} 未读 · {svcOnline} 服务</span>
+          <div style={{ ...row(9), marginBottom: 4 }}>
+            <span style={{ font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".24em", color: "var(--accent)" }}>中枢综述</span>
+            <span style={{ font: "500 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--text-mute)" }}>{now.getFullYear()}.{pad(now.getMonth() + 1)}.{pad(now.getDate())}</span>
+            <span style={{ ...row(5), font: "500 9px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />已综合 {signalCount} 信号 · {totalUnread} 未读 · {svcOnline} 服务</span>
           </div>
-          <h1 style={{ margin: "0 0 8px", font: "600 27px/1.05 'Space Grotesk',sans-serif", letterSpacing: "-.02em", color: "var(--text)" }}>{greet}，Leo<span style={{ color: "var(--accent)", animation: "cxGlowText 4s ease infinite" }}>.</span></h1>
-          <div style={{ display: "grid", gap: 1, maxWidth: 760 }}>
+          <h1 style={{ margin: "0 0 3px", font: "600 21px/1.05 'Space Grotesk',sans-serif", letterSpacing: "-.02em", color: "var(--text)" }}>{greet}，Leo<span style={{ color: "var(--accent)", animation: "cxGlowText 4s ease infinite" }}>.</span></h1>
+          <div style={{ display: "grid", gap: 0, maxWidth: 760 }}>
             {briefLines.length === 0 && <div style={{ ...mono(11), padding: "4px 0" }}>正在综合今日情报…</div>}
             {briefLines.map((b) => (
-              <button key={b.idx} onClick={() => { if (b.id) setDetailId(b.id); }} className="cx-row" style={{ textAlign: "left", border: 0, background: "transparent", cursor: b.id ? "pointer" : "default", display: "flex", alignItems: "baseline", gap: 11, padding: "4px 9px", borderRadius: 9 }}>
-                <span style={{ font: "600 11px 'IBM Plex Mono',monospace", color: "var(--accent)", flex: "none", letterSpacing: ".04em" }}>{b.idx}</span>
-                <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", flex: "none" }} />
-                <span style={{ minWidth: 0 }}><b style={{ font: "600 12px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{b.topic}</b><span style={{ font: "400 11.5px/1.45 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}> — {b.detail}</span></span>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: b.tone, flex: "none", alignSelf: "center", boxShadow: `0 0 5px ${b.tone}` }} />
+              <button key={b.idx} onClick={() => { if (b.id) setDetailId(b.id); }} className="cx-row" title={`${b.topic} — ${b.detail}`} style={{ textAlign: "left", border: 0, background: "transparent", cursor: b.id ? "pointer" : "default", display: "flex", alignItems: "center", gap: 10, padding: "1px 8px", borderRadius: 6 }}>
+                <span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: "var(--accent)", flex: "none", letterSpacing: ".04em" }}>{b.idx}</span>
+                <span style={{ width: 1, height: 12, background: "var(--border)", flex: "none" }} />
+                <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.35 }}><b style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{b.topic}</b><span style={{ font: "400 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}> — {b.detail}</span></span>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: b.tone, flex: "none", boxShadow: `0 0 5px ${b.tone}` }} />
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 12 }}>
-            <button onClick={goIntel} className="cx-chip" style={{ border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 12.5px 'Space Grotesk'", padding: "9px 16px", borderRadius: 9, boxShadow: "0 6px 18px rgba(194,59,84,.28)" }}>读完整简报 →</button>
-            <button onClick={goAgents} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12.5px 'Space Grotesk'", padding: "9px 16px", borderRadius: 9 }}>看智能体 →</button>
-            <button onClick={() => goNotes()} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12.5px 'Space Grotesk'", padding: "9px 16px", borderRadius: 9 }}>＋ 记一笔</button>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
+            <button onClick={goIntel} className="cx-chip" style={{ border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "6px 13px", borderRadius: 8, boxShadow: "0 6px 18px rgba(194,59,84,.28)" }}>读完整简报 →</button>
+            <button onClick={goAgents} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12px 'Space Grotesk'", padding: "7px 14px", borderRadius: 8 }}>看智能体 →</button>
+            <button onClick={() => goNotes()} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12px 'Space Grotesk'", padding: "7px 14px", borderRadius: 8 }}>＋ 记一笔</button>
           </div>
-          {/* E1② 今日概览 stats —— 填补空白 + 强化「全系统简报」 */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 12, maxWidth: 760 }}>
-            {([["信号", String(signalCount), "var(--accent)"], ["未读", String(totalUnread), "#ff8a8a"], ["服务", `${svcOnline}/${services.length}`, "var(--good)"], ["运行 agent", String(runningNow), "var(--accent)"], ["磁盘", ssdPct != null ? `${ssdPct}%` : "—", "var(--warn)"], ["记事", String(notes.length), "var(--text-dim)"]] as [string, string, string][]).map(([label, val, c], i) => (
-              <div key={label} style={{ animation: `cxRise .5s ease both ${(i * 0.05).toFixed(2)}s`, display: "grid", gap: 2, background: "var(--panel)", border: "1px solid var(--border-soft)", borderRadius: 11, padding: "7px 15px", minWidth: 70 }}>
-                <span style={{ font: "700 18px 'Space Grotesk',sans-serif", color: c, lineHeight: 1 }}>{val}</span>
-                <span style={mono(8.5, "var(--text-mute)")}>{label}</span>
-              </div>
-            ))}
-          </div>
+          {/* 今日概览统计条已并入「综述」标注行 + 右栏 + 各面板，避免重复、压缩首屏高度 */}
         </div>
-        <CoreOrb online={svcOnline > 0} />
-        <div style={{ display: "grid", gap: 11, alignContent: "center", paddingRight: 18, animation: "cxRise .7s ease both" }}>
+        <CoreOrb online={svcOnline > 0} onClick={() => setChatOpen(true)} />
+        <div style={{ display: "grid", gap: 6, alignContent: "center", paddingRight: 18, animation: "cxRise .7s ease both" }}>
           <div style={{ textAlign: "right" }}>
-            <div style={{ font: "700 38px/1 'Space Grotesk',sans-serif", color: "var(--text)", letterSpacing: "-.01em" }}>{pad(now.getHours())}:{pad(now.getMinutes())}<span style={{ font: "600 16px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>:{pad(now.getSeconds())}</span></div>
-            <div style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", marginTop: 5 }}>{now.getMonth() + 1}月{now.getDate()}日 · {week} · {greet}</div>
+            <div style={{ font: "700 29px/1 'Space Grotesk',sans-serif", color: "var(--text)", letterSpacing: "-.01em" }}>{pad(now.getHours())}:{pad(now.getMinutes())}<span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>:{pad(now.getSeconds())}</span></div>
+            <div style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 · {week} · {greet}</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 9 }}>
-            <span style={{ fontSize: 24, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 18px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "深圳"} · {wx?.weather || "—"}</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
+            <span style={{ fontSize: 19, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 16px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "深圳"} · {wx?.weather || "—"}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
-            {["天秤", "双鱼", "双子"].map((s) => { const h = horos[s]; const sc = typeof h?.score === "number" ? h.score : null; const tn = sc == null ? "var(--text-mute)" : sc >= 75 ? "var(--good)" : sc >= 45 ? "var(--warn)" : "var(--bad)"; return <span key={s} title={h?.advice || ""} style={{ ...row(4), font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: tn, display: "inline-block", boxShadow: `0 0 5px ${tn}` }} />{s} <b style={{ color: "var(--text)" }}>{sc ?? "—"}</b></span>; })}
+            {["天秤", "双鱼", "双子"].map((s) => { const h = horos[s]; const sc = typeof h?.score === "number" ? h.score : null; const tn = sc == null ? "var(--text-mute)" : sc >= 75 ? "var(--good)" : sc >= 45 ? "var(--warn)" : "var(--bad)"; return <span key={s} title={h?.advice || ""} style={{ ...row(4), font: "500 10px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: tn, display: "inline-block", boxShadow: `0 0 5px ${tn}` }} />{s} <b style={{ color: "var(--text)" }}>{sc ?? "—"}</b></span>; })}
           </div>
-          <div style={{ height: 1, background: "var(--border-soft)", margin: "3px 0" }} />
+          <div style={{ height: 1, background: "var(--border-soft)", margin: "1px 0" }} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-            <div style={{ position: "relative", width: 40, height: 40, flex: "none" }}>
-              <svg width="40" height="40" viewBox="0 0 40 40" style={{ transform: "rotate(-90deg)" }}><circle cx="20" cy="20" r="16" fill="none" stroke="var(--border)" strokeWidth="4" /><circle cx="20" cy="20" r="16" fill="none" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" strokeDasharray="100.5" strokeDashoffset={ringOffset} style={{ filter: "drop-shadow(0 0 4px rgba(194,59,84,.6))", transition: "stroke-dashoffset .6s" }} /></svg>
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", font: "700 13px 'Space Grotesk'", color: "var(--text)" }}>{health ?? "—"}</div>
+            <div style={{ position: "relative", width: 34, height: 34, flex: "none" }}>
+              <svg width="34" height="34" viewBox="0 0 34 34" style={{ transform: "rotate(-90deg)" }}><circle cx="17" cy="17" r="14" fill="none" stroke="var(--border)" strokeWidth="3.5" /><circle cx="17" cy="17" r="14" fill="none" stroke="var(--accent)" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="87.96" strokeDashoffset={health != null ? +(87.96 * (1 - health / 100)).toFixed(1) : 87.96} style={{ filter: "drop-shadow(0 0 4px rgba(194,59,84,.6))", transition: "stroke-dashoffset .6s" }} /></svg>
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", font: "700 11px 'Space Grotesk'", color: "var(--text)" }}>{health ?? "—"}</div>
             </div>
-            <div style={{ display: "grid", gap: 4, textAlign: "right" }}>
-              <span style={{ font: "500 10px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>系统健康 · 平稳</span>
-              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", font: "500 10px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}><span>CPU <b style={{ color: "var(--text)" }}>{cpuPct ?? "—"}%</b></span><span>RAM <b style={{ color: "var(--text)" }}>{ramPct ?? "—"}%</b></span><span>SSD <b style={{ color: "var(--warn)" }}>{ssdPct ?? "—"}%</b></span></div>
+            <div style={{ display: "grid", gap: 3, textAlign: "right" }}>
+              <span style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>系统健康 · 平稳</span>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}><span>CPU <b style={{ color: "var(--text)" }}>{cpuPct ?? "—"}%</b></span><span>RAM <b style={{ color: "var(--text)" }}>{ramPct ?? "—"}%</b></span><span>SSD <b style={{ color: "var(--warn)" }}>{ssdPct ?? "—"}%</b></span></div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ROW 2 — 和 Jarvis 对话（宽长方体；动态头像保留在上方中枢核心位）*/}
-      <CenterChat />
+      {chatOpen && <JarvisChat onClose={() => setChatOpen(false)} />}
 
       {/* ROW 3 — 5 面板 bento */}
       <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr 1fr", gridTemplateRows: "repeat(2,minmax(0,1fr))", gap: 14, minHeight: 0 }}>
