@@ -62,11 +62,32 @@ echo "==> [1/3] 构建前端 (web/dist)"
 
 LAUNCH_LABEL="${LEOJARVIS_LAUNCH_LABEL:-com.leo.leojarvis}"
 LAUNCH_DOMAIN="gui/$(id -u)"
+USER_PLIST="${HOME}/Library/LaunchAgents/${LAUNCH_LABEL}.plist"
+REPO_PLIST="${ROOT}/deploy/${LAUNCH_LABEL}.plist"
+if [ "${LEOJARVIS_USE_LAUNCHD:-auto}" != "0" ] \
+  && command -v launchctl >/dev/null 2>&1; then
+  if [ -f "${REPO_PLIST}" ]; then
+    mkdir -p "${HOME}/Library/LaunchAgents"
+    cp "${REPO_PLIST}" "${USER_PLIST}"
+  fi
+  if [ -f "${USER_PLIST}" ]; then
+    echo "==> [2/3] 使用 LaunchAgent 重载守护进程 (:${PORT})"
+    launchctl bootout "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}" >/dev/null 2>&1 || true
+    for i in $(seq 1 20); do
+      launchctl print "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}" >/dev/null 2>&1 || break
+      sleep 0.25
+    done
+    launchctl bootstrap "${LAUNCH_DOMAIN}" "${USER_PLIST}"
+    launchctl enable "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}" >/dev/null 2>&1 || true
+    launchctl kickstart -k "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}"
+  else
+    echo "==> [2/3] 未找到 LaunchAgent plist，回退到后台进程 (:${PORT})"
+    LEOJARVIS_USE_LAUNCHD=0
+  fi
+fi
 if [ "${LEOJARVIS_USE_LAUNCHD:-auto}" != "0" ] \
   && command -v launchctl >/dev/null 2>&1 \
   && launchctl print "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}" >/dev/null 2>&1; then
-  echo "==> [2/3] 检测到 LaunchAgent，使用 launchctl 重启守护进程 (:${PORT})"
-  launchctl kickstart -k "${LAUNCH_DOMAIN}/${LAUNCH_LABEL}"
   echo "==> [3/3] 等待 LaunchAgent 接管 8787"
   for i in $(seq 1 30); do
     if curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${PORT}/health" 2>/dev/null; then

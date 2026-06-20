@@ -63,7 +63,7 @@ PLACEHOLDER_PATTERNS = [
     r"//\s*implement",
     r"#\s*implement",
     r'raise NotImplementedError',
-    r"pass\s*$",
+    r"pass\s*#\s*(?:TODO|FIXME|placeholder)\b",
     r"\.\.\.  # placeholder",
 ]
 

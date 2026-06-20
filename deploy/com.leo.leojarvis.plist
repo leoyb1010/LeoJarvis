@@ -5,19 +5,21 @@
   <key>Label</key><string>com.leo.leojarvis</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/leoyuan/Desktop/leoworkspace/cortex/.venv/bin/python</string>
-    <string>-m</string>
-    <string>leojarvis.main</string>
+    <string>/bin/bash</string>
+    <string>/Users/leoyuan/LeoJarvis-runtime/scripts/run_launchd.sh</string>
   </array>
-  <key>WorkingDirectory</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex</string>
+  <key>WorkingDirectory</key><string>/Users/leoyuan/LeoJarvis-runtime</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key><string>/Users/leoyuan</string>
+    <key>USER</key><string>leoyuan</string>
+    <key>LOGNAME</key><string>leoyuan</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/leoyuan/.nvm/versions/node/v24.15.0/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>5</integer>
-  <key>StandardOutPath</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex/data/stdout.log</string>
-  <key>StandardErrorPath</key><string>/Users/leoyuan/Desktop/leoworkspace/cortex/data/stderr.log</string>
+  <key>StandardOutPath</key><string>/Users/leoyuan/LeoJarvis-runtime/data/stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/leoyuan/LeoJarvis-runtime/data/stderr.log</string>
 </dict>
 </plist>

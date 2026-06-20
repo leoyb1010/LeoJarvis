@@ -166,7 +166,7 @@ LeoJarvis/
 ## 后端启动
 
 ```bash
-cd /Users/leoyuan/Desktop/leoworkspace/cortex
+cd /Users/leoyuan/LeoJarvis-runtime
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -184,7 +184,7 @@ curl http://127.0.0.1:8787/health
 开发模式（热更新，端口 5173）：
 
 ```bash
-cd /Users/leoyuan/Desktop/leoworkspace/cortex/web
+cd /Users/leoyuan/LeoJarvis-runtime/web
 npm install
 npm run dev
 ```
@@ -291,19 +291,18 @@ hdiutil verify dist/macos/LeoJarvis-0.1.0-arm64.dmg
 
 ## launchd 常驻
 
-确认 `.venv` 已创建并能运行后：
+确认仓库位于 `/Users/leoyuan/LeoJarvis-runtime`，`.venv` 已创建并能运行后：
 
 ```bash
-cp deploy/com.leo.leojarvis.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.leo.leojarvis.plist
-launchctl start com.leo.leojarvis
-launchctl list | grep leojarvis
+bash scripts/deploy.sh
+launchctl print gui/$(id -u)/com.leo.leojarvis
 ```
 
 卸载：
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.leo.leojarvis.plist
+launchctl bootout gui/$(id -u)/com.leo.leojarvis
+rm -f ~/Library/LaunchAgents/com.leo.leojarvis.plist
 ```
 
 端口只监听本机：

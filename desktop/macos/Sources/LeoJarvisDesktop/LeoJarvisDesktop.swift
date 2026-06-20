@@ -531,9 +531,9 @@ final class ServiceController {
 
     func installLaunchAgent() -> Bool {
         let repo = repoPath
-        let python = "\(repo)/.venv/bin/python"
-        guard FileManager.default.fileExists(atPath: python) else { return false }
-        let plist = launchAgentPlist(repoPath: repo, pythonPath: python)
+        let runner = "\(repo)/scripts/run_launchd.sh"
+        guard FileManager.default.fileExists(atPath: runner) else { return false }
+        let plist = launchAgentPlist(repoPath: repo, runnerPath: runner)
         let path = "\(NSHomeDirectory())/Library/LaunchAgents/\(serviceLabel).plist"
         do {
             try FileManager.default.createDirectory(atPath: "\(NSHomeDirectory())/Library/LaunchAgents", withIntermediateDirectories: true)
@@ -546,6 +546,7 @@ final class ServiceController {
 
     func startLaunchAgent() -> Bool {
         let path = "\(NSHomeDirectory())/Library/LaunchAgents/\(serviceLabel).plist"
+        _ = run(["launchctl", "bootout", "gui/\(getuid())/\(serviceLabel)"])
         _ = run(["launchctl", "bootstrap", "gui/\(getuid())", path])
         _ = run(["launchctl", "enable", "gui/\(getuid())/\(serviceLabel)"])
         let out = run(["launchctl", "kickstart", "-k", "gui/\(getuid())/\(serviceLabel)"])
@@ -553,11 +554,7 @@ final class ServiceController {
     }
 
     func restartLaunchAgent() -> Bool {
-        let out = run(["launchctl", "kickstart", "-k", "gui/\(getuid())/\(serviceLabel)"])
-        if out.contains("Could not") {
-            return startLaunchAgent()
-        }
-        return true
+        return startLaunchAgent()
     }
 }
 
@@ -847,7 +844,7 @@ enum LoginItemManager {
     }
 }
 
-private func launchAgentPlist(repoPath: String, pythonPath: String) -> String {
+private func launchAgentPlist(repoPath: String, runnerPath: String) -> String {
     let stdout = "\(repoPath)/data/stdout.log"
     let stderr = "\(repoPath)/data/stderr.log"
     return """
@@ -858,13 +855,15 @@ private func launchAgentPlist(repoPath: String, pythonPath: String) -> String {
       <key>Label</key><string>\(serviceLabel)</string>
       <key>ProgramArguments</key>
       <array>
-        <string>\(xmlEscape(pythonPath))</string>
-        <string>-m</string>
-        <string>leojarvis.main</string>
+        <string>/bin/bash</string>
+        <string>\(xmlEscape(runnerPath))</string>
       </array>
       <key>WorkingDirectory</key><string>\(xmlEscape(repoPath))</string>
       <key>EnvironmentVariables</key>
       <dict>
+        <key>HOME</key><string>\(xmlEscape(NSHomeDirectory()))</string>
+        <key>USER</key><string>\(xmlEscape(NSUserName()))</string>
+        <key>LOGNAME</key><string>\(xmlEscape(NSUserName()))</string>
         <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\(xmlEscape(NSHomeDirectory()))/.nvm/versions/node/v24.15.0/bin</string>
       </dict>
       <key>RunAtLoad</key><true/>
