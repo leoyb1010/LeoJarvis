@@ -3,6 +3,20 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // rolldown 的 manualChunks 需函数形式：按模块路径归拢 vendor 块，利于浏览器长缓存。
+        manualChunks(id: string) {
+          if (id.includes("node_modules")) {
+            if (id.includes("@xterm")) return "xterm";          // 终端依赖（随懒加载分块，再显式归拢）
+            if (id.includes("react")) return "react";           // React 运行时单独成块
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

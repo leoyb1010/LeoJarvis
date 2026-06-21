@@ -489,13 +489,16 @@ def import_url(url: str, notebook: str = "") -> dict:
     import httpx
     import trafilatura
 
+    from .netguard import safe_get
+
     cleaned_url = url.strip()
     if not cleaned_url:
         raise ValueError("url is required")
     if not re.match(r"^https?://", cleaned_url):
         cleaned_url = "https://" + cleaned_url
-    with httpx.Client(timeout=15, follow_redirects=True, trust_env=False) as client:
-        res = client.get(cleaned_url, headers={"User-Agent": "LeoJarvis-Notes-Importer/0.1"})
+    # 逐跳 SSRF 复检：禁用 httpx 自动重定向，netguard 校验每一跳目标，挡掉内网/本机/保留地址
+    with httpx.Client(timeout=15, trust_env=False) as client:
+        res = safe_get(client, cleaned_url, headers={"User-Agent": "LeoJarvis-Notes-Importer/0.1"})
         res.raise_for_status()
         html = res.text
     extracted = trafilatura.extract(html, include_comments=False, include_tables=False) or ""

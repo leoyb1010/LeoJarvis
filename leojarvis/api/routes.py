@@ -5,17 +5,49 @@ import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import db, user_settings
-from ..agent.loop import approve_action, run_agent
+from ..agent.loop import approve_action, run_agent, run_agent_stream
 from ..agent.tools import TOOLBUS
+from ..auth import bearer_token, is_authorized, is_trusted_local
+from urllib.parse import urlsplit
 from ..briefing.builder import build_item_detail, build_today
 from ..notify.hub import hub
 from ..scheduler import run_ingest_cycle
 
 router = APIRouter()
+
+
+def _ws_origin_ok(ws: WebSocket) -> bool:
+    """浏览器发起的 WebSocket 握手会带 Origin 头；只放行回环来源，挡掉恶意站点的
+    跨站驱动（尤其是 /ws/term 这种 PTY）。非浏览器客户端不带 Origin，直接放行交给 token 鉴权。"""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True
+    host = (urlsplit(origin).hostname or "").lower()
+    if host.startswith("::ffff:"):
+        host = host[len("::ffff:"):]
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+async def _authorize_websocket(ws: WebSocket) -> bool:
+    if not _ws_origin_ok(ws):
+        await ws.close(code=1008)
+        return False
+    client_host = ws.client.host if ws.client else None
+    if is_trusted_local(client_host, ws.headers):
+        return True
+    supplied = bearer_token(ws.headers.get("authorization"))
+    if not supplied:
+        supplied = ws.headers.get("x-leojarvis-token", "")
+    if not supplied:
+        supplied = ws.query_params.get("token", "")
+    if is_authorized(supplied):
+        return True
+    await ws.close(code=1008)
+    return False
 
 
 def _public_settings(payload: dict) -> dict:
@@ -58,6 +90,13 @@ class ReachSearchIn(BaseModel):
     limit: int = 10
 
 
+class LocalizeBatchIn(BaseModel):
+    texts: list[str]
+    context: str = "移动端情报"
+    max_chars: int = 420
+    allow_llm: bool = True
+
+
 class MCPSettingsIn(BaseModel):
     settings: dict = Field(default_factory=dict)
 
@@ -66,6 +105,16 @@ class MCPSearchIn(BaseModel):
     query: str
     limit: int = 8
     include_answer: bool = False
+    purpose: str = "manual"
+
+
+class SpeechTranscribeIn(BaseModel):
+    data_base64: str
+    mime_type: str = "audio/wav"
+    file_name: str = "recording.wav"
+    model: str = "base"
+    language: str = "auto"
+    prompt: str = ""
 
 
 @router.get("/settings")
@@ -183,6 +232,65 @@ def device_summary() -> dict:
     return sysinfo.device_summary()
 
 
+def _remote_public_device_summaries(current_device_id: str) -> list[dict]:
+    import json
+    import urllib.request
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from urllib.parse import urlparse
+
+    targets = [
+        target for target in (user_settings.load().get("remote_public_endpoints") or [])
+        if isinstance(target, dict) and target.get("enabled", True) and str(target.get("endpoint") or "").strip()
+    ]
+    if not targets:
+        return []
+
+    def fetch(target: dict) -> dict | None:
+        endpoint = str(target.get("endpoint") or "").strip().rstrip("/")
+        if not endpoint.startswith(("http://", "https://")):
+            endpoint = "https://" + endpoint
+        try:
+            started = time.perf_counter()
+            with urllib.request.urlopen(endpoint + "/api/device/summary", timeout=2.8) as resp:
+                summary = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if not isinstance(summary, dict):
+                return None
+            if str(summary.get("device_id") or "") == current_device_id:
+                return None
+            summary["role"] = "remote-leojarvis"
+            summary["remote_target_id"] = str(target.get("id") or "")
+            summary["remote_target_name"] = str(target.get("name") or summary.get("device_name") or "")
+            summary["public_endpoint"] = endpoint
+            summary["network_latency_ms"] = int((time.perf_counter() - started) * 1000)
+            summary["last_seen_ts"] = int(time.time())
+            summary["generated_at"] = int(time.time())
+            if not summary.get("host_name"):
+                summary["host_name"] = urlparse(endpoint).hostname or endpoint
+            return summary
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "device_id": f"remote-public-{target.get('id') or endpoint}",
+                "device_name": str(target.get("name") or target.get("id") or "远端 Mac"),
+                "host_name": urlparse(endpoint).hostname or endpoint,
+                "role": "remote-leojarvis",
+                "status": "离线",
+                "health": 0,
+                "public_endpoint": endpoint,
+                "last_seen_ts": 0,
+                "generated_at": 0,
+                "error": str(exc)[:180],
+            }
+
+    rows: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(4, len(targets))) as pool:
+        futures = [pool.submit(fetch, target) for target in targets]
+        for future in as_completed(futures, timeout=4):
+            item = future.result()
+            if item:
+                rows.append(item)
+    return rows
+
+
 @router.get("/devices")
 def devices_list() -> dict:
     """舰队：列出已登记的设备（含本机），标注在线/离线 + 是否当前设备。
@@ -193,19 +301,36 @@ def devices_list() -> dict:
     """
     from ..agent import sysinfo
     me = sysinfo.device_summary()
-    db.upsert_device_heartbeat(me)  # 确保本机始终在册、且是最新
+    # 本机心跳由调度器的 run_heartbeat 每 60s 维护，这里不再写库（避免 GET 产生副作用、
+    # 防止跨站预取 /devices 触发数据写入/删除）。读取时仍兜底取一次本机摘要用于标注 current。
     cur = str(me.get("device_id") or "")
+    live_public_names: set[str] = set()
+    for summary in _remote_public_device_summaries(cur):
+        if int(summary.get("last_seen_ts") or 0) > 0:
+            db.upsert_device_heartbeat(summary)
+            live_public_names.add(str(summary.get("remote_target_name") or summary.get("device_name") or "").lower())
     now = int(time.time())
     out: list[dict] = []
     for r in db.list_device_heartbeats(limit=100):
         did = str(r.get("device_id") or "")
-        if did.startswith("rc-"):           # 旧远端连接幽灵 → 直接清理
-            db.delete_device_heartbeat(did)
+        if did.startswith("rc-"):           # 旧远端连接幽灵 → 调度器会清理，这里仅从列表过滤
             continue
         last = int(r.get("last_seen_ts") or 0)
         r["online"] = (now - last) <= 120     # 2 分钟内有心跳算在线
         r["is_current"] = did == cur
         r["seen_ago_s"] = max(0, now - last)
+        name_key = str(r.get("device_name") or r.get("host_name") or did).lower()
+        is_stale_ssh_shadow = (
+            r.get("role") == "ssh"
+            and not r["online"]
+            and (
+                did in {"ssh-macbook-pro", "ssh-mac-studio", "ssh-mac-mini", "macbook-pro", "mac-studio", "mac-mini"}
+                or any(part in name_key for part in ("macbook pro", "mac studio", "mac mini"))
+            )
+            and (live_public_names or did == "ssh-macbook-pro")
+        )
+        if is_stale_ssh_shadow:        # 陈旧 SSH 影子行 → 仅从列表隐藏，不在 GET 里删库
+            continue
         out.append(r)
     out.sort(key=lambda d: (not d.get("is_current"), not d.get("online"), -(d.get("last_seen_ts") or 0)))
     return {"ok": True, "current": cur, "devices": out, "count": len(out)}
@@ -234,6 +359,49 @@ def agent_chat(req: ChatRequest) -> dict:
     return run_agent([m.model_dump() for m in req.messages])
 
 
+@router.post("/agent/chat/stream")
+async def agent_chat_stream(req: ChatRequest) -> StreamingResponse:
+    """流式对话（SSE）：逐步把思考/工具/最终答复事件推给前端，首字亚秒可见。
+
+    run_agent_stream 是同步生成器且内部有阻塞 LLM 调用，这里放到线程里跑、用 asyncio.Queue
+    把事件桥到异步流，避免阻塞事件循环。每个事件序列化为一行 `data: {json}\\n\\n`。
+    """
+    import asyncio
+    import json as _json
+
+    messages = [m.model_dump() for m in req.messages]
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    _SENTINEL = object()
+
+    def _produce() -> None:
+        try:
+            for event in run_agent_stream(messages):
+                loop.call_soon_threadsafe(queue.put_nowait, event)
+        except Exception as exc:  # noqa: BLE001
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(exc)})
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+
+    async def _event_source():
+        fut = loop.run_in_executor(None, _produce)
+        try:
+            while True:
+                event = await queue.get()
+                if event is _SENTINEL:
+                    break
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            await fut
+
+    return StreamingResponse(
+        _event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 class ApproveRequest(BaseModel):
     id: str
     decision: str = Field(pattern="^(approve|reject)$")
@@ -248,6 +416,69 @@ def agent_approve(req: ApproveRequest) -> dict:
 def agent_tools() -> list[dict]:
     return [{"name": t.name, "description": t.description, "parameters": t.parameters}
             for t in TOOLBUS.all()]
+
+
+@router.get("/metrics")
+def metrics() -> dict:
+    """系统自身健康：LLM 调用数、批量 judge 规模、最近扫描耗时、DB 行数。本机只读。"""
+    from .. import obs
+    snap = obs.snapshot()
+    rows: dict[str, int] = {}
+    try:
+        with db.conn() as c:
+            for table in ("events", "judgments", "memories", "personal_notes",
+                          "github_repo_snapshots", "device_heartbeats"):
+                try:
+                    r = c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                    rows[table] = int(r[0] if not isinstance(r, dict) else list(r.values())[0])
+                except Exception:
+                    rows[table] = -1
+    except Exception:
+        pass
+    snap["db_rows"] = rows
+    return snap
+
+
+@router.post("/localize/chinese")
+def localize_chinese(req: LocalizeBatchIn) -> dict:
+    from ..localize import to_chinese
+
+    max_chars = min(max(int(req.max_chars or 420), 40), 900)
+    texts = [str(text or "").strip()[:1800] for text in (req.texts or [])[:80]]
+    translations = [
+        to_chinese(
+            text,
+            context=req.context or "移动端情报",
+            max_chars=max_chars,
+            allow_llm=bool(req.allow_llm),
+        )
+        for text in texts
+    ]
+    return {"ok": True, "translations": translations}
+
+
+@router.get("/speech/status")
+def speech_status() -> dict:
+    from .. import speech
+    return speech.status()
+
+
+@router.post("/speech/transcribe")
+def speech_transcribe(req: SpeechTranscribeIn) -> dict:
+    from .. import speech
+    try:
+        return speech.transcribe_base64(
+            data_base64=req.data_base64,
+            mime_type=req.mime_type,
+            file_name=req.file_name,
+            model=req.model,
+            language=req.language,
+            prompt=req.prompt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 # ---------- 能力模块（只读，供仪表盘瓷砖直接取数，无需 LLM）----------
@@ -361,8 +592,20 @@ def mcp_settings(req: MCPSettingsIn) -> dict:
 @router.post("/mcp/search")
 def mcp_search(req: MCPSearchIn) -> dict:
     from .. import mcp_gateway
+    from ..intelligence import scanner
+
     try:
+        if req.purpose != "intel_fallback":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "tavily_reserved_for_intel_fallback", "message": "Tavily paid search is only available as intelligence fallback."},
+            )
+        reserved, budget = scanner._reserve_tavily_query(f"mcp_search:{req.purpose or 'manual'}")
+        if not reserved:
+            raise HTTPException(status_code=429, detail={"error": "tavily_budget_exhausted", "budget": budget})
         return mcp_gateway.search_web(req.query, limit=req.limit, include_answer=req.include_answer)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -586,11 +829,18 @@ class NotebookTextSourceIn(BaseModel):
 
 
 @router.get("/personal-notes")
-def personal_note_list(q: str = "", tag: str = "", status: str = "active", project: str = "", compact: bool = False) -> dict:
+def personal_note_list(
+    q: str = "",
+    tag: str = "",
+    status: str = "active",
+    project: str = "",
+    compact: bool = False,
+    limit: int = 100,
+) -> dict:
     from .. import personal_notes
     return {
         "ok": True,
-        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, compact=compact),
+        "notes": personal_notes.list_notes(q=q, tag=tag, status=status, project=project, compact=compact, limit=limit),
         "stats": personal_notes.note_stats(),
     }
 
@@ -751,6 +1001,26 @@ def intelligence_overview() -> dict:
     return overview()
 
 
+@router.get("/intelligence/browser-preferences")
+def intelligence_browser_preferences(
+    window_days: int = 45,
+    limit_terms: int = 40,
+    limit_domains: int = 18,
+    refresh: bool = False,
+) -> dict:
+    from ..browser_history import browser_preferences
+
+    safe_window = min(max(int(window_days or 45), 1), 120)
+    safe_terms = min(max(int(limit_terms or 40), 1), 80)
+    safe_domains = min(max(int(limit_domains or 18), 1), 40)
+    return browser_preferences(
+        window_days=safe_window,
+        limit_terms=safe_terms,
+        limit_domains=safe_domains,
+        refresh=refresh,
+    )
+
+
 @router.post("/intelligence/scan")
 async def intelligence_scan(req: IntelligenceScanRequest) -> dict:
     from ..intelligence.scanner import run_intelligence_scan
@@ -888,6 +1158,8 @@ def memory_reflect(hours: int = 24) -> dict:
 
 @router.websocket("/ws/notify")
 async def ws_notify(ws: WebSocket):
+    if not await _authorize_websocket(ws):
+        return
     await hub.connect(ws)
     try:
         while True:
@@ -908,9 +1180,20 @@ async def ws_term(ws: WebSocket):
     """
     import asyncio
     import json as _json
+    import os as _os
 
     from ..agent import pty_term
 
+    if not await _authorize_websocket(ws):
+        return
+    # 纵深防御：/ws/term 会拉起裸登录 shell 与「免确认」agent，等于本机 RCE。
+    # 默认只对真实回环直连开放；远程（即便持有合法 token）需运维显式 opt-in。
+    client_host = ws.client.host if ws.client else None
+    if not is_trusted_local(client_host, ws.headers) and _os.environ.get("LEOJARVIS_ALLOW_REMOTE_TERM", "").strip() not in {"1", "true", "yes"}:
+        await ws.accept()
+        await ws.send_json({"type": "error", "msg": "交互终端默认仅限本机访问；如需远程使用请在 Mac 端设置 LEOJARVIS_ALLOW_REMOTE_TERM=1。"})
+        await ws.close(code=1008)
+        return
     await ws.accept()
     pid = None
     fd = None
@@ -977,5 +1260,10 @@ async def ws_term(ws: WebSocket):
     finally:
         if reader_task is not None:
             reader_task.cancel()
+            # 等 pump() 真正结束再关 fd，避免 os.read 与 close(fd) 竞争同一描述符
+            try:
+                await asyncio.gather(reader_task, return_exceptions=True)
+            except Exception:
+                pass
         if pid is not None and fd is not None:
             pty_term.kill(pid, fd)

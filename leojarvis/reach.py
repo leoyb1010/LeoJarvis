@@ -373,14 +373,14 @@ def source_matrix() -> list[dict[str, Any]]:
     """Agent-Reach-style source catalog used by the intelligence UI."""
     return [
         {
-            "group": "MCP / Agent 工具",
+            "group": "兜底搜索 / Agent 工具",
             "channels": ["tavily", "github_mcp", "amap_maps", "exa_search"],
-            "use": "实时搜索、网页抓取、GitHub 研发上下文、地图位置和 Agent 工具调用，统一由 Jarvis MCP Gateway 控制。",
+            "use": "Tavily 只作为信源之外的付费兜底：手动搜索、原文抽取失败或主信源覆盖不到时才调用；不参与默认情报扫描排序。",
         },
         {
             "group": "核心低噪",
-            "channels": ["web", "github", "rss", "youtube", "tavily", "exa_search", "wechat", "v2ex"],
-            "use": "技术趋势、开源项目、长文、官方发布和可留证据的资料。",
+            "channels": ["rss", "web", "github", "youtube", "wechat", "v2ex"],
+            "use": "默认情报主信源：订阅源、网页变化、GitHub、长文和公开视频资料；按发布时间优先，同时间窗内挑重点。",
         },
         {
             "group": "社媒口碑",
@@ -469,6 +469,9 @@ def read_url(url: str, limit: int = 12000) -> dict[str, Any]:
         raise ValueError("url required")
     if not clean.startswith(("http://", "https://")):
         clean = "https://" + clean
+    # 校验目标地址：拒绝内网/本机/保留网段（与 personal_notes 导入同一套 SSRF 防护）
+    from .netguard import ensure_public_url
+    ensure_public_url(clean)
     try:
         from . import mcp_gateway
 

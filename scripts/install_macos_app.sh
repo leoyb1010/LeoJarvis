@@ -29,9 +29,13 @@ done
 
 echo "Installed: ${CANONICAL}"
 echo "Remaining installed apps:"
-find /Applications "${HOME}/Applications" "${HOME}/Desktop" "${HOME}/Downloads" -maxdepth 3 \( \
+SEARCH_BASES=("/Applications")
+for base in "${HOME}/Applications" "${HOME}/Desktop" "${HOME}/Downloads"; do
+  [[ -d "${base}" ]] && SEARCH_BASES+=("${base}")
+done
+find "${SEARCH_BASES[@]}" -maxdepth 3 \( \
   -name "LeoJarvis.app" -o \
   -name "Cortex.app" -o \
   -name "CortexFleet.app" -o \
   -name "Cortex Fleet.app" \
-\) -print 2>/dev/null
+\) -print 2>/dev/null || true

@@ -55,7 +55,11 @@ def run_maintenance() -> dict:
     except Exception as exc:  # noqa: BLE001
         result["logs_error"] = str(exc)
     try:
-        result["pruned"] = db.prune_old_data()
+        pruned = db.prune_old_data()
+        result["pruned"] = pruned
+        # 只有删了足够多行才 VACUUM（VACUUM 会全库加锁，不值得每天为几行跑一次）。
+        if sum(int(v) for v in pruned.values()) >= 200:
+            result["vacuumed"] = db.vacuum()
     except Exception as exc:  # noqa: BLE001
         result["prune_error"] = str(exc)
     print(f"[maintenance] {result}")

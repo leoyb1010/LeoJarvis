@@ -54,6 +54,26 @@ DEFAULTS: dict[str, Any] = {
             "amap_maps": {"enabled": False, "api_key": ""},
         },
     },
+    "remote_public_endpoints": [
+        {
+            "id": "leoyuan-macbook-pro",
+            "name": "Leo MacBook Pro",
+            "endpoint": "https://leoyuanmacbook-pro.tail23de22.ts.net",
+            "enabled": True,
+        },
+        {
+            "id": "leo-mac-studio",
+            "name": "Leo Mac Studio",
+            "endpoint": "https://leomac-studio.tail23de22.ts.net",
+            "enabled": True,
+        },
+        {
+            "id": "mac-mini-cortex",
+            "name": "Mac mini Cortex",
+            "endpoint": "https://mac-mini-cortex.tail23de22.ts.net",
+            "enabled": True,
+        },
+    ],
     # 高级阈值/节奏：留空表示沿用 settings.toml。UI 在这里写入即可覆盖，
     # 改动定时任务节奏需要重启后端生效（任务在启动时注册）。
     "overrides": {},

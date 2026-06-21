@@ -1,0 +1,78 @@
+// 真实交互终端：xterm.js ←→ 后端 PTY（/ws/term）。在这里跑的是 agent 的**原生 REPL**，
+// 所以 claude 的 /model、/cost、/clear 这些原生斜杠命令会真实弹出、完整执行 —— 不是假壳。
+//
+// 独立成文件以便 React.lazy 懒加载：xterm（含 css）只有用户真正打开终端面板时才下载，
+// 不再进首屏主 bundle（首屏体积显著下降）。
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Terminal as XTerm } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
+
+type Theme = "dark" | "light";
+const row = (g = 8): CSSProperties => ({ display: "flex", alignItems: "center", gap: g });
+
+export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: string; themeMode: Theme; sessionKey: number }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [status, setStatus] = useState<"connecting" | "live" | "exited">("connecting");
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const dark = themeMode === "dark";
+    const term = new XTerm({
+      fontFamily: "'IBM Plex Mono','SFMono-Regular',monospace",
+      fontSize: 12.5, lineHeight: 1.32, cursorBlink: true, scrollback: 5000,
+      allowProposedApi: true,
+      theme: dark
+        ? { background: "#0f141b", foreground: "#cdd6e2", cursor: "#d9536b", cursorAccent: "#0f141b", selectionBackground: "rgba(217,83,107,.32)", black: "#0f141b", brightBlack: "#5b6573" }
+        : { background: "#f6f8fa", foreground: "#1c2530", cursor: "#bc1d2a", cursorAccent: "#f6f8fa", selectionBackground: "rgba(188,29,42,.18)", black: "#1c2530", brightBlack: "#8a93a0" },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(host);
+    const doFit = () => { try { fit.fit(); } catch { /* noop */ } };
+    setTimeout(doFit, 0);
+
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/api/ws/term`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => {
+      setStatus("live");
+      ws.send(JSON.stringify({ type: "start", agent, cwd: "~", cols: term.cols, rows: term.rows }));
+      term.focus();
+    };
+    ws.onmessage = (e) => {
+      if (typeof e.data === "string") {
+        try {
+          const o = JSON.parse(e.data);
+          if (o.type === "exit") { setStatus("exited"); term.write("\r\n\x1b[2m─ 会话已结束 ─\x1b[0m\r\n"); }
+          else if (o.type === "error") term.write(`\r\n\x1b[31m${o.msg}\x1b[0m\r\n`);
+        } catch { /* ignore */ }
+      } else {
+        term.write(new Uint8Array(e.data as ArrayBuffer));
+      }
+    };
+    ws.onclose = () => setStatus((s) => (s === "exited" ? s : "exited"));
+    ws.onerror = () => setStatus("exited");
+    const onData = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data: d })); });
+    const ro = new ResizeObserver(() => {
+      doFit();
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    });
+    ro.observe(host);
+
+    return () => { onData.dispose(); ro.disconnect(); try { ws.close(); } catch { /* noop */ } term.dispose(); };
+    // sessionKey 变化 = 用户点了「重启会话」，强制重建终端
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent, sessionKey]);
+
+  const bg = themeMode === "dark" ? "#0f141b" : "#f6f8fa";
+  return (
+    <div style={{ position: "relative", height: "100%", minHeight: 0, background: bg }}>
+      <div ref={hostRef} style={{ height: "100%", padding: "8px 4px 8px 12px" }} />
+      <span style={{ position: "absolute", top: 9, right: 13, ...row(5), font: "600 9px 'IBM Plex Mono',monospace", color: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", pointerEvents: "none" }}>
+        <b style={{ width: 6, height: 6, borderRadius: "50%", background: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", display: "inline-block", boxShadow: status === "live" ? "0 0 6px var(--good)" : "none", animation: status === "live" ? "cxBreathe 2.5s ease infinite" : "none" }} />
+        {status === "live" ? "PTY 在线" : status === "connecting" ? "连接中…" : "已结束"}
+      </span>
+    </div>
+  );
+}

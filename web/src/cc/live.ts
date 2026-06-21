@@ -86,6 +86,120 @@ export type ChatReply = { reply?: string; steps?: ChatStep[]; pending_actions?: 
 export const agentChat = (messages: ChatMsg[]) => jpost<ChatReply>("/agent/chat", { messages });
 export const approveAction = (id: string, decision: "approve" | "reject") => jpost<ChatReply>("/agent/approve", { id, decision });
 
+// 流式对话事件（与后端 run_agent_stream 对齐）
+export type ChatStreamEvent =
+  | { type: "thought"; text: string }
+  | { type: "tool_start"; tool: string; args?: any }
+  | { type: "tool_result"; tool: string; status: string; result?: string }
+  | { type: "token"; text: string }
+  | { type: "final"; reply: string; steps?: ChatStep[] }
+  | { type: "pending"; reply: string; steps?: ChatStep[]; pending_actions?: PendingAction[] }
+  | { type: "error"; message: string };
+
+/**
+ * 流式对话：POST /agent/chat/stream，逐事件回调，首字亚秒可见。
+ * onEvent 收到每个 SSE 事件；返回一个可 await 的 Promise，结束时 resolve。
+ * 浏览器不支持 EventSource 的 POST，所以用 fetch + ReadableStream 手解析 SSE。
+ */
+export async function agentChatStream(
+  messages: ChatMsg[],
+  onEvent: (e: ChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const r = await fetch(BASE + "/agent/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+  if (!r.ok || !r.body) throw new Error(`/agent/chat/stream ${r.status}`);
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // SSE 以空行分隔事件；逐个取出
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = block.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const payload = line.slice(6);
+      if (payload === "[DONE]") return;
+      try {
+        onEvent(JSON.parse(payload) as ChatStreamEvent);
+      } catch {
+        /* 跳过解析失败的帧 */
+      }
+    }
+  }
+}
+
+// ---- 语音转写（本机 Whisper）----
+export type SpeechTranscribeReq = { data_base64: string; mime_type: string; file_name: string; model?: string; language?: string; prompt?: string };
+export const transcribeSpeech = (req: SpeechTranscribeReq) =>
+  jpost<{ ok?: boolean; text?: string; error?: string }>("/speech/transcribe", req);
+
+// ---- 实时推送（/ws/notify）----
+export type NotifyEvent = { type?: string; source?: string; title?: string; take?: string } & Record<string, any>;
+
+/**
+ * 订阅后端 /ws/notify 推送（情报命中、系统告警等），带自动重连。
+ * 返回一个 stop() 用于卸载时关闭。后端所有 push 都是 {type:"notify", ...}。
+ */
+export function connectNotify(onEvent: (e: NotifyEvent) => void): () => void {
+  const wsBase = window.location.port === "5173"
+    ? "ws://127.0.0.1:8787"
+    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
+  let ws: WebSocket | null = null;
+  let ping: number | undefined;
+  let retry: number | undefined;
+  let closed = false;
+  let backoff = 1000;
+
+  const open = () => {
+    if (closed) return;
+    ws = new WebSocket(`${wsBase}/api/ws/notify`);
+    ws.onopen = () => { backoff = 1000; };
+    ws.onmessage = (ev) => { try { onEvent(JSON.parse(ev.data)); } catch { /* ignore */ } };
+    ws.onclose = () => {
+      if (ping) window.clearInterval(ping);
+      if (closed) return;
+      retry = window.setTimeout(open, backoff);
+      backoff = Math.min(backoff * 2, 15000);   // 指数退避，封顶 15s
+    };
+    ws.onerror = () => { try { ws?.close(); } catch { /* ignore */ } };
+    ping = window.setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send("ping"); }, 30000);
+  };
+  open();
+
+  return () => {
+    closed = true;
+    if (ping) window.clearInterval(ping);
+    if (retry) window.clearTimeout(retry);
+    try { ws?.close(); } catch { /* ignore */ }
+  };
+}
+
+// 全局单例：整个 App 只开一条 /ws/notify 连接，多个组件通过订阅复用。
+const _notifySubs = new Set<(e: NotifyEvent) => void>();
+let _notifyStop: (() => void) | null = null;
+
+/** 订阅实时推送（自动管理单例连接）。返回取消订阅函数。 */
+export function subscribeNotify(handler: (e: NotifyEvent) => void): () => void {
+  _notifySubs.add(handler);
+  if (!_notifyStop) {
+    _notifyStop = connectNotify((e) => { for (const h of _notifySubs) { try { h(e); } catch { /* ignore */ } } });
+  }
+  return () => {
+    _notifySubs.delete(handler);
+    if (_notifySubs.size === 0 && _notifyStop) { _notifyStop(); _notifyStop = null; }
+  };
+}
+
 // ---- 记事（完整 CRUD + 链接导入 + 附件/图片）----
 export type PersonalNote = { id?: string; title?: string; excerpt?: string; content?: string; tags?: string[]; pinned?: boolean; favorite?: boolean; source?: string; source_url?: string; created_ts?: number; updated_ts?: number } & Record<string, any>;
 export type NoteAttachment = { id?: string; file_name?: string; mime_type?: string; size?: number } & Record<string, any>;

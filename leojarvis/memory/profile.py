@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..config import profile
+from ..browser_history import browser_preference_summary, browser_preference_terms
 
 
 def profile_text() -> str:
@@ -20,6 +21,9 @@ def profile_text() -> str:
             continue
         value = ", ".join(str(v) for v in vals) if isinstance(vals, list) else str(vals)
         lines.append(f"- {label}: {value}")
+    browser_summary = browser_preference_summary(limit=10)
+    if browser_summary:
+        lines.append(f"- 近期浏览偏好: {browser_summary}")
     return "\n".join(lines) or "（画像未配置）"
 
 
@@ -36,4 +40,5 @@ def profile_terms() -> set[str]:
                     terms.add(part)
             if str(val).strip():
                 terms.add(str(val).strip().lower())
+    terms.update(browser_preference_terms(limit=42))
     return terms

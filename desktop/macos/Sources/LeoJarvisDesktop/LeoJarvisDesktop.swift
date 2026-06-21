@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import CryptoKit
 import Foundation
 import UserNotifications
 import WebKit
@@ -766,13 +767,59 @@ final class UpdateManager {
             if compareVersion(latest, currentVersion) <= 0 {
                 return UpdateCheckResult(title: "LeoJarvis 已是最新", body: "当前版本 \(currentVersion)。", hasUpdate: false)
             }
-            if openDownload, let dmg = json["dmg_url"] as? String, let dmgURL = URL(string: dmg) {
-                NSWorkspace.shared.open(dmgURL)
+            if openDownload {
+                if let result = await downloadAndVerify(json: json, latest: latest) {
+                    return result
+                }
             }
-            let body = openDownload ? "已打开下载地址。下载 DMG 后替换 App 即可。" : "菜单栏选择“检查更新”可打开下载地址。"
+            let body = openDownload ? "新版本可下载。" : "菜单栏选择“检查更新”可下载新版本。"
             return UpdateCheckResult(title: "发现新版本 \(latest)", body: body, hasUpdate: true)
         } catch {
             return UpdateCheckResult(title: "更新检查失败", body: error.localizedDescription, hasUpdate: false)
+        }
+    }
+
+    /// 下载 DMG → 校验 SHA256（与清单 sha256 比对）→ 一致才打开，否则拒绝。
+    /// 没有校验值时不下载，只给出安全提示，绝不打开未经校验的 DMG。
+    private func downloadAndVerify(json: [String: Any], latest: String) async -> UpdateCheckResult? {
+        guard let dmg = json["dmg_url"] as? String, let dmgURL = URL(string: dmg) else {
+            return nil
+        }
+        // 远程清单的 DMG 必须 HTTPS（本地 file:// 走构建产物，放行）。
+        if !dmgURL.isFileURL, (dmgURL.scheme ?? "").lowercased() != "https" {
+            return UpdateCheckResult(title: "更新被拒绝", body: "新版本 \(latest) 的下载地址不是 HTTPS，已拒绝。", hasUpdate: true)
+        }
+        guard let expected = (json["sha256"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !expected.isEmpty else {
+            return UpdateCheckResult(title: "发现新版本 \(latest)",
+                                     body: "更新清单缺少 SHA256 校验值，出于安全未自动下载。请手动从可信来源获取。",
+                                     hasUpdate: true)
+        }
+        do {
+            let dmgData: Data
+            if dmgURL.isFileURL {
+                dmgData = try Data(contentsOf: dmgURL)
+            } else {
+                dmgData = try await URLSession.shared.data(from: dmgURL).0
+            }
+            let digest = SHA256.hash(data: dmgData)
+            let actual = digest.map { String(format: "%02x", $0) }.joined()
+            guard actual == expected else {
+                return UpdateCheckResult(title: "更新被拒绝",
+                                         body: "新版本 \(latest) 的 DMG 校验失败（SHA256 不匹配），可能被篡改，已拒绝打开。",
+                                         hasUpdate: true)
+            }
+            // 校验通过：落地到下载目录再打开，避免直接打开网络流。
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            let dest = downloads.appendingPathComponent("LeoJarvis-\(latest).dmg")
+            try? dmgData.write(to: dest)
+            NSWorkspace.shared.open(FileManager.default.fileExists(atPath: dest.path) ? dest : dmgURL)
+            return UpdateCheckResult(title: "发现新版本 \(latest)",
+                                     body: "已校验 SHA256 并下载到“下载”文件夹，打开后替换 App 即可。",
+                                     hasUpdate: true)
+        } catch {
+            return UpdateCheckResult(title: "更新检查失败", body: "下载或校验失败：\(error.localizedDescription)", hasUpdate: true)
         }
     }
 }
@@ -811,7 +858,7 @@ enum LoginItemManager {
     }
 
     static func enable() {
-        guard let appPath = Bundle.main.bundleURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)?.removingPercentEncoding else { return }
+        let appPath = Bundle.main.bundleURL.path
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

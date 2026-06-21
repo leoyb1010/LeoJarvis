@@ -191,11 +191,21 @@ def _t_run_shell(args: dict) -> str:
 def _t_intelligence_scan(args: dict) -> str:
     from ..intelligence.scanner import run_intelligence_scan
 
-    result = asyncio.run(run_intelligence_scan(
+    coro = run_intelligence_scan(
         include_rss=bool(args.get("include_rss", True)),
         include_web=bool(args.get("include_web", True)),
         include_github=bool(args.get("include_github", True)),
-    ))
+    )
+    # 工具在线程池线程里跑：正常没有运行中的 loop，asyncio.run 即可。万一已有 loop
+    # （未来若从异步上下文直接调用），退回到新线程里跑专属 loop，避免 "loop already running"。
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        result = asyncio.run(coro)
+    else:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(lambda: asyncio.run(coro)).result()
     return json_dumps(result)[:5000]
 
 

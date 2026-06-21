@@ -36,3 +36,11 @@ xcuserdata/
 # 含真实密钥，不入库
 config/models.toml
 config/settings.toml
+
+# iOS 大二进制：模型权重(141MB)/whisper 框架(49MB)/样本音频 —— 体积大且 >100MB 会被 GitHub 拒绝，
+# 用 scripts/install_whisper_cpp.sh 本地获取或走 Git LFS，不要直接入库。
+ios/**/models/*.bin
+ios/**/*.xcframework/
+ios/**/samples/*.wav
+# xcodegen 由 project.yml 生成，工程文件不入库（改 project.yml 后 `xcodegen generate` 重建）
+ios/**/*.xcodeproj/

@@ -3,13 +3,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .api.routes import router
+from .auth import api_token, bearer_token, is_authorized, is_static_request, is_trusted_local
 from .config import ROOT, settings
 from .scheduler import setup_scheduler
 
@@ -30,21 +31,34 @@ async def lifespan(app: FastAPI):
 
 
 def _warm_caches() -> None:
-    """后台预热慢探测（AI 工具 / 天气），让首屏驾驶舱直接命中缓存，不卡顿。"""
+    """后台预热慢探测，让首屏驾驶舱直接命中缓存。各探测互不依赖，并行跑（原本串行 10~30s，
+    npm 网络调用主导），把冷启动期「占位→实数」的窗口压短。"""
     import threading
 
-    def _warm() -> None:
+    def _safe(fn) -> None:
         try:
-            from .agent import sysinfo
-            sysinfo.ai_tool_status(block=True)
-            sysinfo.weather()
-            # 预热系统/设备探测缓存（含最慢的温控 mo 探测），首开系统页/设备页直接命中。
-            sysinfo.structured_status(block=True)
-            # 预热驾驶舱总览缓存，首屏直接命中，避免第一次点击卡 1~2s。
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[warmup] {getattr(fn, '__name__', fn)} failed: {exc}")
+
+    def _warm() -> None:
+        from .agent import sysinfo
+        # 三个独立慢探测并行预热
+        jobs = [
+            lambda: sysinfo.ai_tool_status(block=True),
+            sysinfo.weather,
+            lambda: sysinfo.structured_status(block=True),
+        ]
+        threads = [threading.Thread(target=_safe, args=(j,), daemon=True) for j in jobs]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # overview 依赖上面几项的缓存，最后再预热（此时多半已命中）。
+        def _warm_overview() -> None:
             from .cockpit import overview
             overview(force=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[warmup] failed: {exc}")
+        _safe(_warm_overview)
 
     threading.Thread(target=_warm, daemon=True).start()
 
@@ -56,6 +70,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _bearer_token_guard(request: Request, call_next):
+    client_host = request.client.host if request.client else None
+    if (
+        not api_token()
+        or request.method == "OPTIONS"
+        or is_static_request(request.url.path)
+        or is_trusted_local(client_host, request.headers)
+    ):
+        return await call_next(request)
+
+    supplied = bearer_token(request.headers.get("authorization"))
+    if not supplied:
+        supplied = request.headers.get("x-leojarvis-token", "").strip()
+
+    if not is_authorized(supplied):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 app.include_router(router)
 # API 前缀别名：避免将来新增前端路由名与 API 名冲突；旧的无前缀接口继续兼容。
 app.include_router(router, prefix="/api")

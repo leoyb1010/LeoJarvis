@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
+import { useEffect, useRef, useState, lazy, Suspense, type CSSProperties, type ReactNode } from "react";
+// xterm 较重，只有打开终端面板时才懒加载（不进首屏主 bundle）。
+const PtyTerminal = lazy(() => import("./PtyTerminal"));
 import {
   getCliAgents, getCliCommands, getCliSessions, runCliAgent, stopCliSession, clearFinishedSessions, openApp, fmtAgo,
   type CliCommand,
   getVitals, getServices, getSystemOverview, getBriefing, getNotes, getNotifications,
-  agentChat, approveAction, getIntelligence, getBriefingItem,
+  agentChatStream, approveAction, getIntelligence, getBriefingItem, subscribeNotify,
   getAmapConfig, getAmapWeather, getSettings, patchSettings,
   getNote, createNote, updateNote, deleteNote, importNoteUrl, importNoteAttachment, attachmentUrl, getHoroscope,
   getNotebooks, getNotebookWorkspace, addNotebookText, notebookChat, notebookStudio,
@@ -17,6 +16,8 @@ import {
   type Intelligence, type IntelRepo, type IntelSource, type IntelTarget, type BriefDetailItem,
   type AmapConfig, type AmapWeather, type Settings as SettingsData, type Horoscope,
 } from "./live";
+import { briefingMainFeed, pickBriefingLeads } from "../briefingOrder";
+import { useWhisperRecorder } from "../useWhisperRecorder";
 
 // Cortex · 指挥台 — 深/浅双主题 + 酒红强调色。颜色一律走 theme.css 的 CSS 变量。
 const TAG: Record<string, [string, string]> = {
@@ -100,8 +101,19 @@ export default function CommandCenter() {
     try { return localStorage.getItem("cx-theme") === "light" ? "light" : "dark"; } catch { return "dark"; }
   });
   const [vitals, setVitals] = useState<Vitals>({ health: null, cpu: null, online: 0, total: 0 });
+  const [notifyToast, setNotifyToast] = useState<string>("");
 
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem("cx-theme", theme); } catch { /* ignore */ } }, [theme]);
+
+  // 实时推送：情报命中/系统告警时弹一条 toast（数据刷新由各页自行订阅 subscribeNotify）。
+  useEffect(() => {
+    const stop = subscribeNotify((e) => {
+      const title = String(e.title || e.source || "有新动态");
+      setNotifyToast(`🔔 ${title.slice(0, 48)}`);
+      window.setTimeout(() => setNotifyToast(""), 4000);
+    });
+    return stop;
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -173,6 +185,9 @@ export default function CommandCenter() {
           {page === "settings" && <Settings theme={theme} setTheme={setTheme} scan={scan} toggleScan={() => setScan((v) => !v)} />}
         </div>
       </div>
+      {notifyToast && (
+        <div className="cx-pop-in" style={{ position: "fixed", top: 16, right: 18, zIndex: 90, background: "var(--panel)", border: "1px solid var(--accent)", borderRadius: 12, padding: "10px 16px", font: "600 12.5px 'Space Grotesk'", color: "var(--text)", boxShadow: "var(--shadow)", maxWidth: 360 }}>{notifyToast}</div>
+      )}
     </div>
   );
 }
@@ -214,6 +229,11 @@ function ChatDock() {
   const [approving, setApproving] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const suggestions = ["本地服务都还活着吗", "北京今天天气怎么样", "今天有什么高优先情报", "让 codex 看看这个项目"];
+  const voice = useWhisperRecorder({
+    prompt: "LeoJarvis 指挥中心顶部对话",
+    onText: (text) => { setDraft((prev) => prev.trim() ? `${prev.trim()}\n${text}` : text); setOpen(true); },
+    onError: (message) => { setOpen(true); setTurns((t) => [...t, { kind: "system", text: `语音识别失败：${message}` }]); },
+  });
 
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [turns, busy, open]);
 
@@ -232,8 +252,35 @@ function ChatDock() {
     setTurns((t) => [...t, { kind: "user", text: msg }]);
     const next: ChatMsg[] = [...history, { role: "user", content: msg }];
     setHistory(next); setBusy(true);
-    try { appendReply(await agentChat(next)); }
-    catch { setTurns((t) => [...t, { kind: "system", text: "中枢暂时无法连接，请稍后再试。" }]); }
+    let assistantText = "";
+    let assistantIdx = -1;       // 正在流式填充的助手气泡在 turns 中的下标
+    const steps: ChatStep[] = [];
+    try {
+      await agentChatStream(next, (e) => {
+        if (e.type === "tool_start") {
+          steps.push({ tool: e.tool, args: e.args, status: "running" });
+          setTurns((t) => [...t, { kind: "steps", steps: [...steps] }]);
+        } else if (e.type === "tool_result") {
+          const s = steps.find((x) => x.tool === e.tool && x.status === "running");
+          if (s) { s.status = e.status; s.result = e.result; }
+        } else if (e.type === "token") {
+          assistantText += e.text;
+          setTurns((t) => {
+            const copy = [...t];
+            if (assistantIdx < 0) { copy.push({ kind: "assistant", text: assistantText }); assistantIdx = copy.length - 1; }
+            else copy[assistantIdx] = { kind: "assistant", text: assistantText };
+            return copy;
+          });
+        } else if (e.type === "final") {
+          if (e.reply) setHistory((h) => [...h, { role: "assistant", content: e.reply }]);
+        } else if (e.type === "pending") {
+          if (e.reply && !assistantText) setTurns((t) => [...t, { kind: "assistant", text: e.reply }]);
+          if (e.pending_actions?.length) setTurns((t) => [...t, { kind: "pending", actions: e.pending_actions! }]);
+        } else if (e.type === "error") {
+          setTurns((t) => [...t, { kind: "system", text: e.message }]);
+        }
+      });
+    } catch { setTurns((t) => [...t, { kind: "system", text: "中枢暂时无法连接，请稍后再试。" }]); }
     finally { setBusy(false); }
   }
   async function approve(id: string) {
@@ -255,6 +302,7 @@ function ChatDock() {
         <span style={{ font: "700 14px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>&gt;_</span>
         <input value={draft} onChange={(e) => setDraft(e.target.value)} onFocus={() => setOpen(true)} onKeyDown={(e) => { if (e.key === "Enter") send(draft); }} placeholder="问 Cortex 一句… (天气 / 情报 / 跑个 agent / 记一笔)" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "var(--text)", font: "500 13.5px 'Space Grotesk',sans-serif" }} />
         {busy && <span style={mono(10, "var(--text-mute)")}>思考中…</span>}
+        <button onClick={voice.toggle} disabled={busy || voice.transcribing} title="Whisper 语音输入" style={{ border: "1px solid var(--border)", cursor: busy || voice.transcribing ? "default" : "pointer", background: voice.recording ? "var(--bad)" : "var(--panel-2)", color: voice.recording ? "#fff" : "var(--text-dim)", font: "600 10.5px 'Space Grotesk'", padding: "7px 11px", borderRadius: 8, opacity: busy || voice.transcribing ? 0.55 : 1 }}>{voice.transcribing ? "转写中" : voice.recording ? "停止" : "语音"}</button>
         <button onClick={() => send(draft)} disabled={busy} style={{ border: 0, cursor: busy ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 11px 'Space Grotesk'", padding: "7px 14px", borderRadius: 8, opacity: busy ? 0.6 : 1 }}>发送</button>
         {open && <button onClick={() => setOpen(false)} title="收起" style={{ border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text-mute)", cursor: "pointer", width: 30, height: 30, borderRadius: 8, display: "grid", placeContent: "center" }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 15l6-6 6 6" /></svg></button>}
       </div>
@@ -430,7 +478,7 @@ function IntelFeed({ onOpen, goIntel }: { onOpen: (id: string) => void; goIntel:
     const t = setInterval(() => load(true), 60000);  // 每分钟扫描一次最新
     return () => { live = false; clearInterval(t); };
   }, []);
-  const items = (Array.isArray(brief?.items) ? brief!.items! : []).filter((it) => it.kind !== "github_repo" && it.kind !== "repo").sort((a, b) => ((b.ts as number) || 0) - ((a.ts as number) || 0));
+  const items = briefingMainFeed(Array.isArray(brief?.items) ? brief!.items! : []);
   const total = brief?.counts?.total ?? items.length;
   return (
     <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, overflow: "hidden", position: "relative" }}>
@@ -660,6 +708,11 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
   const [approving, setApproving] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const voice = useWhisperRecorder({
+    prompt: "LeoJarvis 指挥中心 Jarvis 对话",
+    onText: (text) => setDraft((prev) => prev.trim() ? `${prev.trim()}\n${text}` : text),
+    onError: (message) => setTurns((t) => [...t, { kind: "system", text: `语音识别失败：${message}` }]),
+  });
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [turns, busy]);
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80); const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   function appendReply(res: ChatReply | null | undefined) {
@@ -675,8 +728,35 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
     setDraft(""); setTurns((t) => [...t, { kind: "user", text: msg }]);
     const next: ChatMsg[] = [...history, { role: "user", content: msg }];
     setHistory(next); setBusy(true);
-    try { appendReply(await agentChat(next)); }
-    catch { setTurns((t) => [...t, { kind: "system", text: "中枢暂时无法连接，请稍后再试。" }]); }
+    let assistantText = "";
+    let assistantIdx = -1;
+    const steps: ChatStep[] = [];
+    try {
+      await agentChatStream(next, (e) => {
+        if (e.type === "tool_start") {
+          steps.push({ tool: e.tool, args: e.args, status: "running" });
+          setTurns((t) => [...t, { kind: "steps", steps: [...steps] }]);
+        } else if (e.type === "tool_result") {
+          const s = steps.find((x) => x.tool === e.tool && x.status === "running");
+          if (s) { s.status = e.status; s.result = e.result; }
+        } else if (e.type === "token") {
+          assistantText += e.text;
+          setTurns((t) => {
+            const copy = [...t];
+            if (assistantIdx < 0) { copy.push({ kind: "assistant", text: assistantText }); assistantIdx = copy.length - 1; }
+            else copy[assistantIdx] = { kind: "assistant", text: assistantText };
+            return copy;
+          });
+        } else if (e.type === "final") {
+          if (e.reply) setHistory((h) => [...h, { role: "assistant", content: e.reply }]);
+        } else if (e.type === "pending") {
+          if (e.reply && !assistantText) setTurns((t) => [...t, { kind: "assistant", text: e.reply }]);
+          if (e.pending_actions?.length) setTurns((t) => [...t, { kind: "pending", actions: e.pending_actions! }]);
+        } else if (e.type === "error") {
+          setTurns((t) => [...t, { kind: "system", text: e.message }]);
+        }
+      });
+    } catch { setTurns((t) => [...t, { kind: "system", text: "中枢暂时无法连接，请稍后再试。" }]); }
     finally { setBusy(false); }
   }
   async function approve(id: string) {
@@ -713,6 +793,7 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
       </div>
       <div style={{ ...row(8), padding: "10px 12px", borderTop: "1px solid var(--border-soft)", position: "relative" }}>
         <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(draft); }} placeholder="和 Jarvis 说点什么…" style={{ flex: 1, background: "var(--panel-3)", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 12px", color: "var(--text)", font: "500 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
+        <button onClick={voice.toggle} disabled={busy || voice.transcribing} title="Whisper 语音输入" style={{ border: "1px solid var(--border)", cursor: busy || voice.transcribing ? "default" : "pointer", background: voice.recording ? "var(--bad)" : "var(--panel-2)", color: voice.recording ? "#fff" : "var(--text-dim)", font: "600 11px 'Space Grotesk'", padding: "8px 12px", borderRadius: 9, flex: "none", opacity: busy || voice.transcribing ? 0.55 : 1 }}>{voice.transcribing ? "转写中" : voice.recording ? "停止" : "语音"}</button>
         <button onClick={() => send(draft)} disabled={busy || !draft.trim()} style={{ border: 0, cursor: busy || !draft.trim() ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "8px 15px", borderRadius: 9, flex: "none", opacity: busy || !draft.trim() ? 0.5 : 1 }}>发送</button>
       </div>
       </div>
@@ -734,8 +815,7 @@ function synthBrief(opts: { news: BriefItem[]; services: Service[]; svcTotal: nu
   if (opts.running > 0) lines.push({ topic: "智能体在跑", detail: `${opts.running} 个会话运行中，切换页面不影响后台执行。`, tone: "var(--accent)" });
   if (opts.unread > 0) lines.push({ topic: "未读消息", detail: `共 ${opts.unread} 条未读，可在右侧应用区直接打开处理。`, tone: "#ffb454" });
   // ③ 顶级情报，把简报填到 4 条
-  const rank = (p?: string) => p === "高优先" ? 0 : p === "中优先" ? 1 : 2;
-  const top = [...opts.news].sort((a, b) => (rank(a.priority) - rank(b.priority)) || (((b.score as number) || 0) - ((a.score as number) || 0)));
+  const top = pickBriefingLeads(opts.news, 4);
   for (const it of top) {
     if (lines.length >= 4) break;
     const title = String(it.title || "");
@@ -798,19 +878,25 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
   useEffect(() => {
     let live = true;
     const clock = setInterval(() => setNow(new Date()), 1000);
+    // 推送驱动 + 兜底慢轮询：实时事件来了立即刷新，否则按更长间隔兜底（降轮询压力）。
     const pull = () => { getServices().then((d) => { if (live && Array.isArray(d)) setServices(d); }).catch(() => {}); getSystemOverview().then((d) => { if (live) setOverview(d); }).catch(() => {}); };
-    pull(); const t = setInterval(pull, 10000);
+    pull(); const t = setInterval(pull, 30000);              // 10s → 30s（推送会即时补刷）
     const pullBrief = () => getBriefing().then((d) => { if (live) setBrief(d); }).catch(() => {});
-    pullBrief(); const tb = setInterval(pullBrief, 60000);
+    pullBrief(); const tb = setInterval(pullBrief, 120000);  // 60s → 120s（情报命中走推送即时刷）
     const pullSess = () => getCliSessions().then((d) => { if (live) { setSessions(d.sessions || []); setExternal(d.external || []); } }).catch(() => {});
-    pullSess(); const tsv = setInterval(pullSess, 4000);
+    pullSess(); const tsv = setInterval(pullSess, 6000);     // 4s → 6s
     reloadNotes();
     getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {});
     const tn = setInterval(() => { getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {}); }, 30000);
-    const loadWx = () => getAmapWeather("深圳").then((wd) => { if (live && wd?.ok) setWx(wd); }).catch(() => {});
-    loadWx(); const tw = setInterval(loadWx, 600000);
+    // 实时推送：情报命中/系统告警 → 立即刷新简报与系统态，不等下一个轮询周期。
+    const stopNotify = subscribeNotify(() => { if (!live) return; pullBrief(); pull(); });
+    // 天气城市取高德配置的 home_city（config/settings.toml [amap].home_city），未配置时回退深圳。
+    let wxCity = "深圳";
+    const loadWx = () => getAmapWeather(wxCity).then((wd) => { if (live && wd?.ok) setWx(wd); }).catch(() => {});
+    getAmapConfig().then((c) => { if (live && c?.home_city) wxCity = c.home_city; loadWx(); }).catch(() => loadWx());
+    const tw = setInterval(loadWx, 600000);
     ["天秤", "双鱼", "双子"].forEach((s) => getHoroscope(s).then((d) => { if (live && d?.ok) setHoros((p) => ({ ...p, [s]: d })); }).catch(() => {}));
-    return () => { live = false; clearInterval(clock); clearInterval(t); clearInterval(tb); clearInterval(tsv); clearInterval(tn); clearInterval(tw); };
+    return () => { live = false; clearInterval(clock); clearInterval(t); clearInterval(tb); clearInterval(tsv); clearInterval(tn); clearInterval(tw); stopNotify(); };
   }, []);
 
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -824,8 +910,7 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
   const svcOnline = services.filter((s) => s.health === "online").length;
 
   const allItems = Array.isArray(brief?.items) ? brief!.items! : [];
-  const news = allItems.filter((it) => it.kind !== "github_repo" && it.kind !== "repo");
-  const newsByTime = [...news].sort((a, b) => ((b.ts as number) || 0) - ((a.ts as number) || 0));
+  const news = briefingMainFeed(allItems);
   const totalUnread = notifApps.reduce((a, b) => a + (typeof b.count === "number" ? b.count : 0), 0);
   const signalCount = brief?.counts?.total ?? news.length;
   const runningNow = sessions.filter((s) => s.status === "running").length + external.length;  // 含常驻网关(Hermes/OpenClaw)
@@ -833,10 +918,10 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
 
   const PRI: Record<string, [string, string]> = { 高优先: ["#fff", "#ff5d5d"], 中优先: ["#fff", "var(--accent)"], 简报: ["#fff", "var(--accent)"], 观察: ["var(--text-dim)", "var(--panel-2)"] };
   const pstyle = (p?: string): [string, string] => PRI[p || "观察"] || PRI["观察"];
-  const leads = [...news].sort((a, b) => { const r = (p?: string) => p === "高优先" ? 0 : p === "中优先" ? 1 : 2; return (r(a.priority) - r(b.priority)) || (((b.score as number) || 0) - ((a.score as number) || 0)); }).slice(0, 3);
+  const leads = pickBriefingLeads(news, 3);
   const leadCount = Math.max(1, leads.length);
   const lead = leads[leadIdx % leadCount];  // 进度条走完即切下一条
-  const feed = newsByTime.slice(0, 20);  // E1③ 填满情报流（之前只 6 条留大片空白）
+  const feed = news.slice(0, 20);  // 尊重后端「时效窗口内按重点」的产品顺序
   const catColor: Record<string, string> = { AI科技: "#4da3ff", 财经: "#ffb454", 军事: "#ff5d5d", 科技: "#36d39a", 中文科技: "#b69cff", 开发: "#5ad1c0", 综合资讯: "#9aa4b2", X社媒: "#d9536b" };
   useEffect(() => { if (leadCount <= 1) return; const t = setInterval(() => setLeadIdx((i) => (i + 1) % leadCount), 6500); return () => clearInterval(t); }, [leadCount]);
   const running = sessions.filter((s) => s.status === "running");
@@ -881,7 +966,7 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
             <div style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 · {week} · {greet}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
-            <span style={{ fontSize: 19, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 16px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "深圳"} · {wx?.weather || "—"}</span>
+            <span style={{ fontSize: 19, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 16px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "—"} · {wx?.weather || "—"}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
             {["天秤", "双鱼", "双子"].map((s) => { const h = horos[s]; const sc = typeof h?.score === "number" ? h.score : null; const tn = sc == null ? "var(--text-mute)" : sc >= 75 ? "var(--good)" : sc >= 45 ? "var(--warn)" : "var(--bad)"; return <span key={s} title={h?.advice || ""} style={{ ...row(4), font: "500 10px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: tn, display: "inline-block", boxShadow: `0 0 5px ${tn}` }} />{s} <b style={{ color: "var(--text)" }}>{sc ?? "—"}</b></span>; })}
@@ -1064,72 +1149,7 @@ function AppsWidgetRow({ apps }: { apps: NotifApp[] }) {
 // 真实交互终端：xterm.js ←→ 后端 PTY（/ws/term）。在这里跑的是 agent 的**原生 REPL**，
 // 所以 claude 的 /model、/cost、/clear 这些原生斜杠命令会真实弹出、完整执行 —— 不是假壳。
 const PTY_CAPABLE = ["claude", "codex", "cursor", "grok", "hermes", "openclaw", "shell"];
-function PtyTerminal({ agent, themeMode, sessionKey }: { agent: string; themeMode: Theme; sessionKey: number }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<"connecting" | "live" | "exited">("connecting");
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const dark = themeMode === "dark";
-    const term = new XTerm({
-      fontFamily: "'IBM Plex Mono','SFMono-Regular',monospace",
-      fontSize: 12.5, lineHeight: 1.32, cursorBlink: true, scrollback: 5000,
-      allowProposedApi: true,
-      theme: dark
-        ? { background: "#0f141b", foreground: "#cdd6e2", cursor: "#d9536b", cursorAccent: "#0f141b", selectionBackground: "rgba(217,83,107,.32)", black: "#0f141b", brightBlack: "#5b6573" }
-        : { background: "#0f141b", foreground: "#cdd6e2", cursor: "#d9536b", cursorAccent: "#0f141b", selectionBackground: "rgba(217,83,107,.32)" },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
-    const doFit = () => { try { fit.fit(); } catch { /* noop */ } };
-    setTimeout(doFit, 0);
-
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/api/ws/term`);
-    ws.binaryType = "arraybuffer";
-    const dec = new TextDecoder();
-    ws.onopen = () => {
-      setStatus("live");
-      ws.send(JSON.stringify({ type: "start", agent, cwd: "~", cols: term.cols, rows: term.rows }));
-      term.focus();
-    };
-    ws.onmessage = (e) => {
-      if (typeof e.data === "string") {
-        try {
-          const o = JSON.parse(e.data);
-          if (o.type === "exit") { setStatus("exited"); term.write("\r\n\x1b[2m─ 会话已结束 ─\x1b[0m\r\n"); }
-          else if (o.type === "error") term.write(`\r\n\x1b[31m${o.msg}\x1b[0m\r\n`);
-        } catch { /* ignore */ }
-      } else {
-        term.write(new Uint8Array(e.data as ArrayBuffer));
-      }
-    };
-    ws.onclose = () => setStatus((s) => (s === "exited" ? s : "exited"));
-    ws.onerror = () => setStatus("exited");
-    const onData = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data: d })); });
-    const ro = new ResizeObserver(() => {
-      doFit();
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-    });
-    ro.observe(host);
-    void dec;
-
-    return () => { onData.dispose(); ro.disconnect(); try { ws.close(); } catch { /* noop */ } term.dispose(); };
-    // sessionKey 变化 = 用户点了「重启会话」，强制重建终端
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agent, sessionKey]);
-
-  return (
-    <div style={{ position: "relative", height: "100%", minHeight: 0, background: "#0f141b" }}>
-      <div ref={hostRef} style={{ height: "100%", padding: "8px 4px 8px 12px" }} />
-      <span style={{ position: "absolute", top: 9, right: 13, ...row(5), font: "600 9px 'IBM Plex Mono',monospace", color: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", pointerEvents: "none" }}>
-        <b style={{ width: 6, height: 6, borderRadius: "50%", background: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", display: "inline-block", boxShadow: status === "live" ? "0 0 6px var(--good)" : "none", animation: status === "live" ? "cxBreathe 2.5s ease infinite" : "none" }} />
-        {status === "live" ? "PTY 在线" : status === "connecting" ? "连接中…" : "已结束"}
-      </span>
-    </div>
-  );
-}
+// PtyTerminal 已抽到 ./PtyTerminal.tsx 并在文件顶部 React.lazy 懒加载。
 
 function Agents({ themeMode }: { themeMode: Theme }) {
   const [agents, setAgents] = useState<CliAgent[]>([]);
@@ -1149,6 +1169,16 @@ function Agents({ themeMode }: { themeMode: Theme }) {
   const [termMode, setTermMode] = useState<"pty" | "task">("pty");  // E2: 默认进真实交互终端
   const [ptyKey, setPtyKey] = useState(0);                          // ++ = 重启 PTY 会话
   const termRef = useRef<HTMLPreElement | null>(null);
+  const promptVoice = useWhisperRecorder({
+    prompt: "LeoJarvis Agent 快速任务",
+    onText: (text) => setPrompt((prev) => prev.trim() ? `${prev.trim()}\n${text}` : text),
+    onError: (message) => setErr(`语音识别失败：${message}`),
+  });
+  const centerVoice = useWhisperRecorder({
+    prompt: "LeoJarvis Agent 中央指令",
+    onText: (text) => setCenterCmd((prev) => prev.trim() ? `${prev.trim()}\n${text}` : text),
+    onError: (message) => setErr(`语音识别失败：${message}`),
+  });
 
   useEffect(() => {
     getCliAgents().then((d) => { setAgents(d.agents); const inst = d.agents.find((a) => a.installed); if (inst) setSel((s) => s || inst.name); }).catch(() => {});
@@ -1236,6 +1266,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
           <div style={{ ...row(9), background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", height: 40 }}>
             <span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>$</span>
             <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") run(); }} placeholder={`给 ${sel || "agent"} 一个任务…`} style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "var(--text)", font: "500 13px 'Space Grotesk',sans-serif" }} />
+            <button onClick={promptVoice.toggle} disabled={busy || promptVoice.transcribing} title="Whisper 语音输入" style={{ border: "1px solid var(--border)", cursor: busy || promptVoice.transcribing ? "default" : "pointer", background: promptVoice.recording ? "var(--bad)" : "var(--panel-3)", color: promptVoice.recording ? "#fff" : "var(--text-dim)", font: "600 10.5px 'Space Grotesk'", padding: "6px 10px", borderRadius: 7, opacity: busy || promptVoice.transcribing ? 0.55 : 1 }}>{promptVoice.transcribing ? "转写" : promptVoice.recording ? "停止" : "语音"}</button>
             <button onClick={run} disabled={busy} style={{ border: 0, cursor: busy ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 11px 'Space Grotesk'", padding: "6px 13px", borderRadius: 7, opacity: busy ? 0.6 : 1 }}>{busy ? "启动中" : "运行"}</button>
           </div>
           {err && <div style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--bad)" }}>{err}</div>}
@@ -1287,7 +1318,9 @@ function Agents({ themeMode }: { themeMode: Theme }) {
 
         {/* 主体 */}
         {termMode === "pty" ? (
-          <PtyTerminal agent={ptyAgent} themeMode={themeMode} sessionKey={ptyKey} />
+          <Suspense fallback={<div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-mute)", font: "600 11px 'IBM Plex Mono',monospace" }}>终端加载中…</div>}>
+            <PtyTerminal agent={ptyAgent} themeMode={themeMode} sessionKey={ptyKey} />
+          </Suspense>
         ) : (
           <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0 }}>
             <div style={{ ...row(10), padding: "12px 16px 10px", borderBottom: "1px solid var(--border-soft)" }}>
@@ -1370,6 +1403,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
                 if (e.key === "Enter" && target) sendCenter(target);
               }}
               placeholder={target ? `给 ${targetLabel} 发指令，回车执行（输入 / 调出 ${agentCmds.length} 个真实命令）…` : "先在左上选一个 agent…"} style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: "var(--text)", font: "500 12.5px 'IBM Plex Mono',monospace" }} />
+            <button onClick={centerVoice.toggle} disabled={busy || centerVoice.transcribing || !target} title="Whisper 语音输入" style={{ border: "1px solid var(--border)", cursor: busy || centerVoice.transcribing || !target ? "default" : "pointer", background: centerVoice.recording ? "var(--bad)" : "var(--panel-2)", color: centerVoice.recording ? "#fff" : "var(--text-dim)", font: "600 10.5px 'Space Grotesk'", padding: "7px 10px", borderRadius: 7, opacity: busy || centerVoice.transcribing || !target ? 0.55 : 1 }}>{centerVoice.transcribing ? "转写" : centerVoice.recording ? "停止" : "语音"}</button>
             <button onClick={() => target && sendCenter(target)} disabled={busy || !target || !centerCmd.trim()} style={{ border: 0, cursor: busy || !target ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 11px 'Space Grotesk'", padding: "7px 14px", borderRadius: 7, opacity: busy || !target || !centerCmd.trim() ? 0.5 : 1 }}>{busy ? "…" : "发送"}</button>
           </div>
           {err && <div style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--bad)" }}>{err}</div>}
@@ -1504,11 +1538,12 @@ function Intel() {
     };
     load();
     const t = setInterval(load, 90000);
-    return () => { live = false; clearInterval(t); };
+    const stopNotify = subscribeNotify(() => { if (live) load(); });   // 情报命中 → 立即刷新
+    return () => { live = false; clearInterval(t); stopNotify(); };
   }, []);
 
-  // 按发布时间倒序（最新滚动在最前）；重要性只作筛选维度，不左右默认顺序。
-  const items: BriefItem[] = (Array.isArray(brief?.items) ? brief!.items! : []).filter((it) => it.kind !== "github_repo" && it.kind !== "repo").sort((a, b) => ((b.ts as number) || 0) - ((a.ts as number) || 0));
+  // 后端已经按「时效窗口优先，同窗按重点」排序；前端只做展示过滤，不再二次按 ts 打乱。
+  const items: BriefItem[] = briefingMainFeed(Array.isArray(brief?.items) ? brief!.items! : []);
   const total = items.length;
   const countPri = (p: string) => items.filter((it) => (it.priority || "观察") === p).length;
   const nHigh = countPri("高优先"), nMid = countPri("中优先"), nWatch = items.length - nHigh - nMid;

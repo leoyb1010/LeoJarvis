@@ -8,7 +8,9 @@ from __future__ import annotations
 from .tools import TOOLBUS
 
 
-SYSTEM_TEMPLATE = """你是 LeoJarvis，Leo 的私人 agent，常驻在 Leo 的 Mac 上。
+# 稳定前缀：协议 + 工具目录 + 安全规则。这部分**不随请求变化**，放在 messages 最前，
+# 让 DeepSeek 等 provider 的上下文缓存能跨请求/跨步命中（每轮最多 8 步都复用同一前缀）。
+SYSTEM_STATIC_TEMPLATE = """你是 LeoJarvis，Leo 的私人 agent，常驻在 Leo 的 Mac 上。
 你不是只会聊天的助手——你能调用工具，在 Leo 的机器上真正动手：扫描系统、检查本地服务、读文件、执行命令、写个人记事、检索记忆。
 
 # 你的工作方式
@@ -26,12 +28,20 @@ SYSTEM_TEMPLATE = """你是 LeoJarvis，Leo 的私人 agent，常驻在 Leo 的 
 - 当你需要一个高风险操作时，正常发起 action 即可，系统会拦截并询问 Leo。
 - 回答用中文，简洁、给结论、必要时给下一步建议。
 - 长期记忆只能作为“待确认记忆”候选生成，必须等 Leo 确认后才算正式长期记忆。
-
-# 相关记忆（可能为空）
-{memories}
 """
 
 
-def build_system_prompt(recalled: list[dict]) -> str:
+def build_static_system_prompt() -> str:
+    """稳定前缀（协议+工具目录+安全规则），跨请求不变，便于命中 prompt 缓存。"""
+    return SYSTEM_STATIC_TEMPLATE.format(tools=TOOLBUS.describe())
+
+
+def build_memory_prompt(recalled: list[dict]) -> str:
+    """随请求变化的相关记忆，单独作为一条 system 消息放在稳定前缀之后。"""
     mem = "\n".join(f"- {h.get('text', '')[:200]}" for h in recalled) or "（无）"
-    return SYSTEM_TEMPLATE.format(tools=TOOLBUS.describe(), memories=mem)
+    return f"# 相关记忆（可能为空）\n{mem}"
+
+
+def build_system_prompt(recalled: list[dict]) -> str:
+    """向后兼容：把稳定前缀与记忆拼成单条 system（旧调用方仍可用）。"""
+    return build_static_system_prompt() + "\n" + build_memory_prompt(recalled)

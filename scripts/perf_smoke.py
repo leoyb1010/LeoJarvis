@@ -34,6 +34,8 @@ def fetch(path: str) -> tuple[int, float, int]:
 
 
 def p95(values: list[float]) -> float:
+    if not values:
+        return 0.0
     if len(values) < 2:
         return values[0]
     return statistics.quantiles(values, n=20, method="inclusive")[18]
@@ -46,9 +48,18 @@ def main() -> int:
         values: list[float] = []
         size = 0
         status = 0
+        error: str | None = None
         for _ in range(ROUNDS):
-            status, elapsed, size = fetch(path)
+            try:
+                status, elapsed, size = fetch(path)
+            except Exception as exc:  # 连接拒绝/超时/4xx/5xx/JSON 解析失败：记为失败并继续，不让整个脚本崩
+                error = f"{type(exc).__name__}: {exc}"
+                break
             values.append(elapsed)
+        if error is not None:
+            print(f"{name:18s} ERROR {error}")
+            failures.append(f"{name}: {error}")
+            continue
         avg = statistics.mean(values)
         worst = max(values)
         tail = p95(values)

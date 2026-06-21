@@ -25,6 +25,8 @@ _DEFAULT_ZODIAC = "双子"
 _TODAY_CACHE: dict[str, Any] = {"ts": 0.0, "data": None, "version": None}
 _TODAY_CACHE_TTL = 30.0
 _TODAY_CACHE_LOCK = threading.Lock()
+_TAVILY_DISPLAY_MIN_PRIMARY = 4
+_TAVILY_DISPLAY_CAP = 1
 
 
 def to_chinese(text, *, context="通用内容", max_chars=360, allow_llm=False):
@@ -39,10 +41,12 @@ def _display_chinese(text: str | None, *, context: str, max_chars: int = 280, al
     value = str(text or "").strip()
     if not value:
         return ""
-    value = re.sub(r"^中文摘要[:：]\s*", "", value)
+    value = re.sub(r"^(中文摘要|中文标题)[:：]\s*", "", value)
+    if "标题" in context and re.search(r"[\u3400-\u9fff]", value) and re.search(r"\[[^\]]+\]", value):
+        return value[:max_chars]
     if has_noisy_english(value):
         localized = to_chinese(value, context=context, max_chars=max_chars, allow_llm=allow_llm)
-        return re.sub(r"^中文摘要[:：]\s*", "", localized).strip()
+        return re.sub(r"^(中文摘要|中文标题)[:：]\s*", "", localized).strip()
     return value[:max_chars]
 
 
@@ -103,13 +107,132 @@ def _is_x(row: dict) -> bool:
     return row.get("kind") == "x_post" or source.startswith("intel:x:") or source.startswith("rss:X ·") or meta.get("channel") == "x_monitor"
 
 
+def _is_tavily_source(row: dict) -> bool:
+    source = str(row.get("source") or "")
+    meta = _loads(row.get("meta"), {}) if isinstance(row.get("meta"), str) else (row.get("meta") or {})
+    return source.startswith("intel:tavily:") or meta.get("channel") == "tavily_search"
+
+
+_HOMEPAGE_TECH_TERMS = [
+    "ai", "artificial intelligence", "openai", "chatgpt", "gpt", "llm", "model", "agent",
+    "claude", "anthropic", "gemini", "deepmind", "grok", "mcp", "github", "open source",
+    "developer", "devtool", "tooling", "api", "sdk", "cli", "wasm", "linux", "postgres",
+    "database", "security", "cloudflare", "tailscale", "docker", "kubernetes", "nvidia",
+    "gpu", "semiconductor", "chip", "wafer", "packaging", "data center", "vera rubin",
+    "人工智能", "大模型", "模型", "智能体", "开源", "开发者", "开发工具", "数据库",
+    "安全", "英伟达", "半导体", "芯片", "晶圆", "封装", "玻璃基板", "数据中心",
+    "台积电", "CoWoS", "CoPoS",
+]
+
+_HOMEPAGE_OUT_OF_SCOPE_TERMS = [
+    "retirement", "social security", "mortgage", "stock market", "wall street",
+    "federal reserve", "billionaire tax", "financial regulator", "tariff",
+    "退休", "社会保障", "房贷", "股市", "华尔街", "美联储", "亿万富翁税", "金融监管",
+]
+
+_HOMEPAGE_OUT_OF_SCOPE_SOURCES = {
+    "rss:MarketWatch",
+}
+
+
+def _homepage_scope_material(row: dict) -> str:
+    analysis = _loads(row.get("analysis"), {}) if isinstance(row.get("analysis"), str) else (row.get("analysis") or {})
+    meta = _loads(row.get("meta"), {}) if isinstance(row.get("meta"), str) else (row.get("meta") or {})
+    pieces = [
+        row.get("title"),
+        row.get("content"),
+        row.get("take"),
+        row.get("source"),
+        analysis.get("title_zh") if isinstance(analysis, dict) else "",
+        analysis.get("summary") if isinstance(analysis, dict) else "",
+        meta.get("original_title") if isinstance(meta, dict) else "",
+        meta.get("description") if isinstance(meta, dict) else "",
+    ]
+    return " ".join(str(x or "") for x in pieces).lower()
+
+
+def _homepage_title_material(row: dict) -> str:
+    analysis = _loads(row.get("analysis"), {}) if isinstance(row.get("analysis"), str) else (row.get("analysis") or {})
+    pieces = [
+        row.get("title"),
+        analysis.get("title_zh") if isinstance(analysis, dict) else "",
+    ]
+    return " ".join(str(x or "") for x in pieces).lower()
+
+
+def _scope_term_hit(term: str, material: str) -> bool:
+    needle = term.lower()
+    if re.fullmatch(r"[a-z0-9][a-z0-9 .+_-]*", needle):
+        pattern = rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])"
+        return re.search(pattern, material) is not None
+    return needle in material
+
+
+def _is_homepage_scope_item(row: dict) -> bool:
+    if _is_github(row) or _is_email(row):
+        return True
+    source = str(row.get("source") or "")
+    material = _homepage_scope_material(row)
+    title_material = _homepage_title_material(row)
+    has_tech = any(_scope_term_hit(term, material) for term in _HOMEPAGE_TECH_TERMS)
+    title_has_tech = any(_scope_term_hit(term, title_material) for term in _HOMEPAGE_TECH_TERMS)
+    title_out_of_scope = any(term.lower() in title_material for term in _HOMEPAGE_OUT_OF_SCOPE_TERMS)
+    if title_out_of_scope and not title_has_tech:
+        return False
+    if source in _HOMEPAGE_OUT_OF_SCOPE_SOURCES and not has_tech:
+        return False
+    if any(term.lower() in material for term in _HOMEPAGE_OUT_OF_SCOPE_TERMS) and not has_tech:
+        return False
+    if row.get("kind") in {"news", "web_change", "market"}:
+        return has_tech
+    return True
+
+
 def _looks_like_fallback(text: str | None) -> bool:
     value = str(text or "")
     return (
         value.startswith("英文来源摘要")
         or "英文来源摘要：" in value
         or value.startswith("中文摘要：")
+        or value.startswith("中文标题：")
+        or "相关动态" in value
     )
+
+
+def _is_low_information_summary(text: str | None) -> bool:
+    value = _display_chinese(text, context="简报摘要", max_chars=320, allow_llm=False)
+    if not value:
+        return True
+    if re.search(r"^来源提到[^。]{0,100}(打开|查看|完整上下文|原始链接)", value):
+        return True
+    if "已保留原始链接" in value or "打开查看完整上下文" in value or "打开原文确认" in value:
+        return True
+    if re.search(r"^来自[^。]{0,80}资讯，主题包含", value):
+        return True
+    return False
+
+
+def _is_generic_synthetic_title(text: str | None) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if "相关动态" in value:
+        return True
+    return bool(re.fullmatch(r"(AI 与开发者工具资讯|海外资讯|市场与财经资讯|科技资讯|综合资讯|资讯)[：:]\s*[^，。；！？!?]{1,36}", value))
+
+
+def _has_generated_related_noise(row: dict) -> bool:
+    analysis = _loads(row.get("analysis"), {}) if isinstance(row.get("analysis"), str) else (row.get("analysis") or {})
+    material = " ".join(
+        str(x or "")
+        for x in [
+            row.get("title"),
+            row.get("take"),
+            analysis.get("title_zh") if isinstance(analysis, dict) else "",
+            analysis.get("summary") if isinstance(analysis, dict) else "",
+        ]
+    )
+    return "相关动态" in material
 
 
 def _x_topic(text: str) -> str:
@@ -171,6 +294,8 @@ def _source_label(source: str | None) -> str:
         return "RSS 资讯"
     if source.startswith("intel:web:"):
         return "网页变化"
+    if source.startswith("intel:tavily:"):
+        return "搜索补充"
     if source.startswith("rss:"):
         return "RSS 资讯"
     if source.startswith("intel:"):
@@ -235,7 +360,7 @@ def _why(row: dict, reasons: list[str]) -> str:
 
 
 def _safe_tag(text: str) -> str:
-    text = re.sub(r"^(英文来源摘要|中文摘要)[:：]\s*", "", str(text or "").strip())
+    text = re.sub(r"^(英文来源摘要|中文摘要|中文标题)[:：]\s*", "", str(text or "").strip())
     text = text.replace("相关动态", "")
     text = re.sub(r"[。；;，,].*$", "", text)
     text = text.strip()
@@ -512,7 +637,7 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     if _is_github(row):
         title = analysis.get("title_zh") or f"{repo_name} · GitHub 高增速项目"
     elif _is_email(row):
-        title = row.get("title") or "（无主题邮件）"
+        title = analysis.get("title_zh") or row.get("title") or "（无主题邮件）"
     elif _is_x(row):
         title = analysis.get("title_zh") or to_chinese(row.get("title") or "X 监控动态", context="X 监控标题", max_chars=120)
         if _looks_like_fallback(title):
@@ -520,6 +645,10 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     else:
         # 优先用判断器产出的中文标题，没有再回退到翻译，避免英文标题外泄
         title = analysis.get("title_zh") or to_chinese(row.get("title") or "未命名信息", context="简报标题", max_chars=120)
+    if _is_generic_synthetic_title(title):
+        raw_title = meta.get("original_title") or row.get("title") or ""
+        if raw_title:
+            title = to_chinese(raw_title, context="简报标题", max_chars=140)
 
     # take / why / relation / next_step 一律优先用 LLM 产出的真实分析，没有才回退模板
     take = analysis.get("summary") or analysis.get("take") \
@@ -551,8 +680,13 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     item_tags = _tags(row, meta, reasons)
     if _is_github(row) and repo_snapshot.get("display_topics"):
         item_tags = list(dict.fromkeys((repo_snapshot.get("display_topics") or []) + ["GitHub 项目"]))[:6]
-    title = _display_chinese(title, context="简报标题", max_chars=120, allow_llm=translate_source_detail) or title
+    if _is_github(row):
+        title = re.sub(r"^(中文摘要|中文标题)[:：]\s*", "", str(title or "")).strip()[:140] or f"{repo_name} · GitHub 高增速项目"
+    else:
+        title = _display_chinese(title, context="简报标题", max_chars=120, allow_llm=translate_source_detail) or title
     take = _display_chinese(take, context="简报摘要", max_chars=260, allow_llm=translate_source_detail) or take
+    if _is_low_information_summary(take):
+        take = ""
     why = _display_chinese(why, context="为什么重要", max_chars=260, allow_llm=translate_source_detail) or why
     relation = _display_chinese(relation, context="和 Leo 的关系", max_chars=260, allow_llm=translate_source_detail) or relation
     next_step = _display_chinese(next_step, context="下一步建议", max_chars=260, allow_llm=translate_source_detail) or next_step
@@ -572,7 +706,7 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         "source_raw": row.get("source"),
         "kind": row.get("kind"),
         "score": round(float(row.get("score") or 0), 3),
-        "take": take or "暂无摘要。",
+        "take": take,
         "detail": detail,
         "source_detail": source_detail,
         "source_detail_raw": source_detail_raw,
@@ -619,13 +753,26 @@ def _group_items(items: list[dict]) -> list[dict]:
         groups[key].append(item)
     out = []
     for name, rows in groups.items():
+        latest_ts = max(int(r.get("ts") or r.get("ingested_ts") or 0) for r in rows)
+        best_priority = max({"高优先": 2, "中优先": 1, "观察": 0}.get(str(r.get("priority") or "观察"), 0) for r in rows)
         out.append({
             "name": name,
             "count": len(rows),
             "top_score": max(r["score"] for r in rows),
+            "latest_ts": latest_ts,
+            "best_priority": best_priority,
             "items": rows[:4],
         })
-    return sorted(out, key=lambda g: (-g["top_score"], -g["count"], g["name"]))[:8]
+    return sorted(
+        out,
+        key=lambda g: (
+            -_freshness_rank_for_ts(int(g["latest_ts"] or 0)),
+            -int(g["best_priority"] or 0),
+            -float(g["top_score"] or 0),
+            -int(g["latest_ts"] or 0),
+            g["name"],
+        ),
+    )[:8]
 
 
 _TOKEN_STOPWORDS = {
@@ -703,15 +850,22 @@ def _apply_priority_quota(items: list[dict]) -> None:
     news = [it for it in items if it.get("kind") != "github_repo"]
     repos = [it for it in items if it.get("kind") == "github_repo"]
     if news:
-        ranked = sorted(news, key=lambda it: -float(it.get("score") or 0))
-        high_quota = max(1, min(6, round(len(ranked) * 0.15)))
+        ranked = sorted(
+            news,
+            key=lambda it: (_freshness_rank_for_item(it), float(it.get("score") or 0), _item_ts(it)),
+            reverse=True,
+        )
+        recent_count = sum(1 for item in ranked if _freshness_rank_for_item(item) >= 3)
+        high_quota = min(6, max(1, round(recent_count * 0.15))) if recent_count else 0
         mid_quota = max(2, round(len(ranked) * 0.35))
         for idx, item in enumerate(ranked):
-            if item.get("triage") == "notify":
+            freshness_rank = _freshness_rank_for_item(item)
+            score = float(item.get("score") or 0)
+            if freshness_rank >= 3 and item.get("triage") == "notify" and idx < max(high_quota, 1):
                 item["priority"] = "高优先"
-            elif idx < high_quota and float(item.get("score") or 0) >= 0.6:
+            elif freshness_rank >= 3 and idx < high_quota and score >= 0.6:
                 item["priority"] = "高优先"
-            elif idx < high_quota + mid_quota and float(item.get("score") or 0) >= 0.45:
+            elif freshness_rank >= 2 and idx < high_quota + mid_quota and score >= 0.45:
                 item["priority"] = "中优先"
             else:
                 item["priority"] = "观察"
@@ -725,10 +879,17 @@ def _apply_priority_quota(items: list[dict]) -> None:
 def _today_focus_text(items: list[dict]) -> str:
     if not items:
         return "今天还没有足够高价值的情报进入焦点。可以先运行采集或调整 RSS / X 监控源。"
-    high = [it for it in items if it.get("priority") == "高优先" and it.get("kind") != "github_repo"]
-    top = (high or items)[:3]
+    top = sorted(
+        [it for it in items if it.get("kind") != "github_repo"],
+        key=_timely_priority_key,
+        reverse=True,
+    )[:3]
+    if not top:
+        top = items[:3]
     lead = top[0]
     lead_take = str(lead.get("take") or "").split("。")[0].strip()
+    if _is_low_information_summary(lead_take):
+        lead_take = ""
     if len(lead_take) > 110:
         # 在最近的次级标点处收口，避免把数字/词语拦腰截断。
         cut = max(lead_take.rfind(ch, 0, 110) for ch in "，、；,;")
@@ -823,9 +984,14 @@ def _supplement_category_floor(c, rows: list, since: int) -> list:
         if deficit <= 0:
             continue
         cand = c.execute(
-            f"SELECT {_FLOOR_COLS} FROM judgments j JOIN events e ON e.id=j.event_id "
-            "WHERE j.ts>=? AND json_extract(e.meta,'$.category')=? AND e.kind!='github_repo' "
-            "ORDER BY j.score DESC, j.ts DESC LIMIT ?",
+            "WITH latest_judgments AS ("
+            "  SELECT event_id, MAX(ts) AS ts FROM judgments WHERE ts>=? GROUP BY event_id"
+            ") "
+            f"SELECT {_FLOOR_COLS} FROM latest_judgments lj "
+            "JOIN judgments j ON j.event_id=lj.event_id AND j.ts=lj.ts "
+            "JOIN events e ON e.id=j.event_id "
+            "WHERE j.triage IN ('notify','digest') AND json_extract(e.meta,'$.category')=? AND e.kind!='github_repo' "
+            "ORDER BY e.ts DESC, j.score DESC LIMIT ?",
             (since, cat, floor * 4),
         ).fetchall()
         for row in cand:
@@ -849,10 +1015,18 @@ def _build_today_raw() -> dict:
     with db.conn() as c:
         rows = c.execute(
             """
+            WITH latest_judgments AS (
+              SELECT event_id, MAX(ts) AS ts
+              FROM judgments
+              WHERE ts>=?
+              GROUP BY event_id
+            )
             SELECT e.id AS event_id, e.title, e.content, e.url, e.domain, e.source, e.kind, e.meta,
                    j.score, j.take, j.triage, j.reasons, j.analysis, j.ts
-            FROM judgments j JOIN events e ON e.id=j.event_id
-            WHERE j.ts>=? AND j.triage IN ('notify','digest')
+            FROM latest_judgments lj
+            JOIN judgments j ON j.event_id=lj.event_id AND j.ts=lj.ts
+            JOIN events e ON e.id=j.event_id
+            WHERE j.triage IN ('notify','digest')
             ORDER BY e.ts DESC
             """,
             (since,),
@@ -871,6 +1045,12 @@ def _build_today_raw() -> dict:
     duplicate_count = 0
     for raw in rows:
         row = dict(raw)
+        if not _is_homepage_scope_item(row):
+            duplicate_count += 1
+            continue
+        if _has_generated_related_noise(row):
+            duplicate_count += 1
+            continue
         key = _clean_key(row.get("title") or row.get("content") or row["event_id"])
         if key and key in seen:
             duplicate_count += 1
@@ -886,15 +1066,21 @@ def _build_today_raw() -> dict:
             mail_items.append(item)
         else:
             items.append(item)
+        if not _is_email(row) and _is_synthetic_noise_item(item):
+            items.pop()
+            duplicate_count += 1
 
     clustered_away = len(items)
     items = _cluster_similar(items)
     clustered_away -= len(items)
     duplicate_count += clustered_away
     _apply_priority_quota(items)
-    # 主排序：发布时间倒序（最新滚动在最前）。重要性只体现在优先级标签上，不左右顺序。
-    # GitHub 项目没有 published、且有独立版块，沉到最后不参与新闻流的时间排序。
-    items.sort(key=lambda it: (0 if it.get("kind") == "github_repo" else 1, it.get("ts") or 0), reverse=True)
+    # 主排序：时效优先；同一时效窗口内再按来源质量和重要性调序。
+    # GitHub 有独立雷达栏，Tavily 是付费搜索兜底，二者不抢主新闻流前排。
+    items.sort(key=_timely_priority_key, reverse=True)
+    items = _with_tavily_tail(items, min_primary=_TAVILY_DISPLAY_MIN_PRIMARY, tavily_cap=_TAVILY_DISPLAY_CAP)
+    items = _limit_github_presence(items, cap=4)
+    focus_items = [it for it in items if not _is_github_item(it)][:5]
 
     business = [it for it in items if it["domain"] == "business"]
     life = [it for it in items if it["domain"] == "life"]
@@ -914,7 +1100,7 @@ def _build_today_raw() -> dict:
         "mail": mail_items,
         "x": x_items,
         "github": github_items,
-        "focus": items[:5],
+        "focus": focus_items,
         "groups": _group_items(items),
         "counts": {
             "business": len(business),
@@ -940,7 +1126,7 @@ def _build_today_raw() -> dict:
 
 def _compact_item(item: dict) -> dict:
     keep = (
-        "event_id", "title", "original_title", "url", "domain", "domain_label", "source", "source_raw",
+        "event_id", "title", "url", "domain", "domain_label", "source", "source_raw",
         "kind", "score", "take", "detail", "triage", "priority", "why_important", "relation", "next_step",
         "tags", "ts", "repo_stars", "repo_speed", "channel", "category", "dup_count", "related_sources",
         "source_detail_translated",
@@ -960,41 +1146,96 @@ def _is_mail_item(item: dict) -> bool:
     return item.get("kind") == "email" or item.get("channel") == "mail"
 
 
+def _is_tavily_item(item: dict) -> bool:
+    return item.get("channel") == "tavily_search" or str(item.get("source_raw") or "").startswith("intel:tavily:")
+
+
+def _is_synthetic_noise_item(item: dict) -> bool:
+    title = str(item.get("title") or "")
+    take = str(item.get("take") or "")
+    return _is_generic_synthetic_title(title) or "相关动态" in title or "相关动态" in take
+
+
+def _with_tavily_tail(items: list[dict], *, min_primary: int = _TAVILY_DISPLAY_MIN_PRIMARY, tavily_cap: int = _TAVILY_DISPLAY_CAP) -> list[dict]:
+    """Keep Tavily as paid-search fallback only.
+
+    Primary configured sources own the feed. Tavily is appended only when the
+    recent primary pool is short, and it never participates in the leading sort.
+    """
+    primary_items = [it for it in items if not _is_tavily_item(it)]
+    tavily_items = [it for it in items if _is_tavily_item(it)]
+    fresh_primary_count = sum(1 for item in primary_items if _freshness_rank_for_item(item) >= 3)
+    if fresh_primary_count >= min_primary:
+        return primary_items
+    deficit = max(0, min_primary - fresh_primary_count)
+    return primary_items + tavily_items[: min(tavily_cap, deficit)]
+
+
+def _limit_github_presence(items: list[dict], *, cap: int) -> list[dict]:
+    github_seen = 0
+    result: list[dict] = []
+    for item in items:
+        if _is_github_item(item):
+            if github_seen >= cap:
+                continue
+            github_seen += 1
+        result.append(item)
+    return result
+
+
+def _item_ts(item: dict) -> int:
+    try:
+        return int(item.get("ts") or item.get("ingested_ts") or 0)
+    except Exception:
+        return 0
+
+
+def _freshness_rank_for_ts(ts: int, *, now_ms: int | None = None) -> int:
+    now_ms = int(now_ms or time.time() * 1000)
+    age_ms = max(0, now_ms - ts) if ts else 10**15
+    if age_ms <= 6 * 3600 * 1000:
+        return 4
+    if age_ms <= 24 * 3600 * 1000:
+        return 3
+    if age_ms <= 72 * 3600 * 1000:
+        return 2
+    return 1
+
+
+def _freshness_rank_for_item(item: dict) -> int:
+    return _freshness_rank_for_ts(_item_ts(item))
+
+
+def _timely_priority_key(item: dict) -> tuple:
+    ts = _item_ts(item)
+    now_ms = int(time.time() * 1000)
+    freshness_rank = _freshness_rank_for_ts(ts, now_ms=now_ms)
+    score = float(item.get("score") or 0)
+    triage_weight = 1 if item.get("triage") == "notify" else 0
+    priority_weight = {"高优先": 2, "中优先": 1, "观察": 0}.get(str(item.get("priority") or ""), 0)
+    non_tavily_weight = 0 if _is_tavily_item(item) else 1
+    source_quality_weight = 0 if _is_github_item(item) else 1
+    if item.get("kind") == "web_change" and item.get("priority") == "观察":
+        source_quality_weight = 0
+    related_weight = min(8, int(item.get("dup_count") or 0))
+    # 时效是第一排序前提；同一时效窗口内再挑重点资讯。
+    # Tavily 是否展示由 _with_tavily_tail 决定，这里只把它作为同桶末位信号。
+    return (freshness_rank, priority_weight, triage_weight, source_quality_weight, related_weight, score, non_tavily_weight, ts)
+
+
 def _balanced_compact_items(data: dict, limit: int) -> list[dict]:
-    all_items = list(data.get("items", []))
+    ordered = sorted(list(data.get("items", [])), key=_timely_priority_key, reverse=True)
+    all_items = _with_tavily_tail(
+        ordered,
+        min_primary=_TAVILY_DISPLAY_MIN_PRIMARY,
+        tavily_cap=_TAVILY_DISPLAY_CAP,
+    )
+    all_items = _limit_github_presence(all_items, cap=2)
+    all_items = [it for it in all_items if not _is_synthetic_noise_item(it)]
     if limit <= 0 or len(all_items) <= limit:
         return [_compact_item(item) for item in all_items]
 
-    chosen: list[dict] = []
-    seen: set[str] = set()
-
-    def add(rows: list[dict], cap: int | None = None) -> None:
-        nonlocal chosen
-        added = 0
-        for row in rows:
-            key = str(row.get("event_id") or row.get("title") or "")
-            if not key or key in seen:
-                continue
-            chosen.append(row)
-            seen.add(key)
-            added += 1
-            if len(chosen) >= limit or (cap is not None and added >= cap):
-                return
-
-    news = [it for it in all_items if not _is_github_item(it) and not _is_x_item(it) and not _is_mail_item(it)]
-    business_news = [it for it in news if it.get("domain") != "life"]
-    life_news = [it for it in news if it.get("domain") == "life"]
-    x_items = list(data.get("x", [])) or [it for it in all_items if _is_x_item(it)]
-    mail_items = list(data.get("mail", [])) or [it for it in all_items if _is_mail_item(it)]
-    github_items = list(data.get("github", [])) or [it for it in all_items if _is_github_item(it)]
-
-    add(business_news, max(4, limit // 2))
-    add(life_news, min(2, max(1, limit // 5)))
-    add(x_items, min(2, max(1, limit // 6)))
-    add(mail_items, min(2, max(1, limit // 6)))
-    add(github_items, min(4, max(2, limit // 3)))
-    add(all_items)
-    return [_compact_item(item) for item in chosen[:limit]]
+    return [_compact_item(item) for item in all_items[:limit]]
 
 
 def _compact_today(data: dict, *, limit: int = 0) -> dict:
@@ -1028,7 +1269,7 @@ def _compact_today(data: dict, *, limit: int = 0) -> dict:
         "mail": compact_rows("mail", cap=8),
         "x": compact_rows("x", cap=8),
         "github": compact_rows("github", cap=12),
-        "focus": items[:5],
+        "focus": compact_rows("focus", fallback=data.get("items", []), cap=5),
         "groups": groups,
         "counts": data.get("counts", {}),
         "filters": data.get("filters", {}),

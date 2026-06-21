@@ -81,6 +81,33 @@ _SUBST = re.compile(r"\$\(|`")
 # find 的执行/删除动作：-exec -execdir -ok -okdir -delete
 _FIND_WRITE = re.compile(r"\s-(?:exec|execdir|ok|okdir|delete)\b")
 
+# 敏感凭据路径：即便是只读，读这些也等于「无确认窃取凭据」，因此升级为 confirm。
+# 防的是：被注入恶意 prompt 的 agent 自动 `read_file ~/.ssh/id_rsa` / `cat ~/.aws/credentials`。
+_SENSITIVE_PATH = re.compile(
+    r"(?:^|/|~)(?:"
+    r"\.ssh(?:/|$)"
+    r"|\.aws(?:/|$)"
+    r"|\.gnupg(?:/|$)"
+    r"|\.config/gh(?:/|$)"
+    r"|\.netrc$"
+    r"|\.npmrc$"
+    r"|\.pypirc$"
+    r"|\.git-credentials$"
+    r"|\.docker/config\.json$"
+    r"|\.kube/config$"
+    r"|\.claude/\.credentials\.json$"
+    r"|id_rsa\b|id_ed25519\b|id_ecdsa\b|id_dsa\b"
+    r"|credentials(?:\.json)?$"
+    r"|secrets?(?:\.(?:json|ya?ml|toml|env))?$"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_sensitive_path(text: str) -> bool:
+    """text 中是否出现敏感凭据路径/文件（用于 read_file 与 shell 只读命令的升级判断）。"""
+    return bool(_SENSITIVE_PATH.search(text or ""))
+
 
 def _segment_risk(seg: str) -> str:
     parts = seg.split()
@@ -107,6 +134,9 @@ def _shell_risk(command: str) -> str:
     for pat in SHELL_DENY:
         if pat.search(cmd):
             return "deny"
+    # 触碰凭据路径（cat ~/.ssh/id_rsa 等）即便只读也要人确认，挡掉无确认窃密。
+    if is_sensitive_path(cmd):
+        return "confirm"
     if _SUBST.search(cmd):
         return "confirm"
     # 输出重定向写文件（> 或 >>，但放过 2>&1 这类 fd 重定向）。
@@ -124,4 +154,7 @@ def evaluate(tool: str, args: dict) -> str:
     base = TOOL_BASE_RISK.get(tool, "confirm")
     if base == "dynamic" and tool == "run_shell":
         return _shell_risk(str(args.get("command", "")))
+    # read_file 默认 auto，但读凭据路径升级为 confirm（防注入 prompt 自动窃密）。
+    if tool == "read_file" and is_sensitive_path(str(args.get("path", ""))):
+        return "confirm"
     return base

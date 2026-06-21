@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 
 from openai import OpenAI
 
@@ -38,6 +39,8 @@ def _looks_unconfigured(model_cfg: dict) -> bool:
 def _call(model_cfg: dict, messages: list[dict], **kw) -> str:
     if _looks_unconfigured(model_cfg):
         raise RuntimeError("Model endpoint is not configured yet")
+    from . import obs
+    obs.incr("llm.calls")
     client = OpenAI(
         base_url=model_cfg["base_url"],
         api_key=model_cfg["api_key"],
@@ -63,4 +66,54 @@ def chat(task: str, messages: list[dict], **kw) -> str:
             log.warning("primary model %s failed (%s); falling back to %s",
                         primary.get("name"), exc, fb.get("name"))
             return _call(fb, messages, **kw)
+        raise
+
+
+def _call_stream(model_cfg: dict, messages: list[dict], **kw) -> Iterator[str]:
+    """流式调用，逐 token yield 文本增量。"""
+    if _looks_unconfigured(model_cfg):
+        raise RuntimeError("Model endpoint is not configured yet")
+    from . import obs
+    obs.incr("llm.calls")
+    obs.incr("llm.stream_calls")
+    client = OpenAI(
+        base_url=model_cfg["base_url"],
+        api_key=model_cfg["api_key"],
+        timeout=float(model_cfg.get("timeout", 40)),
+        max_retries=int(model_cfg.get("max_retries", 0)),
+    )
+    stream = client.chat.completions.create(
+        model=model_cfg.get("model_id", model_cfg["name"]),
+        messages=messages,
+        temperature=kw.get("temperature", 0.3),
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        piece = getattr(delta, "content", None)
+        if piece:
+            yield piece
+
+
+def chat_stream(task: str, messages: list[dict], **kw) -> Iterator[str]:
+    """流式版 chat：逐 token yield。首选在产出**任何 token 之前**失败才回退到备选；
+    一旦已经吐出 token 就不能重来（流式不可回放），此时直接抛出，由调用方处理。"""
+    primary = _pick(task)
+    emitted = False
+    try:
+        for piece in _call_stream(primary, messages, **kw):
+            emitted = True
+            yield piece
+        return
+    except Exception as exc:  # noqa: BLE001
+        if emitted:
+            raise
+        fb = _fallback()
+        if fb and fb.get("name") != primary.get("name"):
+            log.warning("primary stream %s failed pre-token (%s); falling back to %s",
+                        primary.get("name"), exc, fb.get("name"))
+            yield from _call_stream(fb, messages, **kw)
+            return
         raise

@@ -9,12 +9,13 @@ from . import db, user_settings
 from .config import settings
 from .ingest.calendar_ingest import CalendarCollector
 from .ingest.email_ingest import EmailCollector
-from .ingest.rss import RSSCollector
 from .judge.engine import judge_and_store
 from .memory.store import remember_event
 from .notify.hub import hub
 
-COLLECTORS = [EmailCollector(), CalendarCollector(), RSSCollector()]
+# RSS 已统一由情报扫描（intelligence/scanner，带批量 judge）单轨负责，不再在 ingest 里重复抓取，
+# 避免双轨阈值漂移与重复 LLM 判读。ingest 只保留邮件 / 日历两类本地输入。
+COLLECTORS = [EmailCollector(), CalendarCollector()]
 _INGEST_LOCK = threading.Lock()
 _INTELLIGENCE_LOCK = threading.Lock()
 _GUARD_LOCK = threading.Lock()
@@ -78,7 +79,7 @@ def _run_ingest_cycle_sync() -> tuple[dict, list[dict]]:
 async def run_ingest_cycle() -> dict:
     stats, notifications = await asyncio.to_thread(_run_ingest_cycle_sync)
     for payload in notifications:
-        await hub.push(payload)
+        await hub.push_event(payload)
     return stats
 
 
@@ -143,7 +144,8 @@ async def run_system_guard() -> dict:
     """SystemGuard 主动传感器：磁盘紧张 / 负载过高 / 已知服务掉线 → 实时推送。"""
     result, alerts = await asyncio.to_thread(_run_system_guard_sync)
     for alert in alerts:
-        await hub.push({"type": "notify", "source": "SystemGuard", **alert})
+        # 系统告警（磁盘紧张/负载过高/服务掉线）属紧急，标记 urgent 以绕过每日打断预算。
+        await hub.push_event({"type": "notify", "source": "SystemGuard", "urgent": True, **alert})
     return result
 
 
@@ -174,6 +176,12 @@ async def run_heartbeat() -> None:
     try:
         from .agent import sysinfo
         db.upsert_device_heartbeat(sysinfo.device_summary())
+        # 顺手清理历史遗留的幽灵行（旧 remote_cortex 的 `rc-` 前缀）。放在心跳里做，
+        # 让 GET /devices 保持只读、不再因跨站预取触发删除（修 HTTP 副作用问题）。
+        for r in db.list_device_heartbeats(limit=200):
+            did = str(r.get("device_id") or "")
+            if did.startswith("rc-"):
+                db.delete_device_heartbeat(did)
     except Exception as exc:  # noqa: BLE001
         print(f"[heartbeat] failed: {exc}")
 

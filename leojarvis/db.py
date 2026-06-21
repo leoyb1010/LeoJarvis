@@ -387,17 +387,24 @@ def delete_device_heartbeat(device_id: str) -> None:
         c.execute("DELETE FROM device_heartbeats WHERE device_id=?", (device_id,))
 
 
-def prune_old_data(*, snapshot_days: int = 90) -> dict[str, int]:
-    """给会无限增长的表做保留窗口。
+def prune_old_data(
+    *,
+    snapshot_days: int = 90,
+    event_days: int = 90,
+    revisions_per_note: int = 20,
+) -> dict[str, int]:
+    """给会无限增长的表做保留窗口（events / judgments / 快照 / 笔记历史版本）。
 
-    github_repo_snapshots 每小时雷达扫描都在写，几周就上万行；雷达每次 GROUP BY
-    全表，越跑越慢。这里删掉 snapshot_days 之前的旧快照，但每个仓库永远保留最新一条
-    （算 24h/7d 星标增量要用历史基线）。events / judgments 体量小且喂给简报和记忆，
-    暂不清理。
+    - github_repo_snapshots：删 snapshot_days 之前的旧快照，但每个仓库永远保留最新一条
+      （算 24h/7d 星标增量要用历史基线）。
+    - events / judgments：删 event_days 之前的旧事件及其判断，但**保留被反馈或长期记忆引用的事件**
+      （feedback.event_id / memories.source_events），避免删掉用户标注过或已沉淀成记忆的来源。
+    - personal_note_revisions：每条笔记只保留最近 revisions_per_note 个历史版本。
     """
     init_db()
-    cutoff = now_ms() - int(snapshot_days) * 86_400_000
-    removed = {"snapshots": 0}
+    snap_cutoff = now_ms() - int(snapshot_days) * 86_400_000
+    evt_cutoff = now_ms() - int(event_days) * 86_400_000
+    removed = {"snapshots": 0, "events": 0, "judgments": 0, "revisions": 0}
     with conn() as c:
         cur = c.execute(
             """
@@ -411,7 +418,66 @@ def prune_old_data(*, snapshot_days: int = 90) -> dict[str, int]:
                 ) t ON s.repo_full_name = t.repo_full_name AND s.observed_ts = t.m
               )
             """,
-            (cutoff,),
+            (snap_cutoff,),
         )
         removed["snapshots"] = cur.rowcount
+
+        # 被记忆引用的事件 id（source_events 是 JSON 数组文本，逐行收集）
+        referenced: set[str] = set()
+        for row in c.execute("SELECT source_events FROM memories WHERE source_events IS NOT NULL"):
+            raw = row[0] if not isinstance(row, dict) else row.get("source_events")
+            if not raw:
+                continue
+            try:
+                referenced.update(str(x) for x in json.loads(raw))
+            except Exception:
+                continue
+
+        # 待删旧事件：早于窗口、且不被 feedback 引用、且不被记忆引用
+        old_ids = [
+            (r[0] if not isinstance(r, dict) else r["id"])
+            for r in c.execute(
+                """
+                SELECT e.id FROM events e
+                WHERE e.ts < ?
+                  AND e.id NOT IN (SELECT event_id FROM feedback WHERE event_id IS NOT NULL)
+                """,
+                (evt_cutoff,),
+            )
+        ]
+        old_ids = [eid for eid in old_ids if eid not in referenced]
+        for batch_start in range(0, len(old_ids), 500):
+            chunk = old_ids[batch_start:batch_start + 500]
+            ph = ",".join("?" for _ in chunk)
+            jc = c.execute(f"DELETE FROM judgments WHERE event_id IN ({ph})", chunk)
+            removed["judgments"] += jc.rowcount
+            ec = c.execute(f"DELETE FROM events WHERE id IN ({ph})", chunk)
+            removed["events"] += ec.rowcount
+
+        # 每条笔记只保留最近 revisions_per_note 个版本
+        rc = c.execute(
+            """
+            DELETE FROM personal_note_revisions
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY note_id ORDER BY created_ts DESC
+                ) AS rn FROM personal_note_revisions
+              ) WHERE rn > ?
+            )
+            """,
+            (int(revisions_per_note),),
+        )
+        removed["revisions"] = rc.rowcount
     return removed
+
+
+def vacuum() -> bool:
+    """回收已删除行占用的磁盘空间（VACUUM 会短暂全库加锁，调用方应控制频率，别每天跑）。"""
+    init_db()
+    try:
+        with conn() as c:
+            c.execute("VACUUM")
+        return True
+    except Exception:
+        return False

@@ -69,6 +69,50 @@ def _source_distribution(events: list[dict]) -> list[dict]:
     return [{"source": k, "count": v} for k, v in counts.most_common(8)]
 
 
+def _is_tavily_item(item: dict) -> bool:
+    return item.get("channel") == "tavily_search" or str(item.get("source_raw") or item.get("source") or "").startswith("intel:tavily:")
+
+
+def _item_ts(item: dict) -> int:
+    try:
+        return int(item.get("ts") or item.get("ingested_ts") or 0)
+    except Exception:
+        return 0
+
+
+def _freshness_rank(item: dict) -> int:
+    ts = _item_ts(item)
+    age_ms = max(0, int(time.time() * 1000) - ts) if ts else 10**15
+    if age_ms <= 6 * 3600 * 1000:
+        return 4
+    if age_ms <= 24 * 3600 * 1000:
+        return 3
+    if age_ms <= 72 * 3600 * 1000:
+        return 2
+    return 1
+
+
+def _homepage_item_key(item: dict) -> tuple:
+    priority = {"高优先": 2, "中优先": 1, "观察": 0}.get(str(item.get("priority") or ""), 0)
+    triage = 1 if item.get("triage") == "notify" else 0
+    try:
+        score = float(item.get("score") or 0)
+    except Exception:
+        score = 0.0
+    source_quality = 0 if item.get("kind") == "web_change" and item.get("priority") == "观察" else 1
+    return (_freshness_rank(item), priority, triage, source_quality, score, _item_ts(item))
+
+
+def _homepage_briefing_top(items: list[dict], *, limit: int = 12) -> list[dict]:
+    rows = sorted([it for it in items if it.get("kind") != "github_repo"], key=_homepage_item_key, reverse=True)
+    primary = [it for it in rows if not _is_tavily_item(it)]
+    supplements = [it for it in rows if _is_tavily_item(it)]
+    fresh_primary = sum(1 for it in primary if _freshness_rank(it) >= 3)
+    if fresh_primary >= 4:
+        return primary[:limit]
+    return (primary + supplements[: min(1, max(0, 4 - fresh_primary))])[:limit]
+
+
 def _source_label(source: str | None) -> str:
     raw = str(source or "本地").split(":")[0]
     return {
@@ -418,11 +462,8 @@ def _build_overview() -> dict:
             "business": len(briefing.get("business", [])),
             "life": len(briefing.get("life", [])),
             # 驾驶舱「资讯情报」只放真正的资讯：排除 GitHub 项目（它有独立雷达栏）
-            # 和邮件，按评分顺序给足条目，避免前端过滤后只剩两三条。
-            "top": [
-                it for it in (briefing.get("business", []) + briefing.get("life", []))
-                if it.get("kind") != "github_repo"
-            ][:12],
+            # 和邮件；Tavily 只在主信源不足时补尾部，避免付费搜索刷屏。
+            "top": _homepage_briefing_top(briefing.get("business", []) + briefing.get("life", []), limit=12),
         },
         "intelligence": {
             "events": len(intel_events),

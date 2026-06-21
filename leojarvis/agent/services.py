@@ -10,10 +10,49 @@ import os
 import re
 import socket
 import subprocess
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..config import settings
+
+# stale-while-revalidate 缓存：status_all / discover_services 含多次 lsof（6s 超时）+ ps，
+# 单次可达秒级，而前端每 30s 轮询 /services/discover。缓存让请求永远拿缓存立即返回，
+# 过期则后台线程刷新，绝不阻塞前端、也不占满线程池。
+_SWR_TTL = 20.0
+_swr_store: dict[str, dict] = {}
+_swr_locks: dict[str, threading.Lock] = {}
+_swr_refreshing: dict[str, threading.Event] = {}
+
+
+def _swr(key: str, producer, *, ttl: float = _SWR_TTL):
+    entry = _swr_store.get(key)
+    lock = _swr_locks.setdefault(key, threading.Lock())
+    refreshing = _swr_refreshing.setdefault(key, threading.Event())
+    now = time.time()
+    cached = entry["data"] if entry else None
+    fresh = entry is not None and now - entry["ts"] < ttl
+
+    def _refresh():
+        with lock:
+            data = producer()
+            _swr_store[key] = {"data": data, "ts": time.time()}
+            return data
+
+    if cached is None:
+        return _refresh()
+    if not fresh and not refreshing.is_set():
+        refreshing.set()
+
+        def _bg():
+            try:
+                _refresh()
+            finally:
+                refreshing.clear()
+
+        threading.Thread(target=_bg, daemon=True).start()
+    return cached
 
 _DEFAULTS = {
     "leojarvis": {"port": 8787, "desc": "LeoJarvis 本地中枢：对话、工具总线与全景驾驶舱后端"},
@@ -355,6 +394,11 @@ def _discovered_services(configured_ports: set[int], configured_names: set[str])
 
 
 def status_all() -> list[dict]:
+    """带 SWR 缓存的服务状态（前端轮询友好）。需要绝对实时可调 _status_all_uncached。"""
+    return _swr("status_all", _status_all_uncached)
+
+
+def _status_all_uncached() -> list[dict]:
     rows = []
     configs = service_configs()
     configured_ports: set[int] = set()
@@ -597,6 +641,11 @@ def _start_cmd(name: str, configs: dict) -> str | None:
 
 
 def discover_services() -> list[dict]:
+    """带 SWR 缓存的服务发现（前端 /services/discover 每 30s 轮询，缓存避免重复 lsof 风暴）。"""
+    return _swr("discover_services", _discover_services_uncached)
+
+
+def _discover_services_uncached() -> list[dict]:
     """三路发现本机所有常驻服务，按物理身份(进程名+端口)去重。
 
     来源：

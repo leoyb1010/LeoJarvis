@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  模板/触发文件。下面的绝对路径、用户名、Node 版本只是占位示例，对其它机器无效。
+  实际生效的 plist 由 scripts/deploy.sh 的 write_launch_agent_plist 用当前机器的
+  $ROOT/$HOME/$PATH 动态重写到 ~/Library/LaunchAgents/ 后再 bootstrap —— deploy.sh
+  仅用本文件「是否存在」来决定要不要走 launchd 常驻分支，不会读取这里的具体路径。
+  因此换机/换用户/升级 Node 后无需手改本文件；直接 `bash scripts/deploy.sh` 即可。
+-->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>

@@ -52,6 +52,48 @@ if [ -z "${NPM:-}" ]; then
 fi
 echo "==> 使用 npm: $NPM ($("$NPM" -v 2>/dev/null))"
 
+xml_escape() {
+  printf '%s' "$1" \
+    | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e "s/'/\&apos;/g" -e 's/"/\&quot;/g'
+}
+
+write_launch_agent_plist() {
+  local escaped_root escaped_home escaped_user escaped_path escaped_py
+  escaped_root="$(xml_escape "$ROOT")"
+  escaped_home="$(xml_escape "$HOME")"
+  escaped_user="$(xml_escape "$(id -un)")"
+  escaped_path="$(xml_escape "$PATH")"
+  escaped_py="$(xml_escape "$PY")"
+  cat > "$USER_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCH_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${escaped_root}/scripts/run_launchd.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>${escaped_root}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>${escaped_home}</string>
+    <key>USER</key><string>${escaped_user}</string>
+    <key>LOGNAME</key><string>${escaped_user}</string>
+    <key>PATH</key><string>${escaped_path}</string>
+    <key>LEOJARVIS_PY</key><string>${escaped_py}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>${escaped_root}/data/stdout.log</string>
+  <key>StandardErrorPath</key><string>${escaped_root}/data/stderr.log</string>
+</dict>
+</plist>
+PLIST
+}
+
 if [ ! -d web/node_modules ]; then
   echo "==> 安装前端依赖 (web/node_modules，首次部署或全新克隆时需要)"
   "$NPM" --prefix web install
@@ -68,7 +110,7 @@ if [ "${LEOJARVIS_USE_LAUNCHD:-auto}" != "0" ] \
   && command -v launchctl >/dev/null 2>&1; then
   if [ -f "${REPO_PLIST}" ]; then
     mkdir -p "${HOME}/Library/LaunchAgents"
-    cp "${REPO_PLIST}" "${USER_PLIST}"
+    write_launch_agent_plist
   fi
   if [ -f "${USER_PLIST}" ]; then
     echo "==> [2/3] 使用 LaunchAgent 重载守护进程 (:${PORT})"

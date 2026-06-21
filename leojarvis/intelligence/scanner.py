@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import html
 import json
+import os
 import re
 import threading
 import time
@@ -11,17 +12,17 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import httpx
 import trafilatura
 
 from .. import db
-from ..config import settings, sources
+from ..config import DATA_DIR, settings, sources
 from ..ingest.base import RawItem
 from ..ingest.rss import x_monitor_feeds
-from ..judge.engine import Judgment, judge_and_store
+from ..judge.engine import Judgment, judge, judge_and_store, judge_batch
 from ..localize import has_noisy_english, to_chinese
 from ..memory.profile import profile_terms
 from ..memory.store import remember_event
@@ -29,6 +30,20 @@ from ..notify.hub import hub
 
 USER_AGENT = "LeoJarvis-Intelligence/0.1 (+https://github.com/leoyb1010/LeoJarvis)"
 _SCAN_LOCK = threading.Lock()
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return default
+
+
+_TAVILY_MIN_PRIMARY_NEWS = max(1, _int_env("LEOJARVIS_TAVILY_MIN_PRIMARY_NEWS", 4))
+_TAVILY_DAILY_QUERY_LIMIT = max(0, _int_env("LEOJARVIS_TAVILY_DAILY_QUERY_LIMIT", 1))
+_TAVILY_COOLDOWN_SECONDS = max(0, _int_env("LEOJARVIS_TAVILY_COOLDOWN_SECONDS", 6 * 3600))
+_TAVILY_USAGE_PATH = DATA_DIR / "tavily_usage.json"
+_TAVILY_USAGE_LOCK = threading.Lock()
 
 # GitHub 搜索 API 未认证只有 10 次/分钟；雷达每轮最多 10 条查询，容易顶到限额。
 # 本机有 token 就带上（env 或 `gh auth token`），认证后升到 30 次/分钟。缓存避免每次扫描都 fork gh。
@@ -88,6 +103,96 @@ def _clean_text(text: str, limit: int = 6000) -> str:
     compact = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
     compact = " ".join(compact.split())
     return compact[:limit]
+
+
+_DEFAULT_INTELLIGENCE_TARGETS = [
+    "AI Agent",
+    "LLM",
+    "OpenAI",
+    "Claude Code",
+    "本地大模型",
+    "开发者工具",
+    "Mac 自动化",
+    "GitHub 高星项目",
+]
+
+_BLOCKED_TARGET_TERMS = {
+    "and",
+    "app",
+    "apps",
+    "api",
+    "authuser",
+    "client",
+    "com",
+    "www",
+    "http",
+    "https",
+    "login",
+    "signin",
+    "accounts",
+    "accounts.google.com",
+    "appstoreconnect",
+    "appstoreconnect.apple.com",
+    "bilibili",
+    "bilibili.com",
+    "netease",
+    "leonote",
+    "leoyuan",
+}
+
+_TARGET_SIGNAL_TERMS = {
+    "ai",
+    "agent",
+    "agents",
+    "agentic",
+    "llm",
+    "openai",
+    "claude",
+    "anthropic",
+    "gemini",
+    "deepmind",
+    "grok",
+    "codex",
+    "mcp",
+    "github",
+    "developer",
+    "devtool",
+    "tooling",
+    "automation",
+    "local ai",
+    "ollama",
+    "whisper",
+    "swift",
+    "ios",
+    "mac",
+    "cloudflare",
+    "tailscale",
+    "postgres",
+    "database",
+    "security",
+}
+
+
+def _normalize_target_term(value: str) -> str:
+    clean = re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    clean = clean.removeprefix("https://").removeprefix("http://")
+    clean = clean.strip("/?#")
+    return clean
+
+
+def _is_useful_intelligence_target(value: str) -> bool:
+    clean = _normalize_target_term(value)
+    if not clean or clean in _BLOCKED_TARGET_TERMS:
+        return False
+    if len(clean) < 3 and clean not in {"ai", "ml", "ui", "ux"}:
+        return False
+    if re.search(r"\.(com|net|org|cn|ai|io|dev)(/|$)", clean) and clean not in {"claude.ai", "openai.com"}:
+        return False
+    if re.fullmatch(r"[a-z]{1,10}", clean) and clean not in _TARGET_SIGNAL_TERMS:
+        return False
+    if re.search(r"[\u3400-\u9fff]", clean):
+        return True
+    return any(term in clean for term in _TARGET_SIGNAL_TERMS)
 
 
 _TOPIC_LABELS = {
@@ -264,6 +369,76 @@ def _event_day() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _read_tavily_usage() -> dict[str, Any]:
+    try:
+        if not _TAVILY_USAGE_PATH.exists():
+            return {}
+        with _TAVILY_USAGE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_tavily_usage(state: dict[str, Any]) -> None:
+    try:
+        _TAVILY_USAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _TAVILY_USAGE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _tavily_budget_status(state: dict[str, Any] | None = None, *, now_s: int | None = None) -> dict[str, Any]:
+    """Paid-search guard: Tavily is only a fallback budget, never a routine feed."""
+    state = dict(state or _read_tavily_usage())
+    now_s = int(now_s or time.time())
+    today = _event_day()
+    used_today = int(state.get("used") or 0) if state.get("date") == today else 0
+    last_query_ts = int(state.get("last_query_ts") or 0)
+    cooldown_remaining = max(0, _TAVILY_COOLDOWN_SECONDS - (now_s - last_query_ts)) if last_query_ts else 0
+    remaining = max(0, _TAVILY_DAILY_QUERY_LIMIT - used_today)
+    skipped = ""
+    if _TAVILY_DAILY_QUERY_LIMIT <= 0:
+        skipped = "tavily_disabled_by_daily_limit"
+    elif remaining <= 0:
+        skipped = "tavily_daily_limit"
+    elif cooldown_remaining > 0:
+        skipped = "tavily_cooldown"
+    return {
+        "allowed": not skipped,
+        "skipped": skipped,
+        "date": today,
+        "used_today": used_today,
+        "remaining_today": remaining,
+        "daily_limit": _TAVILY_DAILY_QUERY_LIMIT,
+        "cooldown_seconds": _TAVILY_COOLDOWN_SECONDS,
+        "cooldown_remaining_seconds": cooldown_remaining,
+        "last_query_ts": last_query_ts,
+    }
+
+
+def _reserve_tavily_query(reason: str) -> tuple[bool, dict[str, Any]]:
+    with _TAVILY_USAGE_LOCK:
+        state = _read_tavily_usage()
+        status = _tavily_budget_status(state)
+        if not status["allowed"]:
+            return False, status
+        used_today = int(state.get("used") or 0) if state.get("date") == status["date"] else 0
+        state = {
+            "date": status["date"],
+            "used": used_today + 1,
+            "last_query_ts": int(time.time()),
+            "last_reason": reason,
+        }
+        _write_tavily_usage(state)
+        reserved = _tavily_budget_status(state)
+        reserved["allowed"] = True
+        reserved["skipped"] = ""
+        reserved["reserved"] = True
+        return True, reserved
+
+
 _X_HIGH_SIGNAL_TERMS = (
     "model", "release", "launch", "api", "agent", "benchmark", "research", "paper",
     "open source", "weights", "coding", "developer", "deep research", "multimodal",
@@ -329,7 +504,7 @@ def _store_x_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, dict
 async def _store_x_item(item: RawItem) -> tuple[str | None, Judgment | None]:
     event_id, judgment, payload = await asyncio.to_thread(_store_x_item_sync, item)
     if payload:
-        await hub.push(payload)
+        await hub.push_event(payload)
     return event_id, judgment
 
 
@@ -346,13 +521,90 @@ def _news_score(title: str, content: str) -> tuple[float, list[str]]:
     return round(score, 3), reasons
 
 
-def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, dict | None]:
-    score, reasons = _news_score(item.title, item.content)
-    triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
-    summary = to_chinese(item.content or item.title, context="资讯简报摘要", max_chars=240, allow_llm=False)
-    source_name = str(item.meta.get("feed_name") or item.source).replace("RSS · ", "")
-    analysis = {
-        "title_zh": to_chinese(item.title, context="资讯简报标题", max_chars=120, allow_llm=False),
+def _tavily_queries(limit: int = 1) -> list[str]:
+    # Tavily 是付费兜底信源，不使用浏览历史关键词拼查询，避免偏题和浪费次数。
+    queries = [
+        "AI agents model releases developer tools latest news",
+    ]
+    return list(dict.fromkeys(q for q in queries if q.strip()))[:limit]
+
+
+def _recent_primary_news_count(*, hours: int = 24) -> int:
+    since = int((time.time() - hours * 3600) * 1000)
+    with db.conn() as c:
+        row = c.execute(
+            """
+            SELECT COUNT(*)
+            FROM events e
+            JOIN judgments j ON j.event_id=e.id
+            WHERE e.ts>=?
+              AND j.triage IN ('notify','digest')
+              AND e.source NOT LIKE 'intel:tavily:%'
+              AND (
+                e.source LIKE 'intel:rss:%'
+                OR e.source LIKE 'rss:%'
+                OR e.source LIKE 'intel:x:%'
+                OR e.source LIKE 'intel:web:%'
+                OR e.kind IN ('x_post','web_change','market')
+              )
+            """,
+            (since,),
+        ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+_TAVILY_BLOCKED_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "youtu.be",
+    "reddit.com",
+    "www.reddit.com",
+    "news.ycombinator.com",
+    "lobste.rs",
+}
+
+_TAVILY_LOW_SIGNAL_PATTERNS = (
+    "what is ",
+    "what are ",
+    "definition",
+    "how to ",
+    "tutorial",
+    "guide",
+    "awesome ",
+    "best ",
+    "top ",
+    "youtube",
+    "reddit",
+    "hacker news",
+)
+
+
+def _is_tavily_item(item: RawItem) -> bool:
+    return str(item.source or "").startswith("intel:tavily:") or item.meta.get("channel") == "tavily_search"
+
+
+def _tavily_result_allowed(title: str, url: str, content: str, *, score: Any = None) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if host in _TAVILY_BLOCKED_HOSTS or any(host.endswith(f".{blocked}") for blocked in _TAVILY_BLOCKED_HOSTS):
+        return False
+    lowered = f"{title}\n{content}".lower()
+    if any(pattern in lowered for pattern in _TAVILY_LOW_SIGNAL_PATTERNS):
+        return False
+    try:
+        if score is not None and float(score) < 0.52:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _fallback_news_analysis(item: RawItem, *, source_name: str, allow_llm: bool) -> dict:
+    summary = to_chinese(item.content or item.title, context="资讯简报摘要", max_chars=240, allow_llm=allow_llm)
+    title_zh = to_chinese(item.title, context="资讯简报标题", max_chars=120, allow_llm=allow_llm)
+    if "相关动态" in title_zh or (has_noisy_english(title_zh) and allow_llm):
+        title_zh = str(item.meta.get("original_title") or item.title).strip()
+    return {
+        "title_zh": title_zh,
         "summary": summary,
         "take": f"{source_name} 的资讯进入简报：{summary}",
         "why": "该条资讯命中你的 AI、开发工具、市场或个人助理相关关注信号，适合进入今日判断。",
@@ -360,6 +612,38 @@ def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, d
         "next_step": "打开详情确认原文上下文；如果对项目设计、投资判断或个人工作有用，再写入个人记事或加入持续关注。",
         "detail": item.content[:1200],
     }
+
+
+def _news_llm_needed(item: RawItem, triage: str, is_tavily: bool) -> bool:
+    """这条新闻是否需要 LLM 判读：Tavily、非 ignore、或标题/正文含噪声英文。"""
+    return is_tavily or triage != "ignore" or has_noisy_english(item.title) or has_noisy_english(item.content[:500])
+
+
+def _finalize_news_item_sync(
+    item: RawItem,
+    *,
+    llm_judgment: Judgment | None,
+) -> tuple[str | None, Judgment | None, dict | None]:
+    """用（可选的）LLM 判读结果落库一条新闻。llm_judgment=None 表示不需要/未拿到 LLM，走规则结果。"""
+    score, reasons = _news_score(item.title, item.content)
+    triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
+    is_tavily = _is_tavily_item(item)
+    source_name = "Tavily 搜索补充" if is_tavily else str(item.meta.get("feed_name") or item.source).replace("RSS · ", "")
+    analysis = _fallback_news_analysis(item, source_name=source_name, allow_llm=False)
+    if llm_judgment is not None:
+        score = max(0.0, min(1.0, float(llm_judgment.score)))
+        triage = llm_judgment.triage if llm_judgment.triage in {"notify", "digest", "ignore"} else triage
+        reasons = [str(r) for r in (llm_judgment.reasons or [])][:4] or reasons
+        if llm_judgment.analysis:
+            analysis.update({k: v for k, v in llm_judgment.analysis.items() if v})
+    if is_tavily:
+        # Tavily 是搜索补充，不是主新闻源：用 LLM 判读具体内容，但永不升级成实时通知。
+        score = min(0.68, score)
+        triage = "ignore" if score < 0.42 or triage == "ignore" else "digest"
+        analysis["source_role"] = "search_supplement"
+        analysis["detail"] = item.content[:1200]
+        if "相关动态" in str(analysis.get("title_zh", "")):
+            analysis["title_zh"] = str(item.meta.get("original_title") or item.title).strip()
     event_id = db.insert_event(
         source=item.source,
         domain=item.domain,
@@ -374,7 +658,7 @@ def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, d
         return None, None, None
     db.insert_judgment(event_id=event_id, score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
     judgment = Judgment(score=score, take=analysis["take"], triage=triage, reasons=reasons, analysis=analysis)
-    if triage == "notify":
+    if triage == "notify" and not is_tavily:
         return event_id, judgment, {
             "type": "notify",
             "source": "RSS Intelligence",
@@ -387,11 +671,65 @@ def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, d
     return event_id, judgment, None
 
 
+def _store_news_item_sync(item: RawItem) -> tuple[str | None, Judgment | None, dict | None]:
+    """单条新闻：按需逐条 LLM 判读再落库（批量路径失败时的回退，以及非批量调用方仍可用）。"""
+    score, _ = _news_score(item.title, item.content)
+    triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
+    is_tavily = _is_tavily_item(item)
+    llm_judgment: Judgment | None = None
+    if _news_llm_needed(item, triage, is_tavily):
+        try:
+            llm_judgment = judge(item)
+        except Exception:
+            llm_judgment = None
+    return _finalize_news_item_sync(item, llm_judgment=llm_judgment)
+
+
+def _store_news_items_batch_sync(items: list[RawItem]) -> list[tuple[str | None, Judgment | None, dict | None]]:
+    """一批新闻：先用规则分挑出需要 LLM 的，**一次 judge_batch** 判完再逐条落库。
+
+    把「每条一次 judge」压成「每批一次 judge_batch」。批量失败/某条缺失时回退到逐条 judge，保证不退化。
+    """
+    need_llm: list[RawItem] = []
+    need_idx: list[int] = []
+    for i, item in enumerate(items):
+        score, _ = _news_score(item.title, item.content)
+        triage = "notify" if score >= 0.76 else "digest" if score >= 0.42 else "ignore"
+        if _news_llm_needed(item, triage, _is_tavily_item(item)):
+            need_llm.append(item)
+            need_idx.append(i)
+
+    batched = judge_batch(need_llm) if need_llm else {}
+
+    llm_for: dict[int, Judgment | None] = {}
+    for local_i, orig_i in enumerate(need_idx):
+        j = batched.get(local_i)
+        if j is None:  # 批量没覆盖到这条 → 逐条兜底
+            try:
+                j = judge(need_llm[local_i])
+            except Exception:
+                j = None
+        llm_for[orig_i] = j
+
+    return [_finalize_news_item_sync(item, llm_judgment=llm_for.get(i)) for i, item in enumerate(items)]
+
+
 async def _store_news_item(item: RawItem) -> tuple[str | None, Judgment | None]:
     event_id, judgment, payload = await asyncio.to_thread(_store_news_item_sync, item)
     if payload:
-        await hub.push(payload)
+        await hub.push_event(payload)
     return event_id, judgment
+
+
+async def _store_news_items_batch(items: list[RawItem]) -> list[tuple[str | None, Judgment | None]]:
+    """批量落库一批新闻并推送所有 notify。返回 [(event_id, judgment), ...]。"""
+    results = await asyncio.to_thread(_store_news_items_batch_sync, items)
+    out: list[tuple[str | None, Judgment | None]] = []
+    for event_id, judgment, payload in results:
+        if payload:
+            await hub.push_event(payload)
+        out.append((event_id, judgment))
+    return out
 
 
 def seed_defaults() -> dict:
@@ -399,18 +737,30 @@ def seed_defaults() -> dict:
     db.init_db()
     created = {"targets": 0, "sources": 0}
     ts = db.now_ms()
-    terms = sorted(profile_terms())
-    base_targets = [t for t in terms if len(t) >= 2][:18]
-    if not base_targets:
-        base_targets = ["AI Agent", "本地大模型", "个人生产力", "Mac 自动化"]
+    profile_targets = [
+        t for t in sorted(profile_terms())
+        if _is_useful_intelligence_target(t)
+    ][:6]
+    base_targets = list(_DEFAULT_INTELLIGENCE_TARGETS) + profile_targets
 
     cfg = sources()
     radar_cfg = cfg.get("github_radar", {})
     for q in radar_cfg.get("queries", []):
-        if str(q).strip():
-            base_targets.append(str(q).strip())
+        query = str(q).strip()
+        if query and _is_useful_intelligence_target(query):
+            base_targets.append(query)
 
     with db.conn() as c:
+        cleaned = 0
+        for row in c.execute("SELECT id, query FROM intelligence_targets WHERE enabled=1").fetchall():
+            if not _is_useful_intelligence_target(str(row["query"] or "")):
+                c.execute(
+                    "UPDATE intelligence_targets SET enabled=0, updated_ts=? WHERE id=?",
+                    (ts, row["id"]),
+                )
+                cleaned += 1
+        if cleaned:
+            created["cleaned_targets"] = cleaned
         for target in dict.fromkeys(base_targets):
             try:
                 c.execute(
@@ -660,7 +1010,7 @@ def _store_raw_item_sync(item: RawItem, *, dedup_key: str | None = None) -> tupl
 async def _store_raw_item(item: RawItem, *, dedup_key: str | None = None) -> tuple[str | None, Judgment | None]:
     event_id, judgment, payload = await asyncio.to_thread(_store_raw_item_sync, item, dedup_key=dedup_key)
     if payload:
-        await hub.push(payload)
+        await hub.push_event(payload)
     return event_id, judgment
 
 
@@ -681,6 +1031,7 @@ async def _scan_rss_sources(client: httpx.AsyncClient) -> dict:
             limit = int(meta.get("limit", 12))
             if is_x_source:
                 limit = min(limit, 4)
+            news_batch: list[RawItem] = []   # 非 X 的新闻先收集，扫完整源后一次批量 judge
             for entry in parsed.entries[:limit]:
                 local["seen"] += 1
                 original_title = getattr(entry, "title", "") or "（无标题）"
@@ -713,11 +1064,20 @@ async def _scan_rss_sources(client: httpx.AsyncClient) -> dict:
                         "route": meta.get("route"),
                     },
                 )
-                event_id, judgment = await _store_x_item(item) if is_x_source else await _store_news_item(item)
-                if event_id:
-                    local["inserted"] += 1
-                    if judgment and judgment.triage == "notify":
-                        local["notify"] += 1
+                if is_x_source:
+                    event_id, judgment = await _store_x_item(item)   # X 不走 LLM，逐条即可
+                    if event_id:
+                        local["inserted"] += 1
+                        if judgment and judgment.triage == "notify":
+                            local["notify"] += 1
+                else:
+                    news_batch.append(item)
+            if news_batch:
+                for event_id, judgment in await _store_news_items_batch(news_batch):
+                    if event_id:
+                        local["inserted"] += 1
+                        if judgment and judgment.triage == "notify":
+                            local["notify"] += 1
             with db.conn() as c:
                 c.execute("UPDATE intelligence_sources SET last_scan_ts=? WHERE id=?", (db.now_ms(), src["id"]))
         except Exception as exc:
@@ -776,14 +1136,102 @@ async def _scan_web_sources(client: httpx.AsyncClient) -> dict:
     return stats
 
 
+async def _scan_tavily_search(*, max_total: int = 2, query_limit: int = 1) -> dict:
+    try:
+        from .. import mcp_gateway
+    except Exception as exc:
+        return {"ok": False, "skipped": "mcp_gateway_unavailable", "error": str(exc)[:180]}
+
+    available, _key = mcp_gateway.tavily_available()
+    if not available:
+        return {"ok": True, "skipped": "tavily_not_configured", "queries": [], "seen": 0, "inserted": 0, "notify": 0}
+
+    budget = _tavily_budget_status()
+    if not budget["allowed"]:
+        return {
+            "ok": True,
+            "skipped": budget["skipped"],
+            "backend": "tavily_search",
+            "budget": budget,
+            "queries": [],
+            "seen": 0,
+            "filtered": 0,
+            "inserted": 0,
+            "notify": 0,
+            "errors": [],
+        }
+
+    stats = {
+        "ok": True,
+        "backend": "tavily_search",
+        "queries": [],
+        "seen": 0,
+        "filtered": 0,
+        "inserted": 0,
+        "notify": 0,
+        "errors": [],
+        "budget": budget,
+    }
+    for query in _tavily_queries(limit=query_limit):
+        if stats["inserted"] >= max_total:
+            break
+        try:
+            reserved, reserved_budget = _reserve_tavily_query(f"primary_sources_fallback:{query}")
+            stats["budget"] = reserved_budget
+            if not reserved:
+                stats["skipped"] = reserved_budget["skipped"]
+                break
+            payload = await asyncio.to_thread(mcp_gateway.search_web, query, limit=max(2, max_total), include_answer=False)
+            stats["queries"].append({"query": query, "duration_ms": payload.get("duration_ms")})
+            for row in payload.get("items", []):
+                if stats["inserted"] >= max_total:
+                    break
+                if not isinstance(row, dict):
+                    continue
+                title = str(row.get("title") or "").strip()
+                url = str(row.get("url") or "").strip()
+                content = _clean_text(str(row.get("content") or title), limit=2400)
+                if not title or not url:
+                    continue
+                stats["seen"] += 1
+                if not _tavily_result_allowed(title, url, content, score=row.get("score")):
+                    stats["filtered"] += 1
+                    continue
+                item = RawItem(
+                    source=f"intel:tavily:{query[:72]}",
+                    domain="business",
+                    kind="news",
+                    title=title,
+                    content=content,
+                    url=url,
+                    meta={
+                        "channel": "tavily_search",
+                        "category": "搜索补充",
+                        "original_title": title,
+                        "query": query,
+                        "backend": payload.get("backend"),
+                        "tavily_score": row.get("score"),
+                        "dedup_key": f"tavily:{_hash_text(url)[:24]}",
+                    },
+                )
+                event_id, judgment = await _store_news_item(item)
+                if event_id:
+                    stats["inserted"] += 1
+                    if judgment and judgment.triage == "notify":
+                        stats["notify"] += 1
+        except Exception as exc:
+            stats["errors"].append({"query": query, "error": str(exc)[:220]})
+    return stats
+
+
 def _github_queries() -> list[str]:
     seed_defaults()
     cfg = sources().get("github_radar", {})
-    configured = [str(q).strip() for q in cfg.get("queries", []) if str(q).strip()]
+    configured = [str(q).strip() for q in cfg.get("queries", []) if _is_useful_intelligence_target(str(q).strip())]
     target_queries = [
         str(t["query"]).strip()
         for t in list_targets()
-        if t.get("enabled") and str(t.get("query", "")).strip()
+        if t.get("enabled") and _is_useful_intelligence_target(str(t.get("query", "")).strip())
     ]
     queries = list(dict.fromkeys(configured + target_queries))
     return queries[: int(cfg.get("max_queries", 10))]
@@ -1070,7 +1518,7 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                 )
                 if triage == "notify":
                     local["notify"] += 1
-                    await hub.push({
+                    await hub.push_event({
                         "type": "notify",
                         "source": "GitHub Radar",
                         "event_id": event_id,
@@ -1097,10 +1545,13 @@ async def run_intelligence_scan(*, include_rss: bool = True, include_web: bool =
                                 include_github: bool = True) -> dict:
     if not _SCAN_LOCK.acquire(blocking=False):
         return {"ok": True, "skipped": "already_running", "started_at": _now_iso()}
+    from .. import obs
+    import time as _time
+    _t0 = _time.time()
     try:
         seed_defaults()
         started = _now_iso()
-        stats: dict[str, Any] = {"started_at": started, "rss": None, "web": None, "github": None}
+        stats: dict[str, Any] = {"started_at": started, "rss": None, "web": None, "tavily": None, "github": None}
         async with httpx.AsyncClient(
             timeout=18,
             follow_redirects=True,
@@ -1111,9 +1562,26 @@ async def run_intelligence_scan(*, include_rss: bool = True, include_web: bool =
                 stats["rss"] = await _scan_rss_sources(client)
             if include_web:
                 stats["web"] = await _scan_web_sources(client)
+                primary_count = _recent_primary_news_count(hours=24)
+                if primary_count < _TAVILY_MIN_PRIMARY_NEWS:
+                    stats["tavily"] = await _scan_tavily_search(max_total=2, query_limit=1)
+                    stats["tavily"]["fallback_reason"] = f"primary_news_24h={primary_count}<{_TAVILY_MIN_PRIMARY_NEWS}"
+                else:
+                    stats["tavily"] = {
+                        "ok": True,
+                        "skipped": "primary_sources_sufficient",
+                        "primary_news_24h": primary_count,
+                        "primary_min_required": _TAVILY_MIN_PRIMARY_NEWS,
+                        "queries": [],
+                        "seen": 0,
+                        "inserted": 0,
+                        "notify": 0,
+                    }
             if include_github:
                 stats["github"] = await _scan_github(client)
         stats["finished_at"] = _now_iso()
+        obs.gauge("scan.intelligence.last_seconds", round(_time.time() - _t0, 2))
+        obs.incr("scan.intelligence.runs")
         return stats
     finally:
         _SCAN_LOCK.release()
