@@ -916,15 +916,16 @@ final class JarvisStore: ObservableObject {
         let client = JarvisAPIClient(baseURL: target.endpoint, token: token)
         var bestLatency: Int?
 
-        for attempt in 0..<3 {
+        // 超时放宽到能容忍慢隧道（Mac Studio 走 cloudflared，公网常 3-4s；旧的 2.2s/1.4s
+        // 会把健康但慢的 Mac 误判离线）。首试 6s，重试 5s。拿到 ok:true 即采信，不为"更低延迟"
+        // 再用更紧的超时重试（那只会把慢 Mac 误判掉）。
+        for attempt in 0..<2 {
             let started = Date()
             do {
-                let res: HealthResponse = try await client.get("/health", timeout: attempt == 0 ? 2.2 : 1.4)
+                let res: HealthResponse = try await client.get("/health", timeout: attempt == 0 ? 6.0 : 5.0)
                 guard res.ok else { break }
-                let latency = max(1, Int(Date().timeIntervalSince(started) * 1000))
-                bestLatency = min(bestLatency ?? latency, latency)
-                if latency <= 120 { break }
-                try? await Task.sleep(nanoseconds: 120_000_000)
+                bestLatency = max(1, Int(Date().timeIntervalSince(started) * 1000))
+                break
             } catch APIClientError.http(let code, _) where code == 404 {
                 next.online = false
                 next.latencyMs = nil
@@ -935,7 +936,7 @@ final class JarvisStore: ObservableObject {
                 return next
             } catch {
                 if attempt == 0 {
-                    try? await Task.sleep(nanoseconds: 160_000_000)
+                    try? await Task.sleep(nanoseconds: 200_000_000)
                     continue
                 }
                 break
@@ -959,7 +960,8 @@ final class JarvisStore: ObservableObject {
         var nextTarget = target
         let started = Date()
         do {
-            let health: HealthResponse = try await client.get("/health", timeout: 2.2)
+            // 与 ping 一致放宽，容忍慢隧道（cloudflared ~3-4s），避免舰队卡片把慢 Mac 误判离线。
+            let health: HealthResponse = try await client.get("/health", timeout: 6.0)
             let measuredLatency = max(1, Int(Date().timeIntervalSince(started) * 1000))
             let latency = min(target.latencyMs ?? measuredLatency, measuredLatency)
 
