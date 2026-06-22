@@ -412,15 +412,15 @@ struct HomeView: View {
 
     private var connectionBadge: (title: String, icon: String, tint: Color) {
         if store.health?.ok == true {
-            return ("ONLINE", "checkmark.seal.fill", AppTheme.success)
+            return ("在线", "checkmark.seal.fill", AppTheme.success)
         }
         if store.isUsingCachedRemoteData {
-            return ("CACHE", "clock.badge.checkmark", AppTheme.warn)
+            return ("离线缓存", "clock.badge.checkmark", AppTheme.warn)
         }
         if isConnectingToMac {
-            return ("SYNCING", "arrow.triangle.2.circlepath", AppTheme.accent)
+            return ("连接中", "arrow.triangle.2.circlepath", AppTheme.accent)
         }
-        return ("OFFLINE", "wifi.exclamationmark", AppTheme.warn)
+        return ("离线", "wifi.exclamationmark", AppTheme.warn)
     }
 
     private var briefingSummaryFocus: String? {
@@ -865,7 +865,7 @@ struct JarvisChatView: View {
             .buttonStyle(PressScaleButtonStyle())
             .accessibilityLabel(speechRecorder.isRecording ? "停止录音" : "语音输入")
 
-            TextField("让 Mac 端 Jarvis 做什么", text: $input, axis: .vertical)
+            TextField(store.isMacReachable ? "让 Mac 端 Jarvis 做什么" : "Mac 离线 · 去「设备」页切换在线 Mac", text: $input, axis: .vertical)
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1...4)
                 .softField()
@@ -877,22 +877,22 @@ struct JarvisChatView: View {
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(AppTheme.accent)
+                        .fill(store.isMacReachable ? AppTheme.accent : AppTheme.faint)
                     if store.isSending {
                         ProgressView()
                             .tint(AppTheme.onAccent)
                     } else {
-                        Image(systemName: "paperplane.fill")
+                        Image(systemName: store.isMacReachable ? "paperplane.fill" : "wifi.slash")
                             .font(.system(size: 16, weight: .heavy))
                             .foregroundStyle(AppTheme.onAccent)
                     }
                 }
                 .frame(width: 44, height: 44)
             }
-            .disabled(store.isSending || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(store.isSending || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
+            .disabled(store.isSending || !store.isMacReachable || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(store.isSending || !store.isMacReachable || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
             .buttonStyle(PressScaleButtonStyle())
-            .accessibilityLabel("发送")
+            .accessibilityLabel(store.isMacReachable ? "发送" : "Mac 离线，无法发送")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)

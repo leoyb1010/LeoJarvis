@@ -49,6 +49,7 @@ final class JarvisStore: ObservableObject {
     @Published var isSending = false
 
     private static let endpointKey = "leojarvis.mobile.endpoint"
+    private static let lastGoodEndpointKey = "leojarvis.mobile.lastGoodEndpoint"
     private static let tokenKey = "leojarvis.mobile.token"
     private static let macTargetsKey = "leojarvis.mobile.macTargets"
     static let remoteMacTargets: [MacTarget] = [
@@ -79,6 +80,12 @@ final class JarvisStore: ObservableObject {
         #endif
     }
     private static var defaultEndpoint: String {
+        // 优先用"上次成功连上的 Mac"，而不是写死的第一台——这样某台长期关机时，
+        // 重启 App 不会每次都先撞死端点再报错（sticky failover 的持久化基础）。
+        if let lastGood = UserDefaults.standard.string(forKey: Self.lastGoodEndpointKey),
+           !lastGood.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return lastGood
+        }
         return remoteMacTargets[0].endpoint
     }
 
@@ -99,11 +106,18 @@ final class JarvisStore: ObservableObject {
         JarvisAPIClient(baseURL: endpoint, token: token)
     }
 
+    /// 当前 Mac 是否可达（最近一次健康成功）。对话/Agent 这类需要 Mac 动手的功能据此禁用。
+    var isMacReachable: Bool {
+        health?.ok == true
+    }
+
     func bootstrap() async {
-        async let remote: Void = refreshAll()
-        async let targets: Void = refreshMacTargets()
+        didAttemptFailover = false   // 新的启动周期，允许一次自动故障转移
+        // 先跑 refreshAll（内部失败会自动 ping+切到在线 Mac），再跑端侧情报（Mac 无关，离线也出内容）。
+        // 不再让 refreshAll 与 refreshMacTargets 并发竞写 macTargets —— failover 内部已会 ping。
         async let localIntel: Void = scanLocalIntelIfNeeded()
-        _ = await (remote, targets, localIntel)
+        await refreshAll()
+        _ = await localIntel
         await refreshFleetRuntime()
     }
 
@@ -112,6 +126,34 @@ final class JarvisStore: ObservableObject {
     }
 
     private var isRefreshInFlight = false
+    private var didAttemptFailover = false   // 一次刷新周期内只自动切一次，避免来回切/死循环
+
+    /// 记住"上次成功连上的端点"，作为下次启动的默认（sticky：恢复后不主动切回旧台）。
+    private func recordEndpointSuccess() {
+        let normalized = JarvisAPIClient(baseURL: endpoint, token: token).normalizedBaseURL
+        guard !normalized.isEmpty else { return }
+        UserDefaults.standard.set(endpoint, forKey: Self.lastGoodEndpointKey)
+    }
+
+    /// 当前端点连不上、但舰队里有其它在线 Mac 时，自动切到最快在线台并重试一次（sticky failover）。
+    /// 返回 true 表示已切换并重试。仅在一次刷新周期内尝试一次。
+    @discardableResult
+    private func attemptFailoverIfNeeded() async -> Bool {
+        guard !didAttemptFailover else { return false }
+        didAttemptFailover = true
+        let currentNormalized = JarvisAPIClient(baseURL: endpoint, token: token).normalizedBaseURL
+        await refreshMacTargets()   // ping 全部，拿到最新在线/延迟
+        // 选一台"在线且不是当前这台"的最快 Mac
+        let candidate = macTargets.first { target in
+            target.online && JarvisAPIClient(baseURL: target.endpoint, token: token).normalizedBaseURL != currentNormalized
+        }
+        guard let candidate else { return false }
+        endpoint = candidate.endpoint
+        addOrUpdateMacTarget(name: candidate.name, endpoint: candidate.endpoint, select: true)
+        isRefreshInFlight = false   // 释放重入锁，让重试的 refreshAll 能进
+        await refreshAll()
+        return true
+    }
 
     func refreshAll() async {
         // 重入保护：覆盖整个刷新过程（含后台的 notes/devices 阶段），避免快速切换 Mac
@@ -141,8 +183,10 @@ final class JarvisStore: ObservableObject {
         async let sessionsCall: AgentSessionsResponse = client.get("/agents/cli/sessions", timeout: 8)
         async let briefingCall: BriefingData = client.get("/briefing/today?compact=1&limit=12", timeout: 8)
 
+        var healthOK = false
         do {
             health = try await healthCall
+            healthOK = health?.ok == true
         } catch {
             Self.appendFailure("健康", error: error, to: &criticalFailures)
         }
@@ -169,8 +213,19 @@ final class JarvisStore: ObservableObject {
             Self.appendFailure("会话", error: error, to: &criticalFailures)
         }
         lastRefreshed = Date()
-        markCurrentTargetOnline()
+        // 在线/离线以本次结果为准：健康成功才标在线，否则标离线（修"死 Mac 仍显示在线"）。
+        if healthOK {
+            markCurrentTargetOnline()
+        } else if !criticalFailures.isEmpty {
+            markCurrentTargetOffline()
+        }
         isLoading = false
+
+        // 当前端点连不上、且没有可用内容时，先尝试自动切到其它在线 Mac 并重试一次（sticky failover）。
+        // 若切换成功，重试的 refreshAll 会接管状态/错误显示，本次直接返回，避免弹出旧端点的红错。
+        if !criticalFailures.isEmpty, !hasUsableRemoteContent {
+            if await attemptFailoverIfNeeded() { return }
+        }
 
         async let notesCall: PersonalNotesResponse = client.get("/personal-notes?compact=1&limit=20", timeout: 14)
         async let devicesCall: FleetDevicesResponse = client.get("/devices", timeout: 14)
@@ -191,22 +246,41 @@ final class JarvisStore: ObservableObject {
             if hasUsableRemoteContent {
                 isUsingCachedRemoteData = false
                 persistRemoteSnapshot()
+                recordEndpointSuccess()
+                errorMessage = nil
+            } else if RemoteSnapshotCache.hasUsableSnapshot() {
+                // 有离线缓存可看：不弹红错，靠"离线缓存"徽标安静告知，避免"缓存徽标+红错"同框的惊吓。
+                isUsingCachedRemoteData = true
                 errorMessage = nil
             } else {
-                isUsingCachedRemoteData = RemoteSnapshotCache.hasUsableSnapshot()
-                errorMessage = criticalFailures.prefix(2).joined(separator: "；")
+                // 既连不上任何 Mac、也没有缓存：才显示（已中文化、去重的）错误。
+                isUsingCachedRemoteData = false
+                errorMessage = Self.dedupedFailureMessage(criticalFailures)
             }
         } else if health?.ok != true, !softFailures.isEmpty {
             isUsingCachedRemoteData = false
             persistRemoteSnapshot()
-            errorMessage = softFailures.prefix(2).joined(separator: "；")
+            errorMessage = Self.dedupedFailureMessage(softFailures)
         } else {
             isUsingCachedRemoteData = false
             persistRemoteSnapshot()
+            recordEndpointSuccess()   // 完整成功 → 记为"上次成功端点"
         }
     }
 
+    /// 去重失败文案：5 个接口对同一台死 Mac 往往报同一句，避免横幅显示重复内容。
+    static func dedupedFailureMessage(_ failures: [String]) -> String? {
+        var seen = Set<String>()
+        var unique: [String] = []
+        for f in failures where !seen.contains(f) {
+            seen.insert(f)
+            unique.append(f)
+        }
+        return unique.prefix(2).joined(separator: "；")
+    }
+
     func refreshIntelligence() async {
+        didAttemptFailover = false   // 用户主动刷新 → 允许再次自动故障转移
         async let localIntel: Void = scanLocalIntel(force: true)
         async let remote: Void = refreshAll()
         _ = await (localIntel, remote)
@@ -269,7 +343,36 @@ final class JarvisStore: ObservableObject {
 
     static func userFacingErrorMessage(_ error: Error) -> String? {
         guard !isCancellation(error) else { return nil }
-        return cleanErrorMessage(error.localizedDescription)
+        return cleanErrorMessage(networkErrorChinese(error))
+    }
+
+    /// 把 NSURLError 译成简体中文（与 LocalIntel 的 RSS 路径口径一致），避免横幅出现
+    /// "Could not connect to the server." 这类生英文。非网络错误回落 localizedDescription。
+    static func networkErrorChinese(_ error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return error.localizedDescription }
+        switch nsError.code {
+        case NSURLErrorCannotConnectToHost:
+            return "无法连接 Mac（可能已关机或服务未启动）"
+        case NSURLErrorTimedOut:
+            return "连接 Mac 超时"
+        case NSURLErrorCannotFindHost:
+            return "找不到 Mac 地址（DNS 失败）"
+        case NSURLErrorNetworkConnectionLost:
+            return "连接中断"
+        case NSURLErrorNotConnectedToInternet:
+            return "网络不可用"
+        case NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid:
+            return "TLS 连接失败"
+        case NSURLErrorCannotParseResponse, NSURLErrorBadServerResponse:
+            return "Mac 返回异常响应"
+        default:
+            return nsError.localizedDescription
+        }
     }
 
     private static func appendFailure(_ label: String, error: Error, to failures: inout [String]) {
@@ -399,6 +502,7 @@ final class JarvisStore: ObservableObject {
             lastRefreshed = Date()
             errorMessage = nil
             markCurrentTargetOnline()
+            if res.ok { recordEndpointSuccess() }
             return res.ok
         } catch {
             errorMessage = Self.userFacingErrorMessage(error)
@@ -473,6 +577,7 @@ final class JarvisStore: ObservableObject {
     }
 
     func switchMacTarget(_ target: MacTarget) async {
+        didAttemptFailover = false   // 手动切换是新意图，允许后续自动故障转移
         endpoint = target.endpoint
         addOrUpdateMacTarget(name: target.name, endpoint: target.endpoint, select: true)
         await refreshAll()
@@ -527,6 +632,12 @@ final class JarvisStore: ObservableObject {
     func sendChat(_ text: String) async {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, !isSending else { return }
+        // 离线短路：Mac 不可达时不发网络请求（否则要干等 60s 超时再报错），直接提示。
+        guard isMacReachable else {
+            chatBubbles.append(ChatBubble(role: "user", text: clean))
+            chatBubbles.append(ChatBubble(role: "assistant", text: "Mac 端 Jarvis 当前离线，无法对话。可在「设备」页切换到在线的 Mac，或稍后再试。"))
+            return
+        }
         isSending = true
         errorMessage = nil
         chatBubbles.append(ChatBubble(role: "user", text: clean))

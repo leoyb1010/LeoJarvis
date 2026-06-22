@@ -171,8 +171,10 @@ final class LeoJarvisTests: XCTestCase {
         XCTAssertEqual(enabled, true)
     }
 
-    func testAppBundleIdentifierReplacesCurrentJarvisInstall() {
-        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.leo.cortexfleet")
+    func testAppBundleIdentifierIsLeoJarvis() {
+        // V2 起 App 由 CortexFleet 改名为 LeoJarvis，bundle id 随之更新。
+        // 旧的 com.leo.cortexfleet 是不同 bundle 的历史 App，需手动删除（见 README）。
+        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.leo.leojarvis.ios")
     }
 
     func testChineseFallbackAvoidsHalfTranslatedSocialSecurityTitle() {
@@ -1303,6 +1305,34 @@ final class LeoJarvisTests: XCTestCase {
 
         XCTAssertTrue(json.contains("\"purpose\":\"intel_fallback\""), json)
         XCTAssertTrue(json.contains("\"limit\":2"), json)
+    }
+
+    // MARK: - 离线韧性（V4）
+
+    @MainActor
+    func testNetworkErrorTranslatedToChinese() {
+        let cannotConnect = NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        let timedOut = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        let dns = NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost)
+        // Mac 端错误必须中文化，不能再冒出 "Could not connect to the server." 这类生英文
+        XCTAssertTrue(JarvisStore.networkErrorChinese(cannotConnect).contains("无法连接 Mac"))
+        XCTAssertTrue(JarvisStore.networkErrorChinese(timedOut).contains("超时"))
+        XCTAssertTrue(JarvisStore.networkErrorChinese(dns).contains("DNS"))
+        // 走 userFacingErrorMessage 也应是中文，且取消类返回 nil
+        XCTAssertEqual(JarvisStore.userFacingErrorMessage(cannotConnect)?.contains("无法连接 Mac"), true)
+        let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        XCTAssertNil(JarvisStore.userFacingErrorMessage(cancelled))
+    }
+
+    @MainActor
+    func testDedupedFailureMessageCollapsesRepeats() {
+        // 5 个接口对同一台死 Mac 报同一句 → 横幅不应重复显示
+        let failures = ["健康：无法连接 Mac", "系统：无法连接 Mac", "简报：无法连接 Mac"]
+        let msg = JarvisStore.dedupedFailureMessage(failures) ?? ""
+        XCTAssertFalse(msg.isEmpty)
+        // 去重后最多两条且彼此不同
+        let parts = msg.components(separatedBy: "；")
+        XCTAssertEqual(parts.count, Set(parts).count, "去重后不应有重复段：\(msg)")
     }
 
     func testBundledWhisperModelAvailableForOfflineSpeech() {
