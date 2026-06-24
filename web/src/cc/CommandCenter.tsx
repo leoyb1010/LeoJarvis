@@ -674,24 +674,29 @@ function AppsWidget({ apps }: { apps: NotifApp[] }) {
 // ============ COCKPIT（P10 新布局）============
 // 中枢核心：旋转轨道 + 品牌核 + 均衡器（design 稿装饰中枢）
 // 中枢核心（动态头像）—— 缩小 ~30%，点击即呼出 Jarvis 对话气泡。
+// 光环动效编码真实状态（motivated motion）：
+//   在线 = 旋转+脉冲(rose，活着)；离线 = 停转、去饱和变灰(掉线一眼可辨)。
+// 不再「为酷而恒转」。reduced-motion 由 theme.css 统一收敛为静态。
 function CoreOrb({ online, onClick }: { online: boolean; onClick?: () => void }) {
+  const ringTint = online ? "194,59,84" : "107,116,128"; // rose vs muted gray
+  const spin = (dur: string, dir = "") => (online ? `cxSpin${dir} ${dur} linear infinite` : "none");
   return (
-    <button onClick={onClick} title="点击和 Jarvis 对话" className="cx-orb" style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, animation: "cxRise .6s ease both", padding: 0, justifySelf: "center" }}>
+    <button onClick={onClick} title="点击和 Jarvis 对话" className="cx-orb" style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, animation: "cxRise .6s ease both", padding: 0, justifySelf: "center", filter: online ? "none" : "saturate(.25)", opacity: online ? 1 : 0.82, transition: "filter .5s, opacity .5s" }}>
       <div style={{ position: "relative", width: 124, height: 124, display: "grid", placeItems: "center", flex: "none" }}>
-        <div style={{ position: "absolute", width: 124, height: 124, borderRadius: "50%", border: "1px solid rgba(194,59,84,.18)", animation: "cxSpin 26s linear infinite" }} />
-        <div style={{ position: "absolute", width: 124, height: 124, animation: "cxSpin 26s linear infinite" }}><span style={{ position: "absolute", top: -3, left: "50%", width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", transform: "translateX(-50%)", boxShadow: "0 0 8px var(--accent)" }} /></div>
-        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: "1px dashed rgba(194,59,84,.28)", animation: "cxSpinR 18s linear infinite" }} />
-        <div style={{ position: "absolute", width: 80, height: 80, borderRadius: "50%", border: "1px solid rgba(194,59,84,.4)", animation: "cxPing 3.4s ease-out infinite" }} />
-        <div className="cx-orb-core" style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%,#1d232e,#0f141b)", boxShadow: "inset 0 0 14px rgba(0,0,0,.6),0 0 0 1px var(--border)", animation: "cxCorePulse 4.5s ease infinite", overflow: "hidden" }}>
+        <div style={{ position: "absolute", width: 124, height: 124, borderRadius: "50%", border: `1px solid rgba(${ringTint},.18)`, animation: spin("26s") }} />
+        <div style={{ position: "absolute", width: 124, height: 124, animation: spin("26s") }}><span style={{ position: "absolute", top: -3, left: "50%", width: 5, height: 5, borderRadius: "50%", background: online ? "var(--accent)" : "var(--text-mute)", transform: "translateX(-50%)", boxShadow: online ? "0 0 8px var(--accent)" : "none" }} /></div>
+        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `1px dashed rgba(${ringTint},.28)`, animation: spin("18s", "R") }} />
+        {online && <div style={{ position: "absolute", width: 80, height: 80, borderRadius: "50%", border: "1px solid rgba(194,59,84,.4)", animation: "cxPing 3.4s ease-out infinite" }} />}
+        <div className="cx-orb-core" style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%,#1d232e,#0f141b)", boxShadow: "inset 0 0 14px rgba(0,0,0,.6),0 0 0 1px var(--border)", animation: online ? "cxCorePulse 4.5s ease infinite" : "none", overflow: "hidden" }}>
           <img src={A("brand-mark.png")} alt="" style={{ width: 64, height: 64, objectFit: "cover", opacity: .92 }} />
-          <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 120%,rgba(194,59,84,.4),transparent 60%)" }} />
+          <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 50% 120%,rgba(${ringTint},.4),transparent 60%)` }} />
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, flex: "none" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 2.5, height: 13 }}>
-          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 2.5, height: "100%", background: "linear-gradient(#d9536b,var(--accent))", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` }} />)}
+          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 2.5, height: online ? "100%" : "30%", background: online ? "linear-gradient(#d9536b,var(--accent))" : "var(--text-mute)", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: online ? `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` : "none" }} />)}
         </div>
-        <span style={{ ...row(4), font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--accent)", whiteSpace: "nowrap" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: online ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: online ? "0 0 5px var(--good)" : "none" }} />点我 · 和 Jarvis 对话</span>
+        <span style={{ ...row(4), font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: online ? "var(--accent)" : "var(--text-mute)", whiteSpace: "nowrap" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: online ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: online ? "0 0 5px var(--good)" : "none" }} />{online ? "点我 和 Jarvis 对话" : "Mac 离线"}</span>
       </div>
     </button>
   );
@@ -935,20 +940,25 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
       {/* ROW 1 — 中枢综述 / 核心 / 时间天气健康 */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 268px 240px", gap: 20, alignItems: "stretch" }}>
         <div style={{ animation: "cxRiseL .5s ease both", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
-          <div style={{ ...row(9), marginBottom: 4 }}>
+          <div style={{ ...row(14), marginBottom: 4 }}>
             <span style={{ font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".24em", color: "var(--accent)" }}>中枢综述</span>
             <span style={{ font: "500 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--text-mute)" }}>{now.getFullYear()}.{pad(now.getMonth() + 1)}.{pad(now.getDate())}</span>
-            <span style={{ ...row(5), font: "500 9px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />已综合 {signalCount} 信号 · {totalUnread} 未读 · {svcOnline} 服务</span>
+            {/* 信号/未读/服务改成有呼吸的独立小块，去掉一行四五个中点的 tell */}
+            <span style={{ ...row(5), font: "500 9px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />在线</span>
+            <span style={{ display: "flex", gap: 14, font: "500 9px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>
+              <span>信号 <b style={{ color: "var(--text-dim)" }}>{signalCount}</b></span>
+              <span>未读 <b style={{ color: totalUnread > 0 ? "#ff8a8a" : "var(--text-dim)" }}>{totalUnread}</b></span>
+              <span>服务 <b style={{ color: "var(--text-dim)" }}>{svcOnline}</b></span>
+            </span>
           </div>
           <h1 style={{ margin: "0 0 3px", font: "600 21px/1.05 'Space Grotesk',sans-serif", letterSpacing: "-.02em", color: "var(--text)" }}>{greet}，Leo<span style={{ color: "var(--accent)", animation: "cxGlowText 4s ease infinite" }}>.</span></h1>
           <div style={{ display: "grid", gap: 0, maxWidth: 760 }}>
             {briefLines.length === 0 && <div style={{ ...mono(11), padding: "4px 0" }}>正在综合今日情报…</div>}
             {briefLines.map((b) => (
-              <button key={b.idx} onClick={() => { if (b.id) setDetailId(b.id); }} className="cx-row" title={`${b.topic} — ${b.detail}`} style={{ textAlign: "left", border: 0, background: "transparent", cursor: b.id ? "pointer" : "default", display: "flex", alignItems: "center", gap: 10, padding: "1px 8px", borderRadius: 6 }}>
-                <span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: "var(--accent)", flex: "none", letterSpacing: ".04em" }}>{b.idx}</span>
-                <span style={{ width: 1, height: 12, background: "var(--border)", flex: "none" }} />
-                <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.35 }}><b style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{b.topic}</b><span style={{ font: "400 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}> — {b.detail}</span></span>
+              <button key={b.idx} onClick={() => { if (b.id) setDetailId(b.id); }} className="cx-row" title={`${b.topic}：${b.detail}`} style={{ textAlign: "left", border: 0, background: "transparent", cursor: b.id ? "pointer" : "default", display: "flex", alignItems: "center", gap: 9, padding: "1px 8px", borderRadius: 6 }}>
+                {/* 去掉 01/02 编号 tell：状态点(语义色) + 标题本身即标签 */}
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: b.tone, flex: "none", boxShadow: `0 0 5px ${b.tone}` }} />
+                <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.35 }}><b style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{b.topic}</b><span style={{ font: "400 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>　{b.detail}</span></span>
               </button>
             ))}
           </div>
@@ -963,22 +973,25 @@ function Cockpit({ goIntel, goNotes, goAgents }: { goIntel: () => void; goNotes:
         <div style={{ display: "grid", gap: 6, alignContent: "center", paddingRight: 18, animation: "cxRise .7s ease both" }}>
           <div style={{ textAlign: "right" }}>
             <div style={{ font: "700 29px/1 'Space Grotesk',sans-serif", color: "var(--text)", letterSpacing: "-.01em" }}>{pad(now.getHours())}:{pad(now.getMinutes())}<span style={{ font: "600 13px 'IBM Plex Mono',monospace", color: "var(--accent)" }}>:{pad(now.getSeconds())}</span></div>
-            <div style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 · {week} · {greet}</div>
+            <div style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 {week}　{greet}</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
-            <span style={{ fontSize: 19, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 16px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "—"} · {wx?.weather || "—"}</span>
+          {/* 生活/个人区（天气+星座，柔性 Space Grotesk）—— 与下方系统态（技术 mono）分开 register，
+              不再让玄学数字和 CPU/RAM 挤一条。 */}
+          <div style={{ display: "grid", gap: 5, justifyItems: "end", padding: "7px 9px", background: "var(--panel)", border: "1px solid var(--border-soft)", borderRadius: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 19, lineHeight: 1 }}>{wxEmoji(wx?.weather)}</span><span style={{ font: "700 16px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{wx?.ok ? `${wx.temperature}°` : "—"}</span><span style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{wx?.city || "—"}　{wx?.weather || "—"}</span>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {["天秤", "双鱼", "双子"].map((s) => { const h = horos[s]; const sc = typeof h?.score === "number" ? h.score : null; const tn = sc == null ? "var(--text-mute)" : sc >= 75 ? "var(--good)" : sc >= 45 ? "var(--warn)" : "var(--bad)"; return <span key={s} title={h?.advice || ""} style={{ ...row(4), font: "500 10px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: tn, display: "inline-block", boxShadow: `0 0 5px ${tn}` }} />{s} <b style={{ color: "var(--text)" }}>{sc ?? "—"}</b></span>; })}
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
-            {["天秤", "双鱼", "双子"].map((s) => { const h = horos[s]; const sc = typeof h?.score === "number" ? h.score : null; const tn = sc == null ? "var(--text-mute)" : sc >= 75 ? "var(--good)" : sc >= 45 ? "var(--warn)" : "var(--bad)"; return <span key={s} title={h?.advice || ""} style={{ ...row(4), font: "500 10px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: tn, display: "inline-block", boxShadow: `0 0 5px ${tn}` }} />{s} <b style={{ color: "var(--text)" }}>{sc ?? "—"}</b></span>; })}
-          </div>
-          <div style={{ height: 1, background: "var(--border-soft)", margin: "1px 0" }} />
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginTop: 1 }}>
             <div style={{ position: "relative", width: 34, height: 34, flex: "none" }}>
               <svg width="34" height="34" viewBox="0 0 34 34" style={{ transform: "rotate(-90deg)" }}><circle cx="17" cy="17" r="14" fill="none" stroke="var(--border)" strokeWidth="3.5" /><circle cx="17" cy="17" r="14" fill="none" stroke="var(--accent)" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="87.96" strokeDashoffset={health != null ? +(87.96 * (1 - health / 100)).toFixed(1) : 87.96} style={{ filter: "drop-shadow(0 0 4px rgba(194,59,84,.6))", transition: "stroke-dashoffset .6s" }} /></svg>
               <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", font: "700 11px 'Space Grotesk'", color: "var(--text)" }}>{health ?? "—"}</div>
             </div>
             <div style={{ display: "grid", gap: 3, textAlign: "right" }}>
-              <span style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>系统健康 · 平稳</span>
+              <span style={{ font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-mute)", letterSpacing: ".08em" }}>系统健康</span>
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", font: "500 9.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}><span>CPU <b style={{ color: "var(--text)" }}>{cpuPct ?? "—"}%</b></span><span>RAM <b style={{ color: "var(--text)" }}>{ramPct ?? "—"}%</b></span><span>SSD <b style={{ color: "var(--warn)" }}>{ssdPct ?? "—"}%</b></span></div>
             </div>
           </div>

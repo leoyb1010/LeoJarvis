@@ -93,6 +93,18 @@ input, button, textarea { font-family: inherit; }
 @keyframes cxFeedIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes cxNew { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
+/* 尊重 prefers-reduced-motion：关掉所有「持续循环」的装饰动画（旋转/脉冲/呼吸/扫描线等），
+   保留一次性入场过渡可接受。无障碍硬要求，也消除晕动风险。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .cx-scanline { display: none !important; }
+}
+
 /* 极细扫描线（hairline）：只剩 2px 发光线，缓慢通过，绝不挡内容。 */
 .cx-scanline { position: absolute; left: 0; right: 0; height: 2px; pointer-events: none; z-index: 5;
   background: linear-gradient(90deg, transparent, var(--accent-line), transparent);

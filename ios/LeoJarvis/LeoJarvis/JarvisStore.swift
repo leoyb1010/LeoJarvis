@@ -39,6 +39,9 @@ final class JarvisStore: ObservableObject {
             }
         }
     }
+    // 非红的轻提示（如「已切到 Mac Studio」「显示离线缓存」）。与 errorMessage 互斥使用：
+    // 有内容/已恢复时只用 infoNotice，避免「内容已出却弹红错」的惊吓。
+    @Published var infoNotice: String?
     @Published private(set) var briefingDetails: [String: BriefingItem] = [:]
 
     @Published var chatHistory: [ChatMessage] = []
@@ -152,6 +155,10 @@ final class JarvisStore: ObservableObject {
         addOrUpdateMacTarget(name: candidate.name, endpoint: candidate.endpoint, select: true)
         isRefreshInFlight = false   // 释放重入锁，让重试的 refreshAll 能进
         await refreshAll()
+        // 重试成功后告知用户已自动切换（非红轻提示，不打扰）。失败则由 refreshAll 决定红错/缓存提示。
+        if health?.ok == true {
+            infoNotice = "已自动切到 \(candidate.name)"
+        }
         return true
     }
 
@@ -244,17 +251,21 @@ final class JarvisStore: ObservableObject {
         await refreshBrowserPreferences(refresh: false)
         if !criticalFailures.isEmpty {
             if hasUsableRemoteContent {
+                // 有可用内容（健康成功，只是个别接口慢/失败）→ 不弹红，最多一条非红轻提示。
                 isUsingCachedRemoteData = false
                 persistRemoteSnapshot()
                 recordEndpointSuccess()
                 errorMessage = nil
+                infoNotice = "部分数据稍后补全"
             } else if RemoteSnapshotCache.hasUsableSnapshot() {
-                // 有离线缓存可看：不弹红错，靠"离线缓存"徽标安静告知，避免"缓存徽标+红错"同框的惊吓。
+                // 有离线缓存可看：不弹红错，改非红轻提示，避免"缓存徽标+红错"同框的惊吓。
                 isUsingCachedRemoteData = true
                 errorMessage = nil
+                infoNotice = "Mac 暂不可达 · 显示离线缓存"
             } else {
-                // 既连不上任何 Mac、也没有缓存：才显示（已中文化、去重的）错误。
+                // 既连不上任何 Mac、也没有缓存：才显示（已中文化、去重的）红错。
                 isUsingCachedRemoteData = false
+                infoNotice = nil
                 errorMessage = Self.dedupedFailureMessage(criticalFailures)
             }
         } else if health?.ok != true, !softFailures.isEmpty {
@@ -265,6 +276,8 @@ final class JarvisStore: ObservableObject {
             isUsingCachedRemoteData = false
             persistRemoteSnapshot()
             recordEndpointSuccess()   // 完整成功 → 记为"上次成功端点"
+            errorMessage = nil
+            infoNotice = nil
         }
     }
 

@@ -61,7 +61,12 @@ struct RootView: View {
 
             VStack {
                 if let message = store.errorMessage {
-                    ErrorBanner(message: message)
+                    ErrorBanner(message: message, tone: .error)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                } else if let notice = store.infoNotice {
+                    ErrorBanner(message: notice, tone: .info)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -69,6 +74,13 @@ struct RootView: View {
                 Spacer()
             }
             .animation(.snappy, value: store.errorMessage)
+            .animation(.snappy, value: store.infoNotice)
+            .task(id: store.infoNotice) {
+                // 轻提示自动消失，不长期占顶（红错不自动消，留待用户处理或下次刷新清除）。
+                guard store.infoNotice != nil else { return }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if !Task.isCancelled { store.infoNotice = nil }
+            }
         }
     }
 
@@ -358,11 +370,11 @@ struct HomeView: View {
                 .lineSpacing(3)
                 .lineLimit(3)
 
-            HStack(spacing: 8) {
-                HeroMetric(title: "健康", value: healthValue)
-                HeroMetric(title: "服务", value: serviceValue)
-                HeroMetric(title: "Agent", value: "\(installedAgentCount)")
-            }
+            HeroMetricRow(items: [
+                ("健康", healthValue),
+                ("服务", serviceValue),
+                ("Agent", "\(installedAgentCount)")
+            ])
 
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -380,11 +392,12 @@ struct HomeView: View {
         }
         .padding(16)
         .background(
+            // 单强调锁定：hero 渐变只走蓝色 accent 家族，去掉原来的 violet（第二强调色）。
             LinearGradient(
                 colors: [
                     AppTheme.accentDeep,
                     AppTheme.accent,
-                    AppTheme.violet.opacity(0.88)
+                    AppTheme.accentDeep
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -558,36 +571,13 @@ struct HomeView: View {
     }
 
     private func quickMetrics(installedAgentCount: Int) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            MetricTile(
-                title: "健康值",
-                value: healthValue,
-                subtitle: healthSubtitle,
-                icon: "heart.text.square.fill",
-                tint: AppTheme.success
-            )
-            MetricTile(
-                title: "服务在线",
-                value: serviceValue,
-                subtitle: "Mac 中枢依赖",
-                icon: "server.rack",
-                tint: AppTheme.accent
-            )
-            MetricTile(
-                title: "Agent",
-                value: "\(installedAgentCount)/\(max(store.agents.count, 1))",
-                subtitle: "\(store.sessions.count) 个会话",
-                icon: "terminal.fill",
-                tint: AppTheme.ink
-            )
-            MetricTile(
-                title: "记事",
-                value: "\(store.cockpit?.notes?.total ?? store.notes.count)",
-                subtitle: "\(store.cockpit?.memory?.pending ?? 0) 条待确认记忆",
-                icon: "note.text",
-                tint: AppTheme.warn
-            )
-        }
+        // 去卡片化：首页主指标改为单面板内 hairline 分隔的裸排（大号 mono 数字），不再 4 张卡套卡。
+        HomeMetricStrip(items: [
+            HomeMetricStrip.Item(title: "健康值", value: healthValue, sub: healthSubtitle, tint: AppTheme.success),
+            HomeMetricStrip.Item(title: "服务在线", value: serviceValue, sub: "Mac 中枢依赖", tint: AppTheme.accent),
+            HomeMetricStrip.Item(title: "Agent", value: "\(installedAgentCount)/\(max(store.agents.count, 1))", sub: "\(store.sessions.count) 个会话", tint: AppTheme.ink),
+            HomeMetricStrip.Item(title: "记事", value: "\(store.cockpit?.notes?.total ?? store.notes.count)", sub: "\(store.cockpit?.memory?.pending ?? 0) 条待确认记忆", tint: AppTheme.warn)
+        ])
     }
 
     private var healthSubtitle: String {
@@ -3510,6 +3500,66 @@ struct JarvisContextCard: View {
     }
 }
 
+/// 首页主指标裸排：单面板内 2×2，hairline 分隔，大号等宽数字 + 细色条做语义提示。
+/// 取代原来 4 张 MetricTile 卡（去「卡里套卡」）。仅首页使用；其它页仍用 MetricTile。
+struct HomeMetricStrip: View {
+    struct Item: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let sub: String
+        let tint: Color
+    }
+    let items: [Item]
+
+    private func cell(_ item: Item) -> some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(item.tint)
+                .frame(width: 3, height: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.value)
+                    .font(.system(size: 23, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .contentTransition(.numericText())
+                Text(item.title)
+                    .font(.system(size: 11, weight: .heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Text(item.sub)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
+    }
+
+    var body: some View {
+        let rows = stride(from: 0, to: items.count, by: 2).map { Array(items[$0..<min($0 + 2, items.count)]) }
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                if rowIdx > 0 {
+                    Rectangle().fill(AppTheme.line).frame(height: 1)
+                }
+                HStack(spacing: 0) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { colIdx, item in
+                        if colIdx > 0 {
+                            Rectangle().fill(AppTheme.line).frame(width: 1)
+                                .padding(.vertical, 8)
+                        }
+                        cell(item).padding(.horizontal, 12)
+                    }
+                }
+            }
+        }
+        .panel(padding: 4)
+    }
+}
+
 struct MetricTile: View {
     let title: String
     let value: String
@@ -3552,24 +3602,39 @@ struct HeroMetric: View {
     let title: String
     let value: String
 
+    // 去卡片化：hero 内不再「卡里套卡」，数字裸排（等宽 mono），靠 HeroMetricRow 的细竖线分隔。
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(value)
-                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
                 .foregroundStyle(AppTheme.onAccent)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
             Text(title)
                 .font(.system(size: 10, weight: .heavy))
-                .foregroundStyle(AppTheme.onAccent.opacity(0.66))
+                .foregroundStyle(AppTheme.onAccent.opacity(0.62))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(AppTheme.onAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(AppTheme.onAccent.opacity(0.14), lineWidth: 1)
-        )
+    }
+}
+
+/// hero 内三指标裸排：等宽数字 + 细竖线分隔，无卡容器。
+struct HeroMetricRow: View {
+    let items: [(title: String, value: String)]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                if idx > 0 {
+                    Rectangle()
+                        .fill(AppTheme.onAccent.opacity(0.18))
+                        .frame(width: 1, height: 30)
+                        .padding(.horizontal, 4)
+                }
+                HeroMetric(title: item.title, value: item.value)
+            }
+        }
     }
 }
 
@@ -4345,21 +4410,36 @@ struct EmptyState: View {
 }
 
 struct ErrorBanner: View {
+    enum Tone { case error, info }
     let message: String
+    var tone: Tone = .error
+
+    private var icon: String { tone == .error ? "exclamationmark.triangle.fill" : "info.circle.fill" }
+    private var fg: Color { tone == .error ? AppTheme.onAccent : AppTheme.ink }
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: icon)
                 .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(tone == .error ? AppTheme.onAccent : AppTheme.accent)
             Text(message)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(2)
             Spacer()
         }
-        .foregroundStyle(AppTheme.onAccent)
+        .foregroundStyle(fg)
         .padding(12)
-        .background(AppTheme.danger, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .shadow(color: AppTheme.danger.opacity(0.25), radius: 12, y: 6)
+        .background {
+            if tone == .error {
+                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(AppTheme.danger)
+            } else {
+                // 非红：玻璃面板 + 细边，安静告知不惊吓
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(AppTheme.panel)
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(AppTheme.line, lineWidth: 1))
+            }
+        }
+        .shadow(color: AppTheme.shadow, radius: 10, y: 5)
     }
 }
 
