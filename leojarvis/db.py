@@ -39,6 +39,29 @@ CREATE TABLE IF NOT EXISTS judgments (
 CREATE INDEX IF NOT EXISTS idx_judgments_triage ON judgments(triage, ts);
 CREATE INDEX IF NOT EXISTS idx_judgments_event_id ON judgments(event_id);
 
+-- WorkDock 合并 M2：信息转任务收件箱。task 从 events+judgments 自动抽，带来源与置信度。
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  action TEXT,                       -- reply/review/create/follow_up/approve/prepare...
+  object TEXT,                       -- 对象，如「活动复盘文档」
+  owner TEXT,                        -- 默认本人
+  due TEXT,                          -- ISO 日期（可空）
+  priority TEXT DEFAULT 'P2',        -- P0/P1/P2
+  confidence REAL DEFAULT 0.5,       -- AI 抽取置信度 0..1
+  inbox_state TEXT DEFAULT 'unconfirmed',  -- unconfirmed/confirmed/done/ignored
+  risk_level TEXT DEFAULT 'low',     -- low/medium/high
+  origin TEXT,                       -- 来源类型 email/im/intel/manual...
+  event_id TEXT,                     -- 关联事件（来源台账）
+  context_preview TEXT,              -- 原文/上下文预览
+  suggestion TEXT,                   -- 系统处理建议
+  tags TEXT DEFAULT '[]',
+  created_ts INTEGER,
+  updated_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(inbox_state, priority, created_ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_event ON tasks(event_id);
+
 CREATE TABLE IF NOT EXISTS memories (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
@@ -425,6 +448,82 @@ def memory_health_sweep(*, min_confidence: float = 0.2, stale_days: int = 120) -
             (now_ms(), min_confidence, cutoff),
         )
     return {"archived": cur.rowcount}
+
+
+# ---------- WorkDock 合并 M2：任务收件箱 ----------
+
+def upsert_task(*, event_id: str | None, title: str, action: str | None = None,
+                object: str | None = None, owner: str | None = None, due: str | None = None,
+                priority: str = "P2", confidence: float = 0.5, risk_level: str = "low",
+                origin: str | None = None, context_preview: str | None = None,
+                suggestion: str | None = None, tags: list[str] | None = None,
+                inbox_state: str = "unconfirmed") -> str | None:
+    """插入或更新一条任务。按 event_id 去重（同一事件不重复建任务）。
+    已被用户处理过(confirmed/done/ignored)的任务不被自动重建覆盖。返回 task id 或 None(跳过)。"""
+    init_db()
+    ts = now_ms()
+    with conn() as c:
+        if event_id:
+            existing = c.execute("SELECT id, inbox_state FROM tasks WHERE event_id=?", (event_id,)).fetchone()
+            if existing:
+                # 用户已表态的不动；仍是 unconfirmed 的可刷新内容。
+                if str(existing["inbox_state"]) != "unconfirmed":
+                    return None
+                c.execute(
+                    """UPDATE tasks SET title=?,action=?,object=?,owner=?,due=?,priority=?,
+                       confidence=?,risk_level=?,origin=?,context_preview=?,suggestion=?,tags=?,updated_ts=?
+                       WHERE id=?""",
+                    (title, action, object, owner, due, priority, confidence, risk_level, origin,
+                     context_preview, suggestion, json.dumps(tags or [], ensure_ascii=False), ts, existing["id"]),
+                )
+                return existing["id"]
+        tid = uuid.uuid4().hex
+        c.execute(
+            """INSERT INTO tasks(id,title,action,object,owner,due,priority,confidence,inbox_state,
+               risk_level,origin,event_id,context_preview,suggestion,tags,created_ts,updated_ts)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (tid, title, action, object, owner, due, priority, confidence, inbox_state, risk_level,
+             origin, event_id, context_preview, suggestion, json.dumps(tags or [], ensure_ascii=False), ts, ts),
+        )
+        return tid
+
+
+def list_tasks(states: list[str] | None = None, limit: int = 100) -> list[sqlite3.Row]:
+    init_db()
+    with conn() as c:
+        if states:
+            ph = ",".join("?" for _ in states)
+            return c.execute(
+                f"SELECT * FROM tasks WHERE inbox_state IN ({ph}) "
+                f"ORDER BY (priority='P0') DESC,(priority='P1') DESC, created_ts DESC LIMIT ?",
+                (*states, limit),
+            ).fetchall()
+        return c.execute(
+            "SELECT * FROM tasks ORDER BY created_ts DESC LIMIT ?", (limit,),
+        ).fetchall()
+
+
+def get_task(task_id: str) -> sqlite3.Row | None:
+    init_db()
+    with conn() as c:
+        return c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+
+
+def set_task_state(task_id: str, inbox_state: str) -> bool:
+    if inbox_state not in {"unconfirmed", "confirmed", "done", "ignored"}:
+        raise ValueError("invalid inbox_state")
+    init_db()
+    with conn() as c:
+        cur = c.execute("UPDATE tasks SET inbox_state=?, updated_ts=? WHERE id=?",
+                        (inbox_state, now_ms(), task_id))
+    return cur.rowcount > 0
+
+
+def task_state_counts() -> dict[str, int]:
+    init_db()
+    with conn() as c:
+        rows = c.execute("SELECT inbox_state, COUNT(*) AS n FROM tasks GROUP BY inbox_state").fetchall()
+    return {str(r["inbox_state"]): int(r["n"]) for r in rows}
 
 
 def upsert_device_heartbeat(summary: dict[str, Any]) -> dict[str, Any]:

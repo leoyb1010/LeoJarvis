@@ -276,3 +276,38 @@ export function fmtAgo(ts?: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}分`;
   return `${Math.floor(s / 3600)}时`;
 }
+
+// ---- WorkDock 合并 M2：信息转任务收件箱 ----
+export type InboxTask = {
+  id: string; title: string; action?: string; object?: string; owner?: string; due?: string;
+  priority?: string; confidence?: number; inbox_state?: string; risk_level?: string;
+  origin?: string; event_id?: string; context_preview?: string; suggestion?: string;
+  tags?: string[]; suggest_only?: boolean; created_ts?: number;
+} & Record<string, any>;
+export type InboxList = { ok?: boolean; tasks: InboxTask[]; counts?: Record<string, number> };
+export const getInbox = (states = "unconfirmed,confirmed") =>
+  jget<InboxList>(`/inbox/list?states=${encodeURIComponent(states)}`);
+export const rebuildInbox = (hours = 48) =>
+  jpost<{ ok: boolean; scanned: number; created: number; used_llm?: boolean; note?: string }>(`/inbox/rebuild?hours=${hours}`);
+export const setInboxState = (id: string, state: "unconfirmed" | "confirmed" | "done" | "ignored") =>
+  jpost<{ ok: boolean }>(`/inbox/${encodeURIComponent(id)}/state`, { state });
+
+// ---- WorkDock 合并 M3：下班收尾 / 日报周报 ----
+export type WrapItem = { title?: string; detail?: string; source?: Record<string, any> };
+export type WrapUp = {
+  ok?: boolean; period: string; label: string;
+  completed: WrapItem[]; unfinished: WrapItem[];
+  counts?: { completed: number; unfinished: number };
+  summary?: { headline?: string; report?: string; next?: string };
+};
+export const getWrapup = (period: "today" | "week" = "today") =>
+  jget<WrapUp>(`/wrapup/${period}`);
+
+// ---- WorkDock 合并 M4：受控执行台 ----
+export type AgentRunPending = { id: string; status: string; tool?: string; args?: any; thought?: string; gate?: { verdict: string; label: string }; reason?: string };
+export type AgentRunPast = { id: string; status: string; tool?: string; title?: string; detail?: string; ts?: number };
+export type AgentRunsOverview = {
+  ok?: boolean; pending: AgentRunPending[]; recent: AgentRunPast[];
+  counts?: { awaiting: number; executed: number; blocked: number; total_recent: number };
+};
+export const getAgentRuns = (hours = 48) => jget<AgentRunsOverview>(`/agent-runs?hours=${hours}`);

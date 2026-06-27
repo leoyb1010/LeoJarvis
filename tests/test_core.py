@@ -1557,3 +1557,146 @@ def test_mcp_gateway_status_is_secret_safe(monkeypatch):
     public = mcp_gateway.public_settings({"servers": {"tavily": {"enabled": True, "api_key": "dummy-secret"}}})
     assert public["servers"]["tavily"]["api_key"] == ""
     assert public["servers"]["tavily"]["key_configured"] is True
+
+
+# ===== WorkDock 合并能力测试（M2 收件箱 / M3 收尾 / M4 执行台） =====
+
+def _seed_judged_event(title, *, score, triage, analysis, source="rss:test"):
+    """种一条事件 + 其判定，供收件箱/收尾测试使用。返回 event_id。"""
+    eid = db.insert_event(source=source, kind="news", content=title + " 正文内容",
+                          title=title, dedup_key=uuid.uuid4().hex)
+    db.insert_judgment(event_id=eid, score=score, take=analysis.get("take", ""),
+                       triage=triage, reasons=["原因A", "原因B"], analysis=analysis)
+    return eid
+
+
+def test_inbox_rebuild_maps_judgment_to_task(monkeypatch):
+    """M2：judge 已产的 analysis+score 映射成结构化待办；LLM 不可用时规则兜底；低置信标 suggest_only。"""
+    from leojarvis import inbox
+    db.init_db()
+    # LLM 抽取强制返回空 → 走规则兜底（确定性、无网络）
+    monkeypatch.setattr(inbox, "_llm_extract", lambda rows: {})
+
+    hi = _seed_judged_event("高优先事件需要处理", score=0.82, triage="notify",
+                            analysis={"title_zh": "高优先事件需要处理", "summary": "这是摘要",
+                                      "next_step": "尽快确认口径", "take": "重要"})
+    lo = _seed_judged_event("低置信观察项", score=0.3, triage="digest",
+                            analysis={"title_zh": "低置信观察项", "summary": "次要"})
+
+    res = inbox.rebuild(hours=48, limit=40)
+    assert res["ok"] and res["created"] >= 2
+    assert res["used_llm"] is False   # 兜底路径
+
+    listing = inbox.list_inbox(states=["unconfirmed"], limit=100)
+    by_event = {t["event_id"]: t for t in listing["tasks"]}
+    assert hi in by_event and lo in by_event
+    high = by_event[hi]
+    assert high["priority"] == "P0"           # notify + score>=0.75
+    assert high["confidence"] >= 0.8
+    assert high["suggestion"] == "尽快确认口径"
+    assert high["suggest_only"] is False
+    assert by_event[lo]["suggest_only"] is True   # 低置信只作建议
+
+    # 确认队列：confirm → 状态流转；且二次 rebuild 不覆盖用户已表态的任务
+    tid = high["id"]
+    assert inbox.set_state(tid, "confirmed")["ok"] is True
+    inbox.rebuild(hours=48, limit=40)
+    again = db.get_task(tid)
+    assert again["inbox_state"] == "confirmed"
+
+
+def test_inbox_rebuild_uses_llm_extraction(monkeypatch):
+    """M2：LLM 抽取可用时，action/title/due 来自抽取结果。"""
+    from leojarvis import inbox
+    db.init_db()
+    eid = _seed_judged_event("张昊让你补投放数据", score=0.7, triage="notify",
+                             analysis={"title_zh": "原始标题", "summary": "补数据"})
+
+    def fake_extract(rows):
+        idx = next((i for i, r in enumerate(rows) if r["event_id"] == eid), 0)
+        return {idx: {"idx": idx, "action": "follow_up", "object": "复盘文档",
+                      "due": "2026-06-30", "title": "把投放数据补到复盘文档"}}
+    monkeypatch.setattr(inbox, "_llm_extract", fake_extract)
+
+    res = inbox.rebuild(hours=48, limit=40)
+    assert res["used_llm"] is True
+    t = next(x for x in inbox.list_inbox(["unconfirmed"], 100)["tasks"] if x["event_id"] == eid)
+    assert t["action"] == "follow_up"
+    assert t["title"] == "把投放数据补到复盘文档"
+    assert t["due"] == "2026-06-30"
+    assert t["object"] == "复盘文档"
+
+
+def test_wrapup_aggregates_with_sources(monkeypatch):
+    """M3：收尾把完成/未完成汇总，每行带来源；LLM 不可用走规则兜底仍出体面结果。"""
+    from leojarvis import inbox, wrapup
+    db.init_db()
+    monkeypatch.setattr(inbox, "_llm_extract", lambda rows: {})
+    # 让总结走兜底（不依赖网络）
+    import leojarvis.models_router as mr
+    monkeypatch.setattr(mr, "chat", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no llm")))
+
+    eid = _seed_judged_event("待完成的事件", score=0.7, triage="notify",
+                             analysis={"title_zh": "待完成的事件", "summary": "s"})
+    inbox.rebuild(hours=48, limit=40)
+    t = next(x for x in inbox.list_inbox(["unconfirmed"], 100)["tasks"] if x["event_id"] == eid)
+    inbox.set_state(t["id"], "done")   # 一条完成
+
+    # 一条 agent 动作（审计日志）→ 完成项
+    db.insert_event(source="agent", kind="action", domain="business",
+                    title="run_shell [ok]", content="args={}\n-> done",
+                    meta={"tool": "run_shell", "status": "ok"}, dedup_key=uuid.uuid4().hex)
+
+    out = wrapup.build("today")
+    assert out["ok"] and out["label"] == "日报"
+    assert out["counts"]["completed"] >= 2   # done 任务 + agent 动作
+    # 每个完成项都带来源
+    assert all("source" in c and c["source"].get("event_id") for c in out["completed"])
+    assert out["summary"]["report"]          # 兜底也有正文
+
+
+def test_agent_runs_overview_only_real_data():
+    """M4：执行台只暴露真实数据——历史 action 事件 + 内存待确认 + gate 判定，不编造 plan。"""
+    from leojarvis import agent_runs
+    from leojarvis.agent import loop
+    db.init_db()
+    db.insert_event(source="agent", kind="action", domain="business",
+                    title="read_file [ok]", content="args={}\n-> ok",
+                    meta={"tool": "read_file", "status": "ok"}, dedup_key=uuid.uuid4().hex)
+    db.insert_event(source="agent", kind="action", domain="business",
+                    title="run_shell [denied]", content="args={}\n-> blocked",
+                    meta={"tool": "run_shell", "status": "denied"}, dedup_key=uuid.uuid4().hex)
+
+    # 注入一条内存待确认动作
+    loop._PENDING["pytest-pid"] = {"tool": "run_shell", "args": {"command": "rm x"}, "thought": "测试"}
+    try:
+        ov = agent_runs.overview(hours=48)
+    finally:
+        loop._PENDING.pop("pytest-pid", None)
+
+    assert ov["ok"]
+    assert ov["counts"]["executed"] >= 1
+    assert ov["counts"]["blocked"] >= 1
+    pend = {p["id"]: p for p in ov["pending"]}
+    assert "pytest-pid" in pend
+    assert pend["pytest-pid"]["gate"]["verdict"] in {"auto", "confirm", "deny"}
+    # 不应出现编造的 plan/rollback 字段
+    assert "plan" not in pend["pytest-pid"]
+    assert "rollback" not in pend["pytest-pid"]
+
+
+def test_inbox_wrapup_agentruns_routes(monkeypatch):
+    """路由层：/inbox /wrapup /agent-runs 在 TestClient 下返回 ok（双挂载 /api 亦可）。"""
+    from leojarvis import inbox
+    monkeypatch.setattr(inbox, "_llm_extract", lambda rows: {})
+    _seed_judged_event("路由测试事件", score=0.6, triage="digest",
+                       analysis={"title_zh": "路由测试事件", "summary": "s"})
+    with TestClient(app) as client:
+        r1 = client.post("/api/inbox/rebuild", headers={"Authorization": "Bearer pytest-secret"})
+        assert r1.status_code == 200 and r1.json()["ok"]
+        r2 = client.get("/api/inbox/list", headers={"Authorization": "Bearer pytest-secret"})
+        assert r2.status_code == 200 and "tasks" in r2.json()
+        r3 = client.get("/api/wrapup/today", headers={"Authorization": "Bearer pytest-secret"})
+        assert r3.status_code == 200 and r3.json()["ok"]
+        r4 = client.get("/api/agent-runs", headers={"Authorization": "Bearer pytest-secret"})
+        assert r4.status_code == 200 and r4.json()["ok"]

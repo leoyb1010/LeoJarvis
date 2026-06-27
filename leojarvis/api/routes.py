@@ -1338,6 +1338,54 @@ def _ingest_result_dict(res) -> dict:
     }
 
 
+# ---------- WorkDock 合并 M2：信息转任务收件箱 ----------
+
+@router.get("/inbox/list")
+def inbox_list(states: str = "unconfirmed,confirmed", limit: int = 100) -> dict:
+    """收件箱任务列表。states 逗号分隔(unconfirmed/confirmed/done/ignored)。"""
+    from .. import inbox
+    state_list = [s.strip() for s in states.split(",") if s.strip()] or None
+    return inbox.list_inbox(states=state_list, limit=limit)
+
+
+@router.post("/inbox/rebuild")
+def inbox_rebuild(hours: int = 48, limit: int = 40) -> dict:
+    """从近期已判定事件(judge notify/digest)自动抽成结构化待办,带来源+置信度。"""
+    from .. import inbox
+    return inbox.rebuild(hours=hours, limit=limit)
+
+
+class InboxStateIn(BaseModel):
+    state: str = Field(pattern="^(unconfirmed|confirmed|done|ignored)$")
+
+
+@router.post("/inbox/{task_id}/state")
+def inbox_set_state(task_id: str, req: InboxStateIn) -> dict:
+    """确认/忽略/完成一条待办(确认队列)。"""
+    from .. import inbox
+    return inbox.set_state(task_id, req.state)
+
+
+# ---------- WorkDock 合并 M3：下班收尾 / 日报周报 ----------
+
+@router.get("/wrapup/{period}")
+def wrapup_build(period: str = "today") -> dict:
+    """生成收尾:把今天/本周完成与未完成汇总成日报/周报,每行带来源。"""
+    if period not in {"today", "week"}:
+        period = "today"
+    from .. import wrapup
+    return wrapup.build(period)
+
+
+# ---------- WorkDock 合并 M4：受控执行台(只暴露真实执行数据) ----------
+
+@router.get("/agent-runs")
+def agent_runs_overview(hours: int = 48) -> dict:
+    """执行台:当前待确认动作(内存)+ 历史执行审计(events kind=action)+ gate 风险判定。"""
+    from .. import agent_runs
+    return agent_runs.overview(hours=hours)
+
+
 @router.websocket("/ws/notify")
 async def ws_notify(ws: WebSocket):
     if not await _authorize_websocket(ws):

@@ -11,11 +11,14 @@ import {
   getNotebooks, getNotebookWorkspace, addNotebookText, notebookChat, notebookStudio,
   type NbSource, type NbCitation, type StudioTpl, type NotebookMeta,
   getDevices, deleteDevice, type FleetDevice,
+  getInbox, rebuildInbox, setInboxState, getWrapup, getAgentRuns,
   type CliAgent, type CliSession, type ExternalAgent, type Vitals, type Service, type SystemOverview,
   type Briefing, type BriefItem, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
   type Intelligence, type IntelRepo, type IntelSource, type IntelTarget, type BriefDetailItem,
   type AmapConfig, type AmapWeather, type Settings as SettingsData, type Horoscope,
+  type InboxTask, type WrapUp, type AgentRunsOverview,
 } from "./live";
+import { SENSE_CHANNELS, ingestSensed, type SenseChannel, type SenseResult } from "./sensing";
 import { briefingMainFeed, pickBriefingLeads } from "../briefingOrder";
 import { useWhisperRecorder } from "../useWhisperRecorder";
 
@@ -27,7 +30,7 @@ const TAG: Record<string, [string, string]> = {
 };
 const A = (f: string) => `/cc/${f}`;
 
-type Page = "cockpit" | "agents" | "intel" | "notes" | "devices" | "settings";
+type Page = "cockpit" | "inbox" | "agents" | "intel" | "sense" | "wrapup" | "notes" | "devices" | "settings";
 type Theme = "dark" | "light";
 
 const panel: CSSProperties = { background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 15, padding: 16 };
@@ -81,7 +84,7 @@ function GmailMark({ size = 28 }: { size?: number }) {
   );
 }
 
-const PAGES: Page[] = ["cockpit", "agents", "intel", "notes", "devices", "settings"];
+const PAGES: Page[] = ["cockpit", "inbox", "agents", "intel", "sense", "wrapup", "notes", "devices", "settings"];
 const pageFromHash = (): Page => { try { const h = location.hash.replace(/^#\/?/, "") as Page; return PAGES.includes(h) ? h : "cockpit"; } catch { return "cockpit"; } };
 
 export default function CommandCenter() {
@@ -127,8 +130,9 @@ export default function CommandCenter() {
   const pad = (n: number) => String(n).padStart(2, "0");
   const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const META: Record<Page, [string, string]> = {
-    cockpit: ["全景驾驶舱", "COCKPIT"], agents: ["智能体编排", "AGENTS"],
-    intel: ["情报中心", "INTELLIGENCE"], notes: ["个人记事", "NOTES"], devices: ["设备舰队", "DEVICES"], settings: ["设置台", "SETTINGS"],
+    cockpit: ["全景驾驶舱", "COCKPIT"], inbox: ["任务收件箱", "INBOX"], agents: ["智能体编排", "AGENTS"],
+    intel: ["情报中心", "INTELLIGENCE"], sense: ["感知接入", "SENSING"], wrapup: ["下班收尾", "WRAP-UP"],
+    notes: ["个人记事", "NOTES"], devices: ["设备舰队", "DEVICES"], settings: ["设置台", "SETTINGS"],
   };
   const nav = (p: Page) => ({ fg: page === p ? "var(--accent)" : "var(--text-mute)", bg: page === p ? "var(--accent-soft)" : "transparent", bar: page === p ? "var(--accent)" : "transparent" });
   const navBtn = (p: Page, title: string, icon: ReactNode) => {
@@ -146,8 +150,11 @@ export default function CommandCenter() {
       <nav style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "14px 0", background: "var(--bg-2)", borderRight: "1px solid var(--border-soft)" }}>
         <img src={A("brand-mark.png")} alt="" style={{ width: 40, height: 40, borderRadius: 11, objectFit: "cover", boxShadow: "0 0 0 1px var(--border),0 0 18px var(--accent-soft)", marginBottom: 10 }} />
         {navBtn("cockpit", "驾驶舱", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="2" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" /></svg>)}
+        {navBtn("inbox", "收件箱", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 13h5l2 3h4l2-3h5" /><path d="M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z" /></svg>)}
         {navBtn("agents", "智能体", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="5" r="2.4" /><circle cx="5.5" cy="18" r="2.4" /><circle cx="18.5" cy="18" r="2.4" /><path d="M12 7.4v3M11 12l-4 4M13 12l4 4" /></svg>)}
         {navBtn("intel", "情报", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4.5" /><path d="M12 12l6-6" /></svg>)}
+        {navBtn("sense", "感知接入", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 12a1.5 1.5 0 1 0 0-.01" /><path d="M8.5 8.5a5 5 0 0 1 7 0M5.6 5.6a9 9 0 0 1 12.8 0" /><path d="M9 15.5a4 4 0 0 0 6 0" /></svg>)}
+        {navBtn("wrapup", "下班收尾", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 17h18" /><circle cx="12" cy="11" r="4" /><path d="M12 3v2M5 7l1.4 1.4M19 7l-1.4 1.4M3 21h18" /></svg>)}
         {navBtn("notes", "记事", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 3h11l3 3v15a0 0 0 0 1 0 0H5a0 0 0 0 1 0 0z" /><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" /></svg>)}
         {navBtn("devices", "设备", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M2 20h20M9 16v4M15 16v4" /></svg>)}
         <span style={flex1} />
@@ -178,8 +185,11 @@ export default function CommandCenter() {
         <div style={{ position: "relative", minHeight: 0, overflow: "hidden", backgroundImage: "linear-gradient(var(--border-soft) 1px,transparent 1px),linear-gradient(90deg,var(--border-soft) 1px,transparent 1px)", backgroundSize: "38px 38px", backgroundBlendMode: "overlay", opacity: 1 }}>
           {scan && <div className="cx-scanline" style={{ top: 0 }} />}
           {page === "cockpit" && <Cockpit goIntel={() => setPage("intel")} goNotes={(id) => { setNotesOpenId(id ?? null); setPage("notes"); }} goAgents={() => setPage("agents")} />}
+          {page === "inbox" && <Inbox />}
           {page === "agents" && <Agents themeMode={theme} />}
           {page === "intel" && <Intel />}
+          {page === "sense" && <Sense />}
+          {page === "wrapup" && <Wrapup />}
           {page === "notes" && <Notes openId={notesOpenId} />}
           {page === "devices" && <Devices />}
           {page === "settings" && <Settings theme={theme} setTheme={setTheme} scan={scan} toggleScan={() => setScan((v) => !v)} />}
@@ -1179,7 +1189,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
   const [modelMenu, setModelMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [termMode, setTermMode] = useState<"pty" | "task">("pty");  // E2: 默认进真实交互终端
+  const [termMode, setTermMode] = useState<"pty" | "task" | "runs">("pty");  // E2: 默认进真实交互终端；runs=受控执行台(M4)
   const [ptyKey, setPtyKey] = useState(0);                          // ++ = 重启 PTY 会话
   const termRef = useRef<HTMLPreElement | null>(null);
   const promptVoice = useWhisperRecorder({
@@ -1314,12 +1324,14 @@ function Agents({ themeMode }: { themeMode: Theme }) {
         {/* 顶部：分段 Tab + 状态 */}
         <div style={{ ...row(10), padding: "10px 12px 10px 14px", borderBottom: "1px solid var(--border-soft)" }}>
           <div style={{ display: "flex", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 3, gap: 2 }}>
-            {([["pty", "⚡ 交互终端"], ["task", "📋 任务流"]] as const).map(([m, label]) => (
+            {([["pty", "⚡ 交互终端"], ["task", "📋 任务流"], ["runs", "🛡 执行台"]] as const).map(([m, label]) => (
               <button key={m} onClick={() => setTermMode(m)} style={{ border: 0, cursor: "pointer", borderRadius: 7, padding: "5px 13px", font: "600 11px 'Space Grotesk',sans-serif", background: termMode === m ? "var(--accent)" : "transparent", color: termMode === m ? "#fff" : "var(--text-dim)", transition: "all .15s" }}>{label}</button>
             ))}
           </div>
           <span style={flex1} />
-          {termMode === "pty" ? (
+          {termMode === "runs" ? (
+            <span style={{ ...row(5), flex: "none", font: "600 9.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}>受控执行 · 计划→确认→审计</span>
+          ) : termMode === "pty" ? (
             <div style={{ ...row(8) }}>
               {(() => { const [tg, fg] = tagOf(ptyAgent); return <span style={{ ...row(5), font: "600 11px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}><b style={{ color: fg, fontWeight: 700 }}>{tg}</b>{ptyLabel} · 原生 REPL</span>; })()}
               <button onClick={() => setPtyKey((k) => k + 1)} title="重启这个交互会话（清空并重新启动 agent）" className="cx-chip" style={{ border: "1px solid var(--border)", background: "var(--panel-2)", cursor: "pointer", borderRadius: 7, padding: "5px 11px", ...mono(9.5, "var(--text-dim)") }}>↻ 重启</button>
@@ -1330,7 +1342,9 @@ function Agents({ themeMode }: { themeMode: Theme }) {
         </div>
 
         {/* 主体 */}
-        {termMode === "pty" ? (
+        {termMode === "runs" ? (
+          <AgentRunsView />
+        ) : termMode === "pty" ? (
           <Suspense fallback={<div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-mute)", font: "600 11px 'IBM Plex Mono',monospace" }}>终端加载中…</div>}>
             <PtyTerminal agent={ptyAgent} themeMode={themeMode} sessionKey={ptyKey} />
           </Suspense>
@@ -1530,6 +1544,273 @@ function IntelDetail({ id, onClose }: { id: string; onClose: () => void }) {
             {Array.isArray(item.reasons) && item.reasons.length > 0 && (<div style={{ marginBottom: 18 }}><div style={sectLbl}>判断依据</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{item.reasons.map((r, i) => (<span key={i} style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 999, padding: "5px 11px" }}>{r}</span>))}</div></div>)}
             {item.url && (<button onClick={openUrl} className="cx-chip" style={{ ...row(8), border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--accent)", cursor: "pointer", font: "600 12px 'Space Grotesk',sans-serif", padding: "10px 14px", borderRadius: 10, width: "100%", justifyContent: "center" }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M14 5h5v5M19 5l-9 9M11 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg>打开原文链接</button>)}
           </>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ WorkDock 合并 M5：Confidence / Source 通用小组件 ============
+// 置信度条：把 0..1 置信度可视化（与记忆置信度/judge score 同一语言）。单强调色，无第二色。
+function Confidence({ value, label = true }: { value?: number; label?: boolean }) {
+  const v = Math.max(0, Math.min(1, value ?? 0));
+  const pct = Math.round(v * 100);
+  return (
+    <span style={{ ...row(6), flex: "none" }} title={`置信度 ${pct}%`}>
+      <span style={{ position: "relative", width: 42, height: 4, borderRadius: 999, background: "var(--panel-2)", overflow: "hidden", display: "inline-block" }}>
+        <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: v >= 0.6 ? "var(--accent)" : "var(--text-mute)", borderRadius: 999 }} />
+      </span>
+      {label && <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: v >= 0.6 ? "var(--accent)" : "var(--text-mute)" }}>{pct}%</span>}
+    </span>
+  );
+}
+// 来源引用 chip：每条 AI 衍生项都标明来自哪里（来源台账理念）。
+const ORIGIN_LABEL: Record<string, string> = { email: "邮件", im: "消息", intel: "情报", agent: "执行", calendar: "日历", manual: "手动", task: "任务", action: "执行" };
+function SourceChip({ kind }: { kind?: string }) {
+  if (!kind) return null;
+  return <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "var(--text-mute)", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 999, padding: "2px 8px" }}>来源 · {ORIGIN_LABEL[kind] || kind}</span>;
+}
+
+// ============ WorkDock 合并 M2：任务收件箱（信息转任务） ============
+const ACTION_LABEL: Record<string, string> = { reply: "回复", review: "审阅", fill_form: "填表", create: "创建", follow_up: "跟进", approve: "审批", update_crm: "录入", prepare: "准备" };
+function Inbox() {
+  const [data, setData] = useState<{ tasks: InboxTask[]; counts?: Record<string, number> } | null>(null);
+  const [tab, setTab] = useState<"待确认" | "已确认" | "已完成">("待确认");
+  const [busy, setBusy] = useState(false);
+  const [selId, setSelId] = useState<string | null>(null);
+  const stateOf = { 待确认: "unconfirmed", 已确认: "confirmed", 已完成: "done" } as const;
+
+  const load = (states = "unconfirmed,confirmed,done") => getInbox(states).then(setData).catch(() => setData((p) => p ?? { tasks: [], counts: {} }));
+  useEffect(() => { let live = true; load().finally(() => { if (!live) setData(null); }); const stop = subscribeNotify(() => load()); return () => { live = false; stop(); }; }, []);
+
+  const rebuild = async () => { setBusy(true); try { await rebuildInbox(48); await load(); } finally { setBusy(false); } };
+  const act = async (id: string, state: "confirmed" | "done" | "ignored") => { await setInboxState(id, state); setSelId(null); await load(); };
+
+  const tasks = (data?.tasks || []).filter((t) => t.inbox_state === stateOf[tab]);
+  const counts = data?.counts || {};
+  const sel = tasks.find((t) => t.id === selId) || null;
+  const headBar = { ...row(8), padding: "15px 16px 12px", borderBottom: "1px solid var(--border-soft)" };
+  const col = { ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" } as CSSProperties;
+  const tabs: ("待确认" | "已确认" | "已完成")[] = ["待确认", "已确认", "已完成"];
+
+  return (
+    <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 14, padding: 16, minHeight: 0 }}>
+      <div style={{ ...panel, padding: "14px 16px", ...row(18), flexWrap: "wrap" }}>
+        <div style={{ flex: "none", display: "flex", alignItems: "baseline", gap: 8 }}><b style={{ font: "700 26px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{counts.unconfirmed ?? 0}</b><span style={mono(11)}>待确认任务</span></div>
+        <div style={{ flex: "none", display: "flex", gap: 8, font: "600 10.5px 'IBM Plex Mono',monospace" }}>
+          <span style={{ ...row(5), background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 7, padding: "5px 9px" }}>已确认 {counts.confirmed ?? 0}</span>
+          <span style={{ ...row(5), background: "var(--panel-2)", color: "var(--text-dim)", borderRadius: 7, padding: "5px 9px" }}>已完成 {counts.done ?? 0}</span>
+        </div>
+        <span style={{ flex: 1, minWidth: 20 }} />
+        <button onClick={rebuild} disabled={busy} className="cx-nav" style={{ flex: "none", border: "1px solid var(--accent)", cursor: busy ? "default" : "pointer", font: "600 11.5px 'Space Grotesk',sans-serif", padding: "7px 14px", borderRadius: 9, color: busy ? "var(--text-mute)" : "var(--accent)", background: "var(--accent-soft)" }}>{busy ? "扫描中…" : "从情报抽取待办"}</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: sel ? "minmax(0,1fr) 360px" : "minmax(0,1fr)", gap: 14, minHeight: 0 }}>
+        <div style={col}>
+          <div style={headBar}>
+            <div style={{ flex: "none", display: "flex", gap: 5, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 4 }}>
+              {tabs.map((f) => (<button key={f} onClick={() => { setTab(f); setSelId(null); }} style={{ border: 0, cursor: "pointer", font: "600 11px 'Space Grotesk',sans-serif", padding: "6px 13px", borderRadius: 6, color: tab === f ? "#fff" : "var(--text-dim)", background: tab === f ? "var(--accent)" : "transparent", transition: "all .16s" }}>{f}</button>))}
+            </div>
+            <span style={flex1} /><span style={mono(10, "var(--text-dim)")}>{tasks.length} 条</span>
+          </div>
+          <div style={{ overflowY: "auto", minHeight: 0, padding: "8px 16px 16px" }}>
+            {data === null && <div style={{ ...mono(11), padding: "20px 0", textAlign: "center" }}>正在加载待办…</div>}
+            {data !== null && tasks.length === 0 && <div style={{ ...mono(11), padding: "28px 0", textAlign: "center" }}>{tab === "待确认" ? "暂无待确认任务，点右上「从情报抽取待办」试试。" : `暂无${tab}任务`}</div>}
+            {tasks.map((t) => { const [pf, pb] = priStyle(t.priority === "P0" ? "高优先" : t.priority === "P1" ? "中优先" : "观察"); return (
+              <button key={t.id} onClick={() => setSelId(t.id)} className="cx-intel" style={{ textAlign: "left", width: "100%", border: 0, cursor: "pointer", background: selId === t.id ? "var(--panel-2)" : "transparent", padding: "13px 8px", borderBottom: "1px solid var(--border-soft)", display: "grid", gap: 6, borderRadius: 8 }}>
+                <div style={row(8)}>
+                  <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: pf, background: pb, borderRadius: 999, padding: "2px 8px" }}>{t.priority || "P2"}</span>
+                  {t.action && <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "var(--text-dim)", background: "var(--panel-2)", borderRadius: 999, padding: "2px 8px" }}>{ACTION_LABEL[t.action] || t.action}</span>}
+                  <SourceChip kind={t.origin} />
+                  {t.suggest_only && <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "var(--text-mute)", border: "1px dashed var(--border)", borderRadius: 999, padding: "1px 7px" }}>低置信 · 建议</span>}
+                  <span style={flex1} /><Confidence value={t.confidence} />
+                </div>
+                <b style={{ font: "600 14px/1.4 'Space Grotesk',sans-serif", color: "var(--text)" }}>{t.title}</b>
+                {t.suggestion && <p style={{ margin: 0, font: "400 12px/1.55 'Space Grotesk',sans-serif", color: "var(--text-dim)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.suggestion}</p>}
+                {t.due && <span style={mono(10)}>截止 {t.due}</span>}
+              </button>
+            ); })}
+          </div>
+        </div>
+        {sel && (
+          <div style={col}>
+            <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>任务详情</span><span style={flex1} /><button onClick={() => setSelId(null)} style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-mute)", font: "600 16px 'Space Grotesk'" }}>×</button></div>
+            <div style={{ overflowY: "auto", minHeight: 0, padding: "14px 16px", display: "grid", gap: 13, alignContent: "start" }}>
+              <b style={{ font: "600 16px/1.4 'Space Grotesk',sans-serif", color: "var(--text)" }}>{sel.title}</b>
+              <div style={{ ...row(8), flexWrap: "wrap" }}>{sel.action && <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: "var(--text-dim)", background: "var(--panel-2)", borderRadius: 999, padding: "3px 9px" }}>{ACTION_LABEL[sel.action] || sel.action}{sel.object ? ` · ${sel.object}` : ""}</span>}<SourceChip kind={sel.origin} /><Confidence value={sel.confidence} /></div>
+              {sel.context_preview && <div><div style={{ ...lbl, marginBottom: 6 }}>上下文</div><p style={{ margin: 0, font: "400 12.5px/1.6 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{sel.context_preview}</p></div>}
+              {sel.suggestion && <div><div style={{ ...lbl, marginBottom: 6 }}>建议</div><p style={{ margin: 0, font: "400 12.5px/1.6 'Space Grotesk',sans-serif", color: "var(--text)" }}>{sel.suggestion}</p></div>}
+              {Array.isArray(sel.tags) && sel.tags.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{sel.tags.map((tg, i) => <span key={i} style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 999, padding: "4px 10px" }}>{tg}</span>)}</div>}
+              <div style={{ ...row(8), marginTop: 4 }}>
+                {sel.inbox_state !== "done" && <button onClick={() => act(sel.id, "confirmed")} style={{ flex: 1, border: "1px solid var(--accent)", cursor: "pointer", font: "600 12px 'Space Grotesk'", padding: "9px 0", borderRadius: 9, color: "#fff", background: "var(--accent)" }}>确认</button>}
+                <button onClick={() => act(sel.id, "done")} style={{ flex: 1, border: "1px solid var(--border)", cursor: "pointer", font: "600 12px 'Space Grotesk'", padding: "9px 0", borderRadius: 9, color: "var(--text-dim)", background: "var(--panel-2)" }}>完成</button>
+                <button onClick={() => act(sel.id, "ignored")} style={{ flex: "none", border: "1px solid var(--border)", cursor: "pointer", font: "600 12px 'Space Grotesk'", padding: "9px 14px", borderRadius: 9, color: "var(--text-mute)", background: "transparent" }}>忽略</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ WorkDock 合并 M1：感知接入（浏览器真实数据采集器） ============
+function senseIcon(name: string): ReactNode {
+  const p: Record<string, ReactNode> = {
+    folder: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>,
+    monitor: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+    clipboard: <><rect x="8" y="3" width="8" height="4" rx="1" /><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" /></>,
+    pin: <><path d="M12 21s-6-5.5-6-10a6 6 0 1 1 12 0c0 4.5-6 10-6 10z" /><circle cx="12" cy="11" r="2.2" /></>,
+    cpu: <><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" /></>,
+  };
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">{p[name] || p.cpu}</svg>;
+}
+function Sense() {
+  const [results, setResults] = useState<Record<string, SenseResult & { fed?: string }>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const run = async (ch: SenseChannel) => {
+    setBusy(ch.id);
+    try {
+      const r = await ch.connect();
+      let fed: string | undefined;
+      if (r.status === "connected") { const ing = await ingestSensed(ch, r); fed = ing.ok ? `已投喂 · 收纳 ${ing.accepted ?? 0} 条` : (ing.reason ? `未投喂 · ${ing.reason}` : "未投喂"); }
+      setResults((p) => ({ ...p, [ch.id]: { ...r, fed } }));
+    } finally { setBusy(null); }
+  };
+
+  const statusTone = (s?: string) => s === "connected" ? "var(--good)" : s === "denied" ? "var(--bad)" : s === "unsupported" ? "var(--text-mute)" : "var(--warn)";
+  const statusText = (s?: string) => ({ connected: "已接入", available: "可接入", unsupported: "不支持", denied: "被拒绝" } as Record<string, string>)[s || ""] || "未接入";
+
+  return (
+    <div className="cx-page" style={{ height: "100%", overflowY: "auto", padding: 16, display: "grid", gap: 14, alignContent: "start" }}>
+      <div style={{ ...panel, padding: "14px 16px", display: "grid", gap: 6 }}>
+        <div style={{ ...row(8) }}><b style={{ font: "700 17px 'Space Grotesk',sans-serif", color: "var(--text)" }}>感知接入</b><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "var(--accent)", background: "var(--accent-soft)", borderRadius: 999, padding: "2px 9px" }}>本地优先 · 用户手势触发</span></div>
+        <p style={{ margin: 0, font: "400 12px/1.6 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>用浏览器原生权限读取你的本地/个人数据，喂给 Jarvis。每次都需你点击授权并经系统弹窗；屏幕截帧只取一帧、不持续录制；投喂内容统一过隐私闸门（脱敏 + 红线词拦截）。</p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 12 }}>
+        {SENSE_CHANNELS.map((ch) => {
+          const r = results[ch.id]; const supported = ch.isSupported();
+          return (
+            <div key={ch.id} style={{ ...panel, display: "grid", gap: 10, alignContent: "start" }}>
+              <div style={{ ...row(10) }}>
+                <span style={{ flex: "none", width: 36, height: 36, borderRadius: 10, background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--accent)", display: "grid", placeContent: "center" }}>{senseIcon(ch.icon)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}><b style={{ font: "600 13.5px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{ch.name}</b><div style={{ ...row(6), marginTop: 2 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: statusTone(r?.status), flex: "none" }} /><span style={mono(9.5)}>{r ? statusText(r.status) : supported ? "可接入" : "不支持"}</span></div></div>
+              </div>
+              <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{ch.desc}</p>
+              <div style={{ font: "400 10px/1.5 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>读取：{ch.reads}</div>
+              {r?.thumb && <img src={r.thumb} alt="" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)" }} />}
+              {r?.details && r.details.length > 0 && <div style={{ ...sub, padding: "8px 10px", display: "grid", gap: 3, maxHeight: 120, overflowY: "auto" }}>{r.details.slice(0, 14).map((d, i) => <span key={i} style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d}</span>)}</div>}
+              {r?.summary && <div style={{ font: "500 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{r.summary}</div>}
+              {r?.reason && r.status !== "connected" && <div style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: statusTone(r.status) }}>{r.reason}</div>}
+              {r?.fed && <div style={{ font: "600 10px 'IBM Plex Mono',monospace", color: r.fed.startsWith("已投喂") ? "var(--good)" : "var(--text-mute)" }}>{r.fed}</div>}
+              <button onClick={() => run(ch)} disabled={!supported || busy === ch.id} className="cx-nav" style={{ border: "1px solid var(--accent)", cursor: supported && busy !== ch.id ? "pointer" : "default", font: "600 11.5px 'Space Grotesk'", padding: "8px 0", borderRadius: 9, color: supported ? "#fff" : "var(--text-mute)", background: supported ? "var(--accent)" : "var(--panel-2)" }}>{busy === ch.id ? "读取中…" : r?.status === "connected" ? "重新读取并投喂" : "授权并读取"}</button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============ WorkDock 合并 M3：下班收尾 / 日报周报 ============
+function Wrapup() {
+  const [period, setPeriod] = useState<"today" | "week">("today");
+  const [data, setData] = useState<WrapUp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = (p: "today" | "week") => { setLoading(true); getWrapup(p).then(setData).catch(() => setData(null)).finally(() => setLoading(false)); };
+  useEffect(() => { load(period); }, [period]);
+
+  const col = { ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" } as CSSProperties;
+  const headBar = { ...row(8), padding: "15px 16px 12px", borderBottom: "1px solid var(--border-soft)" };
+  const renderList = (items: WrapUp["completed"], emptyText: string) => (
+    <div style={{ overflowY: "auto", minHeight: 0, padding: "10px 16px 16px", display: "grid", gap: 9, alignContent: "start" }}>
+      {data === null && <div style={{ ...mono(11), padding: "18px 0", textAlign: "center" }}>{loading ? "正在汇总…" : "暂无数据"}</div>}
+      {data !== null && items.length === 0 && <div style={{ ...mono(11), padding: "18px 0", textAlign: "center" }}>{emptyText}</div>}
+      {items.map((it, i) => (
+        <div key={i} style={{ ...sub, padding: "10px 12px", display: "grid", gap: 5 }}>
+          <div style={{ ...row(8) }}><b style={{ font: "600 12.5px/1.45 'Space Grotesk',sans-serif", color: "var(--text)", flex: 1 }}>{it.title}</b><SourceChip kind={it.source?.kind} /></div>
+          {it.detail && <span style={{ font: "400 11px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{it.detail}</span>}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 14, padding: 16, minHeight: 0 }}>
+      <div style={{ ...panel, padding: "14px 16px", display: "grid", gap: 11 }}>
+        <div style={{ ...row(14), flexWrap: "wrap" }}>
+          <b style={{ font: "700 18px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{data?.label || (period === "today" ? "日报" : "周报")}</b>
+          <span style={flex1} />
+          <div style={{ flex: "none", display: "flex", gap: 5, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 4 }}>
+            {(["today", "week"] as const).map((p) => (<button key={p} onClick={() => setPeriod(p)} style={{ border: 0, cursor: "pointer", font: "600 11px 'Space Grotesk',sans-serif", padding: "6px 14px", borderRadius: 6, color: period === p ? "#fff" : "var(--text-dim)", background: period === p ? "var(--accent)" : "transparent" }}>{p === "today" ? "今天" : "本周"}</button>))}
+          </div>
+        </div>
+        {data?.summary?.headline && <div style={{ font: "600 13.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text)" }}>{data.summary.headline}</div>}
+        {data?.summary?.report && <p style={{ margin: 0, font: "400 12.5px/1.65 'Space Grotesk',sans-serif", color: "var(--text-dim)", whiteSpace: "pre-wrap" }}>{data.summary.report}</p>}
+        {data?.summary?.next && <div style={{ ...row(7) }}><span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: "var(--accent)", background: "var(--accent-soft)", borderRadius: 999, padding: "2px 9px" }}>明日</span><span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{data.summary.next}</span></div>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14, minHeight: 0 }}>
+        <div style={col}><div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>已完成</span><span style={flex1} /><span style={mono(10, "var(--good)")}>{data?.counts?.completed ?? 0}</span></div>{renderList(data?.completed || [], "今天还没有完成项")}</div>
+        <div style={col}><div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>未完成 · 进明日驾驶舱</span><span style={flex1} /><span style={mono(10, "var(--text-dim)")}>{data?.counts?.unfinished ?? 0}</span></div>{renderList(data?.unfinished || [], "没有待续事项")}</div>
+      </div>
+    </div>
+  );
+}
+
+// ============ WorkDock 合并 M4：受控执行台（只渲染真实执行数据，不编造 plan） ============
+function AgentRunsView() {
+  const [data, setData] = useState<AgentRunsOverview | null>(null);
+  const load = () => getAgentRuns(48).then(setData).catch(() => setData((p) => p ?? { pending: [], recent: [] }));
+  useEffect(() => { let live = true; load().finally(() => { if (!live) setData(null); }); const t = setInterval(load, 8000); const stop = subscribeNotify(() => load()); return () => { live = false; clearInterval(t); stop(); }; }, []);
+
+  const verdictTone = (v?: string) => v === "deny" ? "var(--bad)" : v === "auto" ? "var(--good)" : "var(--warn)";
+  const statusTone = (s?: string) => s === "denied" ? "var(--bad)" : (s === "ok" || s === "done" || s === "success") ? "var(--good)" : s === "error" ? "var(--bad)" : "var(--text-mute)";
+  const statusText = (s?: string) => ({ ok: "已执行", done: "已执行", success: "已执行", denied: "已拦截", error: "失败", pending: "待确认" } as Record<string, string>)[s || ""] || s || "—";
+  const c = data?.counts;
+  const argPreview = (args?: Record<string, unknown>) => { try { const s = JSON.stringify(args || {}); return s.length > 80 ? s.slice(0, 80) + "…" : s; } catch { return ""; } };
+
+  return (
+    <div style={{ overflowY: "auto", minHeight: 0, padding: "14px 16px", display: "grid", gap: 14, alignContent: "start" }}>
+      <div style={{ ...row(8), flexWrap: "wrap" }}>
+        <span style={{ ...row(5), font: "600 10.5px 'IBM Plex Mono',monospace", background: "var(--panel-2)", color: "var(--text-dim)", borderRadius: 7, padding: "5px 9px" }}>待确认 <b style={{ color: "var(--warn)" }}>{c?.awaiting ?? 0}</b></span>
+        <span style={{ ...row(5), font: "600 10.5px 'IBM Plex Mono',monospace", background: "var(--panel-2)", color: "var(--text-dim)", borderRadius: 7, padding: "5px 9px" }}>已执行 <b style={{ color: "var(--good)" }}>{c?.executed ?? 0}</b></span>
+        <span style={{ ...row(5), font: "600 10.5px 'IBM Plex Mono',monospace", background: "var(--panel-2)", color: "var(--text-dim)", borderRadius: 7, padding: "5px 9px" }}>已拦截 <b style={{ color: "var(--bad)" }}>{c?.blocked ?? 0}</b></span>
+        <span style={flex1} /><span style={mono(9.5)}>每 8s 刷新 · 行动闸门审计</span>
+      </div>
+
+      <div>
+        <div style={{ ...lbl, marginBottom: 8 }}>待你确认（按策略需点头）</div>
+        {data === null && <div style={{ ...mono(11), padding: "10px 0" }}>正在加载…</div>}
+        {data !== null && (data.pending || []).length === 0 && <div style={{ ...mono(10.5), padding: "8px 0" }}>当前没有等待确认的动作。</div>}
+        <div style={{ display: "grid", gap: 9 }}>
+          {(data?.pending || []).map((p) => (
+            <div key={p.id} style={{ ...sub, padding: "11px 12px", display: "grid", gap: 7 }}>
+              <div style={{ ...row(8) }}>
+                <span style={{ font: "600 11px 'IBM Plex Mono',monospace", color: "var(--text)" }}>{p.tool}</span>
+                <span style={{ font: "600 9px 'IBM Plex Mono',monospace", color: verdictTone(p.gate?.verdict), background: "var(--panel-3)", borderRadius: 999, padding: "2px 8px" }}>{p.gate?.label || "需确认"}</span>
+                <span style={flex1} /><span style={mono(9.5, "var(--warn)")}>待确认</span>
+              </div>
+              {p.args && <code style={{ font: "500 10px 'IBM Plex Mono',monospace", color: "var(--text-dim)", wordBreak: "break-all" }}>{argPreview(p.args)}</code>}
+              {p.reason && <span style={{ font: "400 10.5px 'Space Grotesk',sans-serif", color: "var(--text-mute)" }}>{p.reason}</span>}
+              <span style={{ font: "400 9.5px 'Space Grotesk',sans-serif", color: "var(--text-mute)" }}>在「⚡ 交互终端」或对话里确认/拒绝该动作。</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ ...lbl, marginBottom: 8 }}>执行审计 · 近 48h</div>
+        {data !== null && (data.recent || []).length === 0 && <div style={{ ...mono(10.5), padding: "8px 0" }}>暂无执行记录。</div>}
+        <div style={{ display: "grid", gap: 7 }}>
+          {(data?.recent || []).map((r) => (
+            <div key={r.id} style={{ ...row(9), padding: "8px 10px", background: "var(--panel-2)", border: "1px solid var(--border-soft)", borderRadius: 9 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusTone(r.status), flex: "none" }} />
+              <span style={{ font: "600 11px 'IBM Plex Mono',monospace", color: "var(--text-dim)", flex: "none", minWidth: 92, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tool || "动作"}</span>
+              <span style={{ font: "400 11px 'Space Grotesk',sans-serif", color: "var(--text-mute)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.detail || "").replace(/^args=\{\}\n?->\s*/, "")}</span>
+              <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: statusTone(r.status), flex: "none" }}>{statusText(r.status)}</span>
+              <span style={{ ...mono(9.5), flex: "none" }}>{fmtAgo(r.ts ? Math.floor(r.ts / 1000) : undefined)}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
