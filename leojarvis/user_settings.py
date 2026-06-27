@@ -77,6 +77,20 @@ DEFAULTS: dict[str, Any] = {
     # 高级阈值/节奏：留空表示沿用 settings.toml。UI 在这里写入即可覆盖，
     # 改动定时任务节奏需要重启后端生效（任务在启动时注册）。
     "overrides": {},
+    # 超级 Jarvis：个人数据投喂的同意分级。每类默认开关在此；敏感项默认关，
+    # 用户显式打开才会摄取。redact=True 时导入前对敏感片段脱敏。
+    "personal_data": {
+        "enabled": True,
+        "redact": True,
+        "consent": {
+            "work": True,        # 工作文档/代码/会议纪要
+            "chat": False,       # 聊天记录（默认关，需显式开 + 脱敏）
+            "preference": True,  # 个人喜好问卷
+            "behavior": True,    # 行为习惯（日历/系统/历史）
+        },
+        # 绝不摄取的硬红线关键词（命中即整条跳过，优先级高于 consent）。
+        "never_ingest": ["身份证", "护照", "银行卡", "密码", "password", "ssn", "私钥", "助记词"],
+    },
 }
 
 

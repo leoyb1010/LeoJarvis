@@ -36,10 +36,17 @@ def build_static_system_prompt() -> str:
     return SYSTEM_STATIC_TEMPLATE.format(tools=TOOLBUS.describe())
 
 
-def build_memory_prompt(recalled: list[dict]) -> str:
-    """随请求变化的相关记忆，单独作为一条 system 消息放在稳定前缀之后。"""
+def build_memory_prompt(recalled: list[dict], context: list[str] | None = None) -> str:
+    """随请求变化的记忆 system 消息：
+    - context：关于你的稳定 fact/pattern（每轮都带，让回答带个人上下文）。
+    - recalled：和当前这句话语义相关的记忆。"""
+    parts: list[str] = []
+    if context:
+        ctx = "\n".join(f"- {c}" for c in context)
+        parts.append(f"# 关于 Leo（长期事实与习惯，请结合这些来回答/建议）\n{ctx}")
     mem = "\n".join(f"- {h.get('text', '')[:200]}" for h in recalled) or "（无）"
-    return f"# 相关记忆（可能为空）\n{mem}"
+    parts.append(f"# 与当前话题相关的记忆（可能为空）\n{mem}")
+    return "\n\n".join(parts)
 
 
 def build_system_prompt(recalled: list[dict]) -> str:

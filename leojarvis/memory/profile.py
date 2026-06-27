@@ -24,7 +24,28 @@ def profile_text() -> str:
     browser_summary = browser_preference_summary(limit=10)
     if browser_summary:
         lines.append(f"- 近期浏览偏好: {browser_summary}")
+    # 超级 Jarvis P3：动态画像 —— 把已确认(active)的 fact/pattern 记忆并入画像，
+    # 让画像随你的真实行为漂移，而不是停在手写 toml。
+    learned = _learned_profile_lines()
+    if learned:
+        lines.append("- 已学到的事实/规律:")
+        lines.extend(f"  · {s}" for s in learned)
     return "\n".join(lines) or "（画像未配置）"
+
+
+def _learned_profile_lines(limit: int = 12) -> list[str]:
+    """取置信度/重要性较高、已确认的 fact+pattern 记忆，作为动态画像补充。"""
+    try:
+        from .. import db
+        rows = db.list_memories_by_layer(["fact", "pattern"], limit=limit, status="active")
+        out: list[str] = []
+        for r in rows:
+            stmt = str(r["statement"] or "").strip()
+            if stmt and float(r["confidence"] or 0) >= 0.5:
+                out.append(stmt[:120])
+        return out
+    except Exception:
+        return []
 
 
 def profile_terms() -> set[str]:

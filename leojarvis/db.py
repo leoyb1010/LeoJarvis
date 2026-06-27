@@ -216,6 +216,20 @@ def _init_db_impl() -> None:
         missing_status = c.execute("SELECT COUNT(*) FROM memories WHERE status IS NULL OR status=''").fetchone()[0]
         if missing_status:
             c.execute("UPDATE memories SET status='active' WHERE status IS NULL OR status=''")
+        # 超级 Jarvis P1：分层记忆 + 来源台账（可溯源/可遗忘）。
+        #   layer      : fact(语义事实) | episode(情景) | pattern(行为规律) | entity(人物图谱) | event_text(旧)
+        #   origin     : 这条记忆来自哪里（reflect / personal_data:<connector> / chat / feedback ...）
+        #   source_ref : 原始来源标识（文件路径/消息id/连接器键），用于「按来源一键删除」被遗忘权
+        for col, ddl in {
+            "layer": "ALTER TABLE memories ADD COLUMN layer TEXT DEFAULT 'fact'",
+            "origin": "ALTER TABLE memories ADD COLUMN origin TEXT",
+            "source_ref": "ALTER TABLE memories ADD COLUMN source_ref TEXT",
+        }.items():
+            if col not in memory_cols:
+                c.execute(ddl)
+        # 旧行回填 layer：event_text 类型归入 episode，其余按 fact。
+        c.execute("UPDATE memories SET layer='episode' WHERE (layer IS NULL OR layer='') AND type='event_text'")
+        c.execute("UPDATE memories SET layer='fact' WHERE layer IS NULL OR layer=''")
         note_cols = {r["name"] for r in c.execute("PRAGMA table_info(personal_notes)").fetchall()}
         for col, ddl in {
             "source_url": "ALTER TABLE personal_notes ADD COLUMN source_url TEXT",
@@ -274,16 +288,17 @@ def insert_judgment(*, event_id: str, score: float, take: str, triage: str,
 
 def insert_memory(statement: str, *, memory_type: str = "semantic", subject: str | None = None,
                   confidence: float = 0.7, salience: float = 0.5,
-                  source_events: list[str] | None = None, status: str = "pending") -> str:
+                  source_events: list[str] | None = None, status: str = "pending",
+                  layer: str = "fact", origin: str | None = None, source_ref: str | None = None) -> str:
     init_db()
     mid = uuid.uuid4().hex
     ts = now_ms()
     with conn() as c:
         c.execute(
-            """INSERT INTO memories(id,type,subject,statement,confidence,salience,created_ts,updated_ts,source_events,status)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO memories(id,type,subject,statement,confidence,salience,created_ts,updated_ts,source_events,status,layer,origin,source_ref)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, memory_type, subject, statement, confidence, salience, ts, ts,
-             json.dumps(source_events or [], ensure_ascii=False), status),
+             json.dumps(source_events or [], ensure_ascii=False), status, layer, origin, source_ref),
         )
     return mid
 
@@ -325,6 +340,91 @@ def update_memory_status(memory_id: str, status: str) -> bool:
             (status, now_ms(), memory_id),
         )
     return cur.rowcount > 0
+
+
+# ---------- 超级 Jarvis：分层记忆查询 / 反馈强化 / 被遗忘权 ----------
+
+def list_memories_by_layer(layers: list[str] | None = None, limit: int = 100,
+                           status: str = "active") -> list[sqlite3.Row]:
+    """按记忆层（fact/episode/pattern/entity）取记忆，供 RAG 加权检索与画像合成。"""
+    init_db()
+    with conn() as c:
+        if layers:
+            ph = ",".join("?" for _ in layers)
+            return c.execute(
+                f"SELECT * FROM memories WHERE status=? AND layer IN ({ph}) "
+                f"ORDER BY salience DESC, updated_ts DESC LIMIT ?",
+                (status, *layers, limit),
+            ).fetchall()
+        return c.execute(
+            "SELECT * FROM memories WHERE status=? ORDER BY salience DESC, updated_ts DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+
+
+def memory_layer_counts() -> dict[str, int]:
+    """各层活跃记忆条数（供 /metrics 展示「Jarvis 现在记得多少」）。"""
+    init_db()
+    with conn() as c:
+        rows = c.execute(
+            "SELECT layer, COUNT(*) AS n FROM memories WHERE status='active' GROUP BY layer"
+        ).fetchall()
+    out: dict[str, int] = {}
+    for r in rows:
+        out[str(r["layer"] or "fact")] = int(r["n"])
+    with conn() as c:
+        out["pending"] = int(c.execute(
+            "SELECT COUNT(*) FROM memories WHERE status IN ('pending','later')"
+        ).fetchone()[0])
+    return out
+
+
+def adjust_memory(memory_id: str, *, salience_delta: float = 0.0, confidence_delta: float = 0.0) -> bool:
+    """反馈回流：采纳→加权，忽略→衰减。salience/confidence 钳到 [0,1]。"""
+    init_db()
+    with conn() as c:
+        cur = c.execute(
+            """UPDATE memories
+               SET salience = MAX(0.0, MIN(1.0, salience + ?)),
+                   confidence = MAX(0.0, MIN(1.0, confidence + ?)),
+                   updated_ts = ?
+               WHERE id = ?""",
+            (salience_delta, confidence_delta, now_ms(), memory_id),
+        )
+    return cur.rowcount > 0
+
+
+def delete_memories_by_source(source_ref: str) -> int:
+    """被遗忘权：删除某来源（文件/消息/连接器键）衍生的全部记忆。返回删除条数。
+    向量库里的同 id 行由调用方（memory.store）一并清理。"""
+    init_db()
+    if not source_ref:
+        return 0
+    with conn() as c:
+        ids = [r["id"] for r in c.execute(
+            "SELECT id FROM memories WHERE source_ref=?", (source_ref,)
+        ).fetchall()]
+        cur = c.execute("DELETE FROM memories WHERE source_ref=?", (source_ref,))
+    deleted = cur.rowcount
+    try:
+        from .memory import store as _store
+        _store.forget_vectors(ids)
+    except Exception:
+        pass
+    return deleted
+
+
+def memory_health_sweep(*, min_confidence: float = 0.2, stale_days: int = 120) -> dict[str, int]:
+    """记忆体检（P5）：低置信或长期未更新的活跃记忆降级归档（status=archived），防「自信地记错」。"""
+    init_db()
+    cutoff = now_ms() - int(stale_days) * 86_400_000
+    with conn() as c:
+        cur = c.execute(
+            """UPDATE memories SET status='archived', updated_ts=?
+               WHERE status='active' AND (confidence < ? OR updated_ts < ?)""",
+            (now_ms(), min_confidence, cutoff),
+        )
+    return {"archived": cur.rowcount}
 
 
 def upsert_device_heartbeat(summary: dict[str, Any]) -> dict[str, Any]:

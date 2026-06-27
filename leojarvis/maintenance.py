@@ -62,5 +62,10 @@ def run_maintenance() -> dict:
             result["vacuumed"] = db.vacuum()
     except Exception as exc:  # noqa: BLE001
         result["prune_error"] = str(exc)
+    try:
+        # 超级 Jarvis P5：记忆体检 —— 低置信/久未更新的活跃记忆归档，防止「自信地记错」。
+        result["memory_sweep"] = db.memory_health_sweep()
+    except Exception as exc:  # noqa: BLE001
+        result["memory_sweep_error"] = str(exc)
     print(f"[maintenance] {result}")
     return result

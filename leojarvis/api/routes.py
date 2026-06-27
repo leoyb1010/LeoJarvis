@@ -436,6 +436,16 @@ def metrics() -> dict:
     except Exception:
         pass
     snap["db_rows"] = rows
+    # 超级 Jarvis：记忆分层计数 + embedding 后端（让驾驶舱能看「Jarvis 现在记得多少、是不是真向量」）。
+    try:
+        snap["memory_layers"] = db.memory_layer_counts()
+    except Exception:
+        snap["memory_layers"] = {}
+    try:
+        from .. import embeddings
+        snap["embedding_neural"] = embeddings.is_neural()
+    except Exception:
+        snap["embedding_neural"] = False
     return snap
 
 
@@ -1154,6 +1164,178 @@ def memory_decision(memory_id: str, req: MemoryDecision) -> dict:
 def memory_reflect(hours: int = 24) -> dict:
     from ..memory.reflect import reflect
     return reflect(hours=hours)
+
+
+@router.post("/memory/distill")
+def memory_distill(limit: int = 200) -> dict:
+    """从投喂的情景记忆提炼 fact/pattern/entity（超级 Jarvis P3）。"""
+    from ..memory.reflect import reflect_personal_data
+    return reflect_personal_data(limit=limit)
+
+
+# ---------- 超级 Jarvis：主动认知 出主意/决策/预判（P4） ----------
+
+class AdviseIn(BaseModel):
+    topic: str
+
+
+@router.post("/cognition/advise")
+def cognition_advise(req: AdviseIn) -> dict:
+    from .. import cognition
+    return cognition.advise(req.topic)
+
+
+class DecideIn(BaseModel):
+    question: str
+    options: list[str]
+
+
+@router.post("/cognition/decide")
+def cognition_decide(req: DecideIn) -> dict:
+    from .. import cognition
+    return cognition.decide(req.question, req.options)
+
+
+class AnticipateIn(BaseModel):
+    context_hint: str = ""
+
+
+@router.post("/cognition/anticipate")
+def cognition_anticipate(req: AnticipateIn) -> dict:
+    from .. import cognition
+    return cognition.anticipate(req.context_hint)
+
+
+# ---------- 超级 Jarvis：反馈进化闭环（P5） ----------
+
+class MemoryFeedbackIn(BaseModel):
+    memory_id: str
+    verdict: str = Field(pattern="^(accept|ignore|correct)$")
+    correction: str | None = None   # verdict=correct 时的更正内容
+
+
+@router.post("/cognition/feedback")
+def cognition_feedback(req: MemoryFeedbackIn) -> dict:
+    """对一条记忆/建议的反馈回流，校准画像与记忆权重（越用越懂你）：
+       accept  → 强化（salience/confidence 上调）
+       ignore  → 衰减
+       correct → 衰减原记忆 + 记一条更正后的新 fact"""
+    if req.verdict == "accept":
+        ok = db.adjust_memory(req.memory_id, salience_delta=0.15, confidence_delta=0.1)
+        return {"ok": ok, "verdict": "accept"}
+    if req.verdict == "ignore":
+        ok = db.adjust_memory(req.memory_id, salience_delta=-0.15, confidence_delta=-0.05)
+        return {"ok": ok, "verdict": "ignore"}
+    # correct：弱化原记忆，并把更正写成新的待确认 fact
+    db.adjust_memory(req.memory_id, salience_delta=-0.2, confidence_delta=-0.15)
+    new_id = None
+    if req.correction and req.correction.strip():
+        new_id = db.insert_memory(req.correction.strip()[:2000], memory_type="correction",
+                                  layer="fact", origin="feedback_correction",
+                                  status="active", confidence=0.7, salience=0.6)
+    return {"ok": True, "verdict": "correct", "new_memory_id": new_id}
+
+
+@router.post("/memory/health-sweep")
+def memory_health_sweep_route(min_confidence: float = 0.2, stale_days: int = 120) -> dict:
+    """记忆体检：低置信/久未更新的活跃记忆归档，防「自信地记错」。"""
+    return db.memory_health_sweep(min_confidence=min_confidence, stale_days=stale_days)
+
+
+# ---------- 超级 Jarvis：个人数据投喂 + 隐私闸门（P2） ----------
+
+@router.get("/personal-data/status")
+def personal_data_status() -> dict:
+    """同意分级开关 + 当前各记忆层条数（让你随时知道 Jarvis 记了什么、来自哪类同意）。"""
+    from .. import user_settings
+    return {
+        "config": (user_settings.load() or {}).get("personal_data", {}),
+        "memory_layers": db.memory_layer_counts(),
+    }
+
+
+class IngestTextIn(BaseModel):
+    text: str
+    kind: str = Field(default="work", pattern="^(work|chat|preference|behavior)$")
+    layer: str = Field(default="episode", pattern="^(fact|episode|pattern|entity)$")
+    source_ref: str = ""
+    subject: str | None = None
+
+
+@router.post("/personal-data/ingest/text")
+def personal_data_ingest_text(req: IngestTextIn) -> dict:
+    from .. import personal_data
+    src = req.source_ref or f"personal_data:{req.kind}:adhoc"
+    items = personal_data.from_text_document(
+        req.text, source_ref=src, kind=req.kind, layer=req.layer, subject=req.subject
+    )
+    res = personal_data.ingest_items(items)
+    return _ingest_result_dict(res)
+
+
+class IngestChatIn(BaseModel):
+    messages: list[dict]
+    source_ref: str = ""
+
+
+@router.post("/personal-data/ingest/chat")
+def personal_data_ingest_chat(req: IngestChatIn) -> dict:
+    from .. import personal_data
+    src = req.source_ref or "personal_data:chat:import"
+    items = personal_data.from_chat_export(req.messages, source_ref=src)
+    res = personal_data.ingest_items(items)
+    return _ingest_result_dict(res)
+
+
+class IngestPrefsIn(BaseModel):
+    preferences: dict
+    source_ref: str = "personal_data:preference:form"
+
+
+@router.post("/personal-data/ingest/preferences")
+def personal_data_ingest_prefs(req: IngestPrefsIn) -> dict:
+    from .. import personal_data
+    items = personal_data.from_preferences(req.preferences, source_ref=req.source_ref)
+    # 本人填写的喜好问卷，可信来源 → 直接 active（其余类型仍走 pending 确认）。
+    res = personal_data.ingest_items(items, auto_confirm=True)
+    return _ingest_result_dict(res)
+
+
+class IngestBehaviorIn(BaseModel):
+    events: list[dict]
+    source_ref: str = "personal_data:behavior"
+
+
+@router.post("/personal-data/ingest/behavior")
+def personal_data_ingest_behavior(req: IngestBehaviorIn) -> dict:
+    from .. import personal_data
+    items = personal_data.from_behavior_log(req.events, source_ref=req.source_ref)
+    res = personal_data.ingest_items(items)
+    return _ingest_result_dict(res)
+
+
+class ForgetIn(BaseModel):
+    source_ref: str
+
+
+@router.post("/personal-data/forget")
+def personal_data_forget(req: ForgetIn) -> dict:
+    """被遗忘权：删除某来源衍生的全部记忆（含向量库）。"""
+    from .. import personal_data
+    deleted = personal_data.forget_source(req.source_ref)
+    return {"ok": True, "deleted": deleted, "source_ref": req.source_ref}
+
+
+def _ingest_result_dict(res) -> dict:
+    return {
+        "ok": True,
+        "accepted": res.accepted,
+        "skipped_no_consent": res.skipped_no_consent,
+        "skipped_redline": res.skipped_redline,
+        "redacted": res.redacted,
+        "errors": res.errors,
+        "memory_ids": res.memory_ids,
+    }
 
 
 @router.websocket("/ws/notify")

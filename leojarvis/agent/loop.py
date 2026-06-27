@@ -132,15 +132,29 @@ def _log_action(tool: str, args: dict, result: str, status: str) -> None:
 
 
 def _build_convo(messages: list[dict]) -> list[dict]:
-    """组装对话：稳定前缀(可缓存) + 相关记忆 + 历史。两条 system 分开放，最大化 prompt 缓存命中。"""
+    """组装对话：稳定前缀(可缓存) + 分层 RAG 记忆 + 历史。两条 system 分开放，最大化 prompt 缓存命中。
+
+    超级 Jarvis P4：检索不只取「和这句话相关」的记忆，还**始终**带上高重要性的
+    fact/pattern（你是谁、你的习惯），让每次回答都有你的个人上下文。
+    """
     user_last = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
     recalled = recall(user_last, k=5)
     convo = [
         {"role": "system", "content": build_static_system_prompt()},
-        {"role": "system", "content": build_memory_prompt(recalled)},
+        {"role": "system", "content": build_memory_prompt(recalled, context=_personal_context())},
     ]
     convo += [{"role": m["role"], "content": m["content"]} for m in messages]
     return convo
+
+
+def _personal_context(limit: int = 8) -> list[str]:
+    """高重要性的已确认 fact/pattern 记忆——「关于你」的稳定上下文，每轮都带。"""
+    try:
+        from .. import db
+        rows = db.list_memories_by_layer(["fact", "pattern"], limit=limit, status="active")
+        return [str(r["statement"])[:160] for r in rows if str(r["statement"] or "").strip()]
+    except Exception:
+        return []
 
 
 def run_agent(messages: list[dict]) -> dict:

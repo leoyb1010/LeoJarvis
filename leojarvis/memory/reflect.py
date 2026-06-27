@@ -119,10 +119,12 @@ def reflect(hours: int = 24) -> dict:
         stmt = str(it.get("statement", "")).strip()
         if not stmt:
             continue
+        # 事件反思产物多为「习惯/偏好」→ 默认归 fact 层（pattern 由 reflect_personal_data 专门提炼）。
         db.insert_memory(
             stmt, memory_type=it.get("type", "semantic"),
             subject=it.get("subject"),
             confidence=0.75, salience=float(it.get("salience", 0.5)),
+            layer="fact", origin="reflect",
         )
         created += 1
 
@@ -139,3 +141,72 @@ def reflect(hours: int = 24) -> dict:
         "memory_evidence_events": len(memory_rows),
         "note": f"已从使用/行为证据中生成 {created} 条待确认记忆；新闻、普通笔记和项目条目不会原样写入长期记忆。",
     }
+
+
+_DISTILL_SYSTEM = """你是 Leo 的私人记忆官。下面是 Leo 投喂的个人数据（工作内容、聊天、行为记录等）的情景片段。
+请从这些零散片段里提炼出**关于 Leo 本人**、值得长期记住的高阶结论，分三类：
+  fact    —— 稳定事实（在做什么项目、长期偏好、关注的人/持仓/主题）
+  pattern —— 反复出现的行为规律（如「常深夜写代码」「决策前要看数据对比」「反感周末打扰」）
+  entity  —— 重要的人/项目及其与 Leo 的关系
+硬规则：只提炼能跨场景复用的结论，不要复述单条片段；pattern 必须是多次出现的规律，不是一次性事件。
+只输出 JSON 数组，每个元素：{"layer":"fact|pattern|entity","subject":"实体/主题","statement":"一句话结论","salience":0.0-1.0}
+最多 10 条。"""
+
+
+def reflect_personal_data(limit: int = 200) -> dict:
+    """超级 Jarvis P3：把累积的 episode 记忆（来自个人数据投喂）提炼成 fact/pattern/entity。
+
+    产物全部进 pending 队列，需用户确认后才转正——和事件反思一致，不偷偷沉淀。
+    """
+    db.init_db()
+    episodes = db.list_memories_by_layer(["episode"], limit=limit, status="active")
+    if not episodes:
+        return {"ok": True, "created": 0, "note": "暂无可提炼的情景记忆（先投喂个人数据）。"}
+
+    digest = "\n".join(f"- {str(r['statement'])[:160]}" for r in episodes[:160])
+    insights: list[dict] = []
+    used_llm = False
+    try:
+        from ..models_router import chat
+        raw = chat("reflect", [
+            {"role": "system", "content": _DISTILL_SYSTEM},
+            {"role": "user", "content": f"## Leo 画像\n{profile_text()}\n\n## 情景片段\n{digest}"},
+        ], temperature=0.3)
+        start, end = raw.find("["), raw.rfind("]")
+        insights = json.loads(raw[start:end + 1]) if start >= 0 else []
+        used_llm = True
+    except Exception:
+        insights = []
+
+    if not insights:
+        # 无 LLM 兜底：按 subject 频次粗提 pattern。
+        subjects = Counter(str(r["subject"] or "").strip() for r in episodes if r["subject"])
+        for subj, n in subjects.most_common(6):
+            if subj and n >= 3:
+                insights.append({"layer": "pattern", "subject": subj,
+                                 "statement": f"Leo 的个人数据里『{subj}』反复出现（{n} 次），可能是稳定的行为/关注规律。",
+                                 "salience": min(0.85, 0.5 + n * 0.05)})
+
+    valid = {"fact", "pattern", "entity"}
+    created = 0
+    for it in insights:
+        stmt = str(it.get("statement", "")).strip()
+        if not stmt:
+            continue
+        layer = str(it.get("layer", "fact"))
+        if layer not in valid:
+            layer = "fact"
+        db.insert_memory(
+            stmt, memory_type=f"distilled:{layer}", subject=it.get("subject"),
+            confidence=0.7, salience=float(it.get("salience", 0.5)),
+            layer=layer, origin="reflect_personal_data",
+        )
+        created += 1
+
+    db.insert_event(source="reflection", kind="insight", domain="business",
+                    title=f"个人数据提炼：{created} 条待确认记忆",
+                    content=f"{'LLM' if used_llm else '规则'}从 {len(episodes)} 条情景记忆提炼出 {created} 条 fact/pattern/entity",
+                    meta={"used_llm": used_llm, "created": created, "episodes": len(episodes)})
+    return {"ok": True, "created": created, "used_llm": used_llm,
+            "episodes": len(episodes),
+            "note": f"已从 {len(episodes)} 条情景记忆提炼出 {created} 条待确认的 fact/pattern/entity。"}

@@ -270,6 +270,142 @@ def test_prune_retention_keeps_referenced(monkeypatch, tmp_path):
     assert "ev-mem" in rows            # 被记忆引用 → 保留
 
 
+def test_layered_memory_and_forget():
+    """超级 Jarvis P1：分层记忆写入/按层查询/反馈强化/按来源遗忘。"""
+    from leojarvis import db
+    db.init_db()
+    f = db.insert_memory("P1 测试事实", layer="fact", status="active",
+                         origin="pytest", source_ref="pytest:p1", salience=0.5)
+    db.insert_memory("P1 测试规律", layer="pattern", status="active",
+                     origin="pytest", source_ref="pytest:p1")
+    db.insert_memory("P1 测试情景", layer="episode", status="active",
+                     origin="pytest", source_ref="pytest:p1-other")
+    counts = db.memory_layer_counts()
+    assert counts.get("fact", 0) >= 1 and counts.get("pattern", 0) >= 1
+    facts = db.list_memories_by_layer(["fact"], limit=50)
+    assert any(r["statement"] == "P1 测试事实" for r in facts)
+    # 反馈强化
+    assert db.adjust_memory(f, salience_delta=0.2) is True
+    # 被遗忘权：删 pytest:p1 来源应删掉 fact+pattern 两条，不动 p1-other
+    deleted = db.delete_memories_by_source("pytest:p1")
+    assert deleted == 2
+    remaining = [r["statement"] for r in db.list_memories_by_layer(None, limit=200)]
+    assert "P1 测试事实" not in remaining and "P1 测试规律" not in remaining
+    assert "P1 测试情景" in remaining
+    # 清理
+    db.delete_memories_by_source("pytest:p1-other")
+
+
+def test_personal_data_privacy_gate():
+    """超级 Jarvis P2：同意分级 + 红线 + 脱敏 + 按来源遗忘。"""
+    from leojarvis import personal_data, db
+    db.init_db()
+    # work 默认同意 → 收
+    work = personal_data.ingest_items(personal_data.from_text_document(
+        "测试工作内容", source_ref="pytest:pd-work", kind="work"))
+    assert work.accepted == 1
+    # chat 默认不同意 → 跳过
+    chat = personal_data.ingest_items(personal_data.from_chat_export(
+        [{"sender": "x", "text": "hi"}], source_ref="pytest:pd-chat"))
+    assert chat.accepted == 0 and chat.skipped_no_consent == 1
+    # 红线词 → 跳过
+    rl = personal_data.ingest_items([personal_data.DataItem(
+        text="我的密码是 abc", kind="work", source_ref="pytest:pd-rl")])
+    assert rl.skipped_redline == 1
+    # 脱敏：sk- key 被替换但仍收
+    rd = personal_data.ingest_items([personal_data.DataItem(
+        text="key sk-abcdefghijklmnop1234 备注", kind="work", source_ref="pytest:pd-rd")])
+    assert rd.accepted == 1 and rd.redacted == 1
+    # 被遗忘权
+    assert personal_data.forget_source("pytest:pd-work") == 1
+    personal_data.forget_source("pytest:pd-rd")
+
+
+def test_distill_personal_data_and_dynamic_profile(monkeypatch):
+    """超级 Jarvis P3：从情景记忆提炼 fact/pattern，确认后并入动态画像。"""
+    from leojarvis import db, personal_data, models_router
+    from leojarvis.memory import reflect, profile
+    db.init_db()
+    personal_data.ingest_items(personal_data.from_text_document(
+        "周一先看持仓再写代码。\n\n深夜还在调记忆模块。",
+        source_ref="pytest:p3test", kind="work"), auto_confirm=True)
+    fake = ('[{"layer":"pattern","subject":"作息","statement":"P3测试规律深夜写码","salience":0.8},'
+            '{"layer":"fact","subject":"项目","statement":"P3测试事实在做记忆模块","salience":0.7}]')
+    monkeypatch.setattr(models_router, "chat", lambda *a, **k: fake)
+    r = reflect.reflect_personal_data(limit=50)
+    assert r["created"] == 2
+    distilled = [p for p in db.list_pending_memories(limit=50) if p["origin"] == "reflect_personal_data"]
+    assert len(distilled) == 2
+    for p in distilled:
+        db.update_memory_status(p["id"], "active")
+    ptext = profile.profile_text()
+    assert "已学到的事实/规律" in ptext and "P3测试" in ptext
+    # cleanup
+    personal_data.forget_source("pytest:p3test")
+    with db.conn() as c:
+        c.execute("DELETE FROM memories WHERE statement LIKE 'P3测试%'")
+
+
+def test_cognition_advise_decide_anticipate(monkeypatch):
+    """超级 Jarvis P4：出主意/决策/预判产出结构化结果，LLM 不可用时优雅降级。"""
+    from leojarvis import db, cognition, models_router
+    db.init_db()
+    db.insert_memory("P4测试事实", layer="fact", status="active", origin="pytest",
+                     source_ref="pytest:p4test", confidence=0.8, salience=0.7)
+    db.insert_memory("P4测试规律", layer="pattern", status="active", origin="pytest",
+                     source_ref="pytest:p4test", confidence=0.8, salience=0.7)
+    monkeypatch.setattr(models_router, "chat",
+                        lambda *a, **k: '{"summary":"建议X","suggestions":["a"],"rationale":"r"}')
+    assert cognition.advise("某情境")["summary"] == "建议X"
+    monkeypatch.setattr(models_router, "chat",
+                        lambda *a, **k: '{"options":[{"name":"A","pros":[],"cons":[],"score":80},{"name":"B","pros":[],"cons":[],"score":40}],"recommendation":"A","why":"w"}')
+    d = cognition.decide("选哪个", ["A", "B"])
+    assert d["recommendation"] == "A" and len(d["options"]) == 2
+    monkeypatch.setattr(models_router, "chat",
+                        lambda *a, **k: '[{"headline":"提醒","reason":"规律","urgency":"low"}]')
+    assert len(cognition.anticipate("ctx")["predictions"]) == 1
+    # 降级不崩
+    monkeypatch.setattr(models_router, "chat", lambda *a, **k: (_ for _ in ()).throw(Exception("down")))
+    assert cognition.advise("x")["ok"] and cognition.decide("q", ["1", "2"])["ok"]
+    # 边界校验
+    assert cognition.decide("q", ["only-one"]).get("ok") is False
+    db.delete_memories_by_source("pytest:p4test")
+
+
+def test_feedback_loop_and_memory_sweep():
+    """超级 Jarvis P5：反馈强化/衰减、更正建新记忆、记忆体检归档低置信。"""
+    from leojarvis import db
+    db.init_db()
+    mid = db.insert_memory("P5测试记忆", layer="fact", status="active", origin="pytest",
+                           source_ref="pytest:p5t", confidence=0.5, salience=0.5)
+
+    def state(i):
+        with db.conn() as c:
+            r = c.execute("SELECT salience,confidence,status FROM memories WHERE id=?", (i,)).fetchone()
+        return round(r["salience"], 3), round(r["confidence"], 3), r["status"]
+
+    assert db.adjust_memory(mid, salience_delta=0.15, confidence_delta=0.1)
+    s, conf, _ = state(mid)
+    assert s > 0.5 and conf > 0.5
+    assert db.adjust_memory(mid, salience_delta=-0.15)
+    # 体检：低置信记忆应被归档
+    low = db.insert_memory("低置信", layer="fact", status="active", origin="pytest",
+                           source_ref="pytest:p5t", confidence=0.05)
+    swept = db.memory_health_sweep(min_confidence=0.2)
+    assert swept["archived"] >= 1
+    assert state(low)[2] == "archived"
+    db.delete_memories_by_source("pytest:p5t")
+
+
+def test_embedding_backend_degrades_gracefully():
+    """embed() 多后端：未配置真模型时降级哈希向量、维度稳定、不抛异常。"""
+    from leojarvis import embeddings
+    vec = embeddings.embed("中文 and english mixed 测试文本")
+    assert isinstance(vec, list)
+    assert len(vec) == embeddings._dimension()
+    assert all(isinstance(x, float) for x in vec[:8])
+
+
 def test_judge_batch_and_fallback(monkeypatch):
     """judge_batch：一次调用判多条，按 idx 映射；JSON 异常时返回空 dict 让调用方逐条兜底。"""
     from dataclasses import dataclass
