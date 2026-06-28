@@ -36,6 +36,17 @@ DEFAULTS: dict[str, Any] = {
         "apps": {"wechat": True, "popo": True, "telegram": True, "mailmaster": True, "mail": True, "gmail": True},
     },
     "system": {"show_status_bar": True, "show_raw_details": False, "refresh_seconds": 15},
+    # 主动助理(A):身份 + 早中晚三次主动 check-in(汇总待办/邮件/日程)。复用定时任务底座。
+    "assistant": {
+        "enabled": True,
+        "name": "Jarvis",
+        "persona": "你是 Leo 的私人助理,主动、简洁、以行动为先。汇报时只说要点和该做什么。",
+        "checkins": {
+            "morning": {"enabled": True, "hour": 8, "minute": 30},
+            "midday": {"enabled": True, "hour": 13, "minute": 0},
+            "evening": {"enabled": True, "hour": 20, "minute": 0},
+        },
+    },
     "email": {"enabled": False, "accounts": [], "apple_mail_fallback": True, "apple_mail_limit": 20, "apple_mail_unread_only": False},
     "gmail": {"enabled": False, "user": "", "app_password": "", "host": "imap.gmail.com", "port": 993, "mailbox": "INBOX", "search": "UNSEEN", "limit": 20},
     "rss": {"sources": []},

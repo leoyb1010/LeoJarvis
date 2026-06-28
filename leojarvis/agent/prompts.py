@@ -33,7 +33,8 @@ SYSTEM_STATIC_TEMPLATE = """你是 LeoJarvis，Leo 的私人 agent，常驻在 L
 
 def build_static_system_prompt() -> str:
     """稳定前缀（协议+工具目录+安全规则），跨请求不变，便于命中 prompt 缓存。"""
-    return SYSTEM_STATIC_TEMPLATE.format(tools=TOOLBUS.describe())
+    from ..prompt_security import policy_line
+    return SYSTEM_STATIC_TEMPLATE.format(tools=TOOLBUS.describe()) + "\n" + policy_line()
 
 
 def build_memory_prompt(recalled: list[dict], context: list[str] | None = None) -> str:
@@ -45,6 +46,10 @@ def build_memory_prompt(recalled: list[dict], context: list[str] | None = None) 
         ctx = "\n".join(f"- {c}" for c in context)
         parts.append(f"# 关于 Leo（长期事实与习惯，请结合这些来回答/建议）\n{ctx}")
     mem = "\n".join(f"- {h.get('text', '')[:200]}" for h in recalled) or "（无）"
+    # 记忆可能源自邮件/网页等外部内容(被污染) → 护栏包裹(C1)。
+    if recalled:
+        from ..prompt_security import wrap_untrusted
+        mem = wrap_untrusted(mem, source="memory")
     parts.append(f"# 与当前话题相关的记忆（可能为空）\n{mem}")
     return "\n\n".join(parts)
 

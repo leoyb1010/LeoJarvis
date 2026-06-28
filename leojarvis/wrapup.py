@@ -19,8 +19,17 @@ from . import db
 _DAY_MS = 86_400_000
 
 _SUMMARY_SYSTEM = """你是 Leo 的私人助理,正在帮他写工作{period}。下面是结构化的已完成项与未完成项。
-请输出 JSON: {"headline":"一句话概述今天/本周的主轴","report":"3-6 行的{period}正文(自然中文,陈述完成了什么、还差什么),不要复述清单格式","next":"给明天/下周的一句话建议"}
-只陈述给定数据里的事,不要编造。"""
+请输出 JSON,字段如下(全部用自然简体中文,陈述给定数据里的事,不要编造、不要复述清单格式):
+{
+  "headline": "一句话概述今天/本周的主轴",
+  "highlights": ["3-6 条今天/本周最值得记的进展或成果,每条一句,具体到做了什么"],
+  "by_area": {"领域名": "这个领域今天/本周的情况(1-2 句)"},
+  "report": "一段连贯的{period}正文(可 4-8 行,讲清完成了什么、推进到哪、还差什么)",
+  "unfinished_focus": "还没完成、明天/下周要优先盯的一两件事(一句)",
+  "next": "给明天/下周的一句话建议"
+}
+by_area 的领域名按内容自拟(如「工作」「沟通」「学习」「系统」「调研」),只放有内容的领域,没有就给空对象 {}。
+内容要详尽但不啰嗦,宁可具体不要套话。"""
 
 
 def _action_ok(meta_raw: str | None) -> tuple[bool, str]:
@@ -68,13 +77,18 @@ def _collect(hours: int) -> dict:
     return {"completed": completed, "unfinished": unfinished}
 
 
+def _empty_summary(period_label: str) -> dict:
+    return {"headline": f"今天没有可汇总的{period_label}记录。", "highlights": [],
+            "by_area": {}, "report": "", "unfinished_focus": "", "next": ""}
+
+
 def _summarize(period_label: str, data: dict) -> dict:
     comp = data["completed"]
     unf = data["unfinished"]
     if not comp and not unf:
-        return {"headline": f"今天没有可汇总的{period_label}记录。", "report": "", "next": ""}
-    lines = ["已完成:"] + [f"- {c['title']}" for c in comp[:20]]
-    lines += ["", "未完成:"] + [f"- {u['title']}" for u in unf[:20]]
+        return _empty_summary(period_label)
+    lines = ["已完成:"] + [f"- {c['title']}" + (f"（{c['detail']}）" if c.get("detail") else "") for c in comp[:24]]
+    lines += ["", "未完成:"] + [f"- {u['title']}" for u in unf[:24]]
     try:
         from .models_router import chat
         raw = chat("agent", [
@@ -83,16 +97,27 @@ def _summarize(period_label: str, data: dict) -> dict:
         ], temperature=0.3)
         s, e = raw.find("{"), raw.rfind("}")
         obj = json.loads(raw[s:e + 1]) if s >= 0 else {}
-        if isinstance(obj, dict) and obj.get("report"):
-            return {"headline": obj.get("headline", ""), "report": obj.get("report", ""),
-                    "next": obj.get("next", "")}
+        if isinstance(obj, dict) and (obj.get("report") or obj.get("highlights")):
+            by_area = obj.get("by_area") if isinstance(obj.get("by_area"), dict) else {}
+            highlights = obj.get("highlights") if isinstance(obj.get("highlights"), list) else []
+            return {
+                "headline": str(obj.get("headline", "")),
+                "highlights": [str(h) for h in highlights][:6],
+                "by_area": {str(k): str(v) for k, v in by_area.items() if v},
+                "report": str(obj.get("report", "")),
+                "unfinished_focus": str(obj.get("unfinished_focus", "")),
+                "next": str(obj.get("next", "")),
+            }
     except Exception:
         pass
-    # 规则兜底：不调 LLM 也能出一份体面的收尾。
+    # 规则兜底:不调 LLM 也能出一份分版块的体面收尾。
     return {
-        "headline": f"今天完成 {len(comp)} 项，{len(unf)} 项待续。",
-        "report": f"已完成 {len(comp)} 项工作；仍有 {len(unf)} 项进行中，将自动进入明日驾驶舱。",
-        "next": (unf[0]["title"] if unf else "保持节奏，明天继续。"),
+        "headline": f"今天完成 {len(comp)} 项,{len(unf)} 项待续。",
+        "highlights": [c["title"] for c in comp[:6]],
+        "by_area": {},
+        "report": f"已完成 {len(comp)} 项工作;仍有 {len(unf)} 项进行中,将自动进入明日驾驶舱。",
+        "unfinished_focus": (unf[0]["title"] if unf else ""),
+        "next": (unf[0]["title"] if unf else "保持节奏,明天继续。"),
     }
 
 

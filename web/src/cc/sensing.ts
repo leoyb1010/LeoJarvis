@@ -46,6 +46,9 @@ type BatteryNav = Navigator & {
   getBattery?: () => Promise<{ level: number; charging: boolean }>;
   deviceMemory?: number;
 };
+type ConnNav = Navigator & {
+  connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean; type?: string };
+};
 
 // --- 本地文件夹（File System Access API）---
 const fileSystem: SenseChannel = {
@@ -209,7 +212,117 @@ const environment: SenseChannel = {
   },
 };
 
-export const SENSE_CHANNELS: SenseChannel[] = [fileSystem, screen, clipboard, geo, environment];
+// --- 网络信息（Network Information API）---
+const network: SenseChannel = {
+  id: "network",
+  name: "网络状况",
+  desc: "当前网络类型、估算带宽与延迟（无需授权）",
+  icon: "network",
+  reads: "浏览器公开的网络信息：连接类型、下行带宽、RTT、省流模式",
+  domain: "local",
+  isSupported: () => typeof navigator !== "undefined" && ("connection" in navigator || "onLine" in navigator),
+  connect: async (): Promise<SenseResult> => {
+    const c = (navigator as ConnNav).connection;
+    const bits: string[] = [`在线：${navigator.onLine ? "是" : "否"}`];
+    if (c) {
+      if (c.effectiveType) bits.push(`网络等级：${c.effectiveType}`);
+      if (typeof c.downlink === "number") bits.push(`下行带宽：约 ${c.downlink} Mb/s`);
+      if (typeof c.rtt === "number") bits.push(`往返延迟：约 ${c.rtt} ms`);
+      if (c.saveData) bits.push("省流模式：开");
+    } else {
+      bits.push("浏览器未暴露详细网络信息");
+    }
+    return { status: "connected", summary: "已感知网络状况", details: bits };
+  },
+};
+
+// --- 媒体设备清单（enumerateDevices，只数数量，不取流）---
+const mediaDevices: SenseChannel = {
+  id: "media-devices",
+  name: "媒体设备",
+  desc: "有几个摄像头/麦克风/扬声器（只清点数量，不开启）",
+  icon: "devices",
+  reads: "媒体输入输出设备的数量与种类（不访问画面或声音）",
+  domain: "local",
+  isSupported: () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.enumerateDevices,
+  connect: async (): Promise<SenseResult> => {
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      const n = (k: string) => list.filter((d) => d.kind === k).length;
+      const bits = [
+        `摄像头：${n("videoinput")} 个`,
+        `麦克风：${n("audioinput")} 个`,
+        `扬声器：${n("audiooutput")} 个`,
+      ];
+      // 标签是否可读 → 反映是否已授权过媒体权限（不主动请求）。
+      const labeled = list.some((d) => d.label);
+      bits.push(labeled ? "设备名称：可读（曾授权）" : "设备名称：未授权（仅计数）");
+      return { status: "connected", summary: "已清点媒体设备", details: bits };
+    } catch (e) {
+      return { status: "denied", reason: String(e) };
+    }
+  },
+};
+
+// --- 语言 & 时区（Intl + navigator.languages，无需授权）---
+const locale: SenseChannel = {
+  id: "locale",
+  name: "语言时区",
+  desc: "首选语言、时区与本地时间偏好（无需授权）",
+  icon: "locale",
+  reads: "浏览器语言列表、时区、24/12 小时制等地区设置",
+  domain: "local",
+  isSupported: () => typeof Intl !== "undefined" && typeof navigator !== "undefined",
+  connect: async (): Promise<SenseResult> => {
+    const dt = Intl.DateTimeFormat().resolvedOptions();
+    const bits = [
+      `首选语言：${navigator.language}`,
+      `语言列表：${(navigator.languages || [navigator.language]).join(", ")}`,
+      `时区：${dt.timeZone || "未知"}`,
+      `本地日历：${dt.calendar || "gregory"} · ${dt.numberingSystem || "latn"}`,
+    ];
+    return { status: "connected", summary: "已感知语言与时区", details: bits };
+  },
+};
+
+// --- 桌面通知授权（Notification.requestPermission，授权后 Jarvis 能主动提醒）---
+const notify: SenseChannel = {
+  id: "notify",
+  name: "桌面通知",
+  desc: "授权后 Jarvis 可在重要事项时弹系统通知",
+  icon: "bell",
+  reads: "通知权限状态（不读取任何已有通知内容）",
+  domain: "local",
+  isSupported: () => typeof window !== "undefined" && "Notification" in window,
+  connect: async (): Promise<SenseResult> => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === "granted") return { status: "connected", summary: "已开启桌面通知", details: ["权限：已授权", "Jarvis 可在重要事项时主动提醒"] };
+      if (perm === "denied") return { status: "denied", reason: "通知权限被拒绝（可在浏览器站点设置里改）" };
+      return { status: "available", reason: "尚未授权" };
+    } catch (e) {
+      return { status: "unsupported", reason: String(e) };
+    }
+  },
+};
+
+export const SENSE_CHANNELS: SenseChannel[] = [fileSystem, screen, clipboard, geo, network, mediaDevices, locale, notify, environment];
+
+// ---- 感知状态持久化(问题9):首页与感知 tab 共享同一份状态,切页不丢授权记录 ----
+const _SENSE_KEY = "cx-sense-state";
+export type SenseSaved = { status: SenseStatus; fed?: string; summary?: string; details?: string[]; ts: number };
+
+export function loadSenseState(): Record<string, SenseSaved> {
+  try { return JSON.parse(localStorage.getItem(_SENSE_KEY) || "{}"); } catch { return {}; }
+}
+export function saveSenseStatus(id: string, v: SenseSaved): Record<string, SenseSaved> {
+  const all = loadSenseState();
+  all[id] = v;
+  try { localStorage.setItem(_SENSE_KEY, JSON.stringify(all)); } catch { /* ignore */ }
+  // 跨组件即时同步(同一标签页内 storage 事件不触发,用自定义事件)。
+  try { window.dispatchEvent(new CustomEvent("cx-sense-change", { detail: all })); } catch { /* ignore */ }
+  return all;
+}
 
 // connect 成功后，把感知到的文本摘要投喂到 LeoJarvis（过隐私闸门）。
 // 屏幕缩略图不投喂（留本地）；只投喂结构化文本（清单/环境/坐标/剪贴板）。

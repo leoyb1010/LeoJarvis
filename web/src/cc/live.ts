@@ -27,6 +27,11 @@ async function jpatch<T>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${path} ${r.status}`);
   return r.json();
 }
+async function jdel<T>(path: string): Promise<T> {
+  const r = await fetch(BASE + path, { method: "DELETE" });
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return r.json();
+}
 
 // ---- CLI agent 编排（真实）----
 export type CliAgent = { name: string; display: string; installed: boolean; version: string | null; auth: string; run_supported: string };
@@ -75,8 +80,10 @@ export type Intelligence = { github?: IntelRepo[]; sources?: IntelSource[]; targ
 export const getIntelligence = () => jget<Intelligence>("/intelligence/overview");
 
 // briefing/items/{id}: { ok, item:{ title, source, source_detail(中文全文正文), source_detail_translated, why_important, take, next_step, reasons[], url, score, ts, priority, ... } }
-export type BriefDetailItem = { title?: string; source?: string; source_detail?: string; source_detail_translated?: boolean; source_detail_missing?: boolean; why_important?: string; take?: string; next_step?: string; reasons?: string[]; url?: string; score?: number; ts?: number; priority?: string; relation?: string } & Record<string, any>;
+export type BriefDetailItem = { title?: string; source?: string; source_detail?: string; source_detail_translated?: boolean; source_detail_missing?: boolean; pending_translation?: boolean; why_important?: string; take?: string; next_step?: string; reasons?: string[]; url?: string; score?: number; ts?: number; priority?: string; relation?: string } & Record<string, any>;
 export const getBriefingItem = (id: string) => jget<{ ok?: boolean; item?: BriefDetailItem }>(`/briefing/items/${encodeURIComponent(id)}`);
+// 秒开后异步补译:返回同步全译后的 item(中文正文)。
+export const translateBriefingItem = (id: string) => jpost<{ ok?: boolean; item?: BriefDetailItem }>(`/briefing/items/${encodeURIComponent(id)}/translate`);
 
 // ---- 中枢对话（真实）----
 export type ChatMsg = { role: "user" | "assistant"; content: string };
@@ -298,7 +305,7 @@ export type WrapUp = {
   ok?: boolean; period: string; label: string;
   completed: WrapItem[]; unfinished: WrapItem[];
   counts?: { completed: number; unfinished: number };
-  summary?: { headline?: string; report?: string; next?: string };
+  summary?: { headline?: string; highlights?: string[]; by_area?: Record<string, string>; report?: string; unfinished_focus?: string; next?: string };
 };
 export const getWrapup = (period: "today" | "week" = "today") =>
   jget<WrapUp>(`/wrapup/${period}`);
@@ -311,3 +318,64 @@ export type AgentRunsOverview = {
   counts?: { awaiting: number; executed: number; blocked: number; total_recent: number };
 };
 export const getAgentRuns = (hours = 48) => jget<AgentRunsOverview>(`/agent-runs?hours=${hours}`);
+
+// ---- P1 Email 腔理 ----
+export type EmailTriage = { event_id: string; summary?: string; tags?: string[]; actionable?: boolean; action?: string; reply_draft?: string } & Record<string, any>;
+export const getEmailTriage = (eventId: string) => jget<{ ok: boolean; triage: EmailTriage | null }>(`/email/triage/${encodeURIComponent(eventId)}`);
+export const runEmailTriage = (hours = 720) => jpost<{ ok: boolean; scanned: number; triaged: number; actionable: number; note?: string }>(`/email/triage?hours=${hours}`);
+
+// ---- P3 定时/事件触发 agent 任务 ----
+export type ScheduledTask = { id: string; name: string; prompt: string; trigger: string; interval_minutes?: number; cron_hour?: number; cron_minute?: number; trigger_event?: string; trigger_count?: number; status: string; last_run?: number; last_result?: string } & Record<string, any>;
+export const getScheduledTasks = () => jget<{ ok: boolean; tasks: ScheduledTask[] }>("/tasks/scheduled");
+export const createScheduledTask = (t: Partial<ScheduledTask>) => jpost<{ ok: boolean; id?: string }>("/tasks/scheduled", t);
+export const setScheduledTaskStatus = (id: string, status: "active" | "paused" | "deleted") => jpost<{ ok: boolean }>(`/tasks/scheduled/${encodeURIComponent(id)}/status`, { status });
+export const runScheduledTask = (id: string) => jpost<{ ok: boolean }>(`/tasks/scheduled/${encodeURIComponent(id)}/run`);
+
+// ---- 问题1 日程 ----
+export type ScheduleItem = { id: string; title: string; note?: string; start_ts: number; remind_ts?: number | null; repeat: string; status: string; overdue?: boolean; source?: string } & Record<string, any>;
+export const getSchedule = (status = "", upcomingHours = 0) => jget<{ ok: boolean; items: ScheduleItem[]; stats: { pending: number; today: number } }>(`/schedule?status=${status}&upcoming_hours=${upcomingHours}`);
+export const createSchedule = (s: { title: string; start_ts: number; remind_ts?: number | null; note?: string; repeat?: string }) => jpost<{ ok: boolean; id?: string }>("/schedule", s);
+export const updateSchedule = (id: string, patch: Partial<ScheduleItem>) => jpatch<{ ok: boolean }>(`/schedule/${encodeURIComponent(id)}`, patch);
+export const scheduleDone = (id: string, done = true) => jpost<{ ok: boolean }>(`/schedule/${encodeURIComponent(id)}/done?done=${done}`);
+export const deleteSchedule = (id: string) => jdel<{ ok: boolean }>(`/schedule/${encodeURIComponent(id)}`);
+
+// ---- P2 Calendar ----
+export type CalEvent = { event_id: string; title: string; start?: number; location?: string; organizer?: string };
+export const getUpcomingEvents = (hours = 168) => jget<{ ok: boolean; events: CalEvent[] }>(`/calendar/upcoming?hours=${hours}`);
+export const importIcs = (ics: string) => jpost<{ ok: boolean; parsed: number; added: number }>("/calendar/import-ics", { ics });
+export const syncCalendar = () => jpost<{ ok: boolean; reason?: string; added?: number }>("/calendar/sync");
+
+// ---- P4 深入调研 ----
+export type DeepResearch = { ok: boolean; goal: string; report: string; sources: { n: number; title: string; url: string }[]; findings: any[]; note?: string };
+export const deepResearch = (goal: string, maxSources = 5) => jpost<DeepResearch>("/research/deep", { goal, max_sources: maxSources });
+export const researchReport = (goal: string, maxSources = 5) => jpost<{ ok: boolean; goal: string; html: string }>("/research/report", { goal, max_sources: maxSources });
+
+// ---- A 主动助理 ----
+export type AssistantCheckin = { enabled: boolean; hour: number; minute: number };
+export type AssistantConfig = { enabled: boolean; name: string; persona: string; checkins: Record<string, AssistantCheckin> } & Record<string, any>;
+export const getAssistantConfig = () => jget<{ ok: boolean; config: AssistantConfig }>("/assistant/config");
+export const patchAssistantConfig = (c: Partial<AssistantConfig>) => jpatch<{ ok: boolean; config: AssistantConfig }>("/assistant/config", c);
+export const runCheckin = (slot: string) => jpost<{ ok: boolean; reply?: string; title?: string }>(`/assistant/checkins/${encodeURIComponent(slot)}/run`);
+
+// ---- B 技能库 ----
+export type Skill = { id: string; name: string; category: string; when_to_use: string; body: string; keywords: string[]; source: string; use_count: number; status: string } & Record<string, any>;
+export const getSkills = (q = "", category = "") => jget<{ ok: boolean; skills: Skill[] }>(`/skills?q=${encodeURIComponent(q)}&category=${encodeURIComponent(category)}`);
+export const createSkill = (s: Partial<Skill>) => jpost<{ ok: boolean; id?: string }>("/skills", s);
+export const setSkillStatus = (id: string, status: "active" | "archived" | "deleted") => jpost<{ ok: boolean }>(`/skills/${encodeURIComponent(id)}/status`, { status });
+// 导入:贴 SKILL.md 文本,或给 GitHub repo(owner/name)+ 路径。
+export const importSkill = (body: { markdown?: string; repo?: string; path?: string; ref?: string }) => jpost<{ ok: boolean; id?: string; error?: string; source_url?: string }>("/skills/import", body);
+
+// ---- 问题8 MCP 中枢 ----
+export type McpServer = { id: string; name: string; provider?: string; enabled?: boolean; status?: string; message?: string; key_configured?: boolean; capabilities?: string[]; path?: string } & Record<string, any>;
+export type McpStatus = { ok: boolean; summary?: { ready: number; total: number; needs_key: number; disabled: number }; servers: McpServer[] };
+export const getMcpStatus = () => jget<McpStatus>("/mcp/status");
+export const patchMcpSettings = (settings: Record<string, any>) => jpatch<{ ok: boolean; status: McpStatus }>("/mcp/settings", { settings });
+
+// ---- D 版本化文档 ----
+export type DocMeta = { id: string; title: string; kind: string; tags: string[]; updated_ts?: number };
+export type DocFull = DocMeta & { content: string };
+export type DocVersion = { id: string; reason: string; created_ts: number };
+export const getDocuments = () => jget<{ ok: boolean; documents: DocMeta[] }>("/documents");
+export const getDocument = (id: string) => jget<{ ok: boolean; document: DocFull | null; versions: DocVersion[] }>(`/documents/${encodeURIComponent(id)}`);
+export const createDocument = (title: string, content = "") => jpost<{ ok: boolean; document: DocFull }>("/documents", { title, content });
+export const editDocument = (id: string, find: string, replace: string) => jpost<{ ok: boolean; replaced?: number; error?: string }>(`/documents/${encodeURIComponent(id)}/edit`, { find, replace });

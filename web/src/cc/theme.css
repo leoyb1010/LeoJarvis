@@ -140,3 +140,28 @@ input, button, textarea { font-family: inherit; }
 .cx-orb { transition: transform .2s ease; }
 .cx-orb:hover { transform: scale(1.05); }
 .cx-orb:hover .cx-orb-core { box-shadow: inset 0 0 16px rgba(0,0,0,.6),0 0 0 2px var(--accent),0 0 20px var(--accent-soft) !important; }
+
+/* ============ 统一弹出层(Overlay.tsx)动画 ============ */
+@keyframes cxFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes cxSlideIn { from { transform: translateX(28px); opacity: .4 } to { transform: translateX(0); opacity: 1 } }
+@keyframes cxModalIn { from { transform: translateY(12px) scale(.98); opacity: 0 } to { transform: translateY(0) scale(1); opacity: 1 } }
+.cx-ov-backdrop { animation: cxFade .16s ease both; }
+.cx-ov-drawer { animation: cxSlideIn .22s cubic-bezier(.22,1,.36,1) both; }
+.cx-ov-modal { animation: cxModalIn .2s cubic-bezier(.22,1,.36,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .cx-ov-backdrop, .cx-ov-drawer, .cx-ov-modal { animation: none; }
+}
+
+/* 侧边 tab 悬停名称提示（问题10）：放右侧，不被裁。 */
+.cx-navtip { position: relative; transition: background .15s, color .15s; }
+.cx-navtip:hover { background: var(--accent-soft); color: var(--accent); }
+.cx-navtip::after {
+  content: attr(data-tip);
+  position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%) translateX(-4px);
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  font: 600 11.5px 'Space Grotesk', sans-serif; white-space: nowrap;
+  padding: 5px 10px; border-radius: 8px; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 1400;
+}
+.cx-navtip:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+@media (prefers-reduced-motion: reduce) { .cx-navtip::after { transition: none; } }

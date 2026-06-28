@@ -1103,7 +1103,17 @@ def briefing_today(compact: bool = False, limit: int = 0, refresh: bool = False)
 
 @router.get("/briefing/items/{event_id}")
 def briefing_item_detail(event_id: str) -> dict:
-    item = build_item_detail(event_id)
+    # 秒开:命中翻译缓存直接给中文,否则先回原文 + pending_translation,前端再调下面的 translate 异步补译。
+    item = build_item_detail(event_id, translate=False)
+    if not item:
+        raise HTTPException(status_code=404, detail="briefing item not found")
+    return {"ok": True, "item": item}
+
+
+@router.post("/briefing/items/{event_id}/translate")
+def briefing_item_translate(event_id: str) -> dict:
+    # 同步全译(写翻译缓存),供前端在抽屉打开后异步替换原文。
+    item = build_item_detail(event_id, translate=True)
     if not item:
         raise HTTPException(status_code=404, detail="briefing item not found")
     return {"ok": True, "item": item}
@@ -1364,6 +1374,311 @@ def inbox_set_state(task_id: str, req: InboxStateIn) -> dict:
     """确认/忽略/完成一条待办(确认队列)。"""
     from .. import inbox
     return inbox.set_state(task_id, req.state)
+
+
+# ---------- P1：Email 腔理(摘要/标签/actionable/回复草稿) ----------
+
+@router.post("/email/triage")
+def email_triage_run(hours: int = 720, limit: int = 60, refresh: bool = False) -> dict:
+    """腔理近 hours 小时的邮件:AI 摘要+标签+是否需处理+回复草稿。结果缓存。"""
+    from .. import email_triage
+    return email_triage.triage(hours=hours, limit=limit, refresh=refresh)
+
+
+@router.get("/email/triage/{event_id}")
+def email_triage_get(event_id: str) -> dict:
+    """取某封邮件的腔理结果(摘要/标签/草稿)。"""
+    from .. import email_triage
+    d = email_triage.triage_dict(event_id)
+    return {"ok": d is not None, "triage": d}
+
+
+# ---------- A：主动助理 + 早中晚 check-in ----------
+
+@router.get("/assistant/config")
+def assistant_get_config() -> dict:
+    from .. import assistant
+    return {"ok": True, "config": assistant.get_config()}
+
+
+class AssistantConfigIn(BaseModel):
+    enabled: bool | None = None
+    name: str | None = None
+    persona: str | None = None
+    checkins: dict | None = None
+
+
+@router.patch("/assistant/config")
+def assistant_patch_config(req: AssistantConfigIn) -> dict:
+    from .. import assistant
+    partial = {k: v for k, v in req.model_dump().items() if v is not None}
+    return {"ok": True, "config": assistant.update_config(partial)}
+
+
+@router.post("/assistant/checkins/{slot}/run")
+def assistant_run_checkin(slot: str) -> dict:
+    """立即手动跑一次 check-in(morning/midday/evening)。"""
+    from .. import assistant
+    return assistant.run_checkin(slot)
+
+
+# ---------- P3：定时/事件触发的 agent 任务 ----------
+
+class ScheduledTaskIn(BaseModel):
+    name: str
+    prompt: str
+    trigger: str = Field(pattern="^(interval|cron|event)$")
+    interval_minutes: int | None = None
+    cron_hour: int | None = None
+    cron_minute: int | None = None
+    trigger_event: str | None = None
+    trigger_count: int = 1
+
+
+@router.get("/tasks/scheduled")
+def scheduled_list() -> dict:
+    rows = db.list_scheduled_tasks()
+    return {"ok": True, "tasks": [dict(r) for r in rows]}
+
+
+@router.post("/tasks/scheduled")
+def scheduled_create(req: ScheduledTaskIn) -> dict:
+    tid = db.create_scheduled_task(
+        name=req.name, prompt=req.prompt, trigger=req.trigger, interval_minutes=req.interval_minutes,
+        cron_hour=req.cron_hour, cron_minute=req.cron_minute, trigger_event=req.trigger_event,
+        trigger_count=req.trigger_count,
+    )
+    return {"ok": True, "id": tid}
+
+
+class SchedStatusIn(BaseModel):
+    status: str = Field(pattern="^(active|paused|deleted)$")
+
+
+@router.post("/tasks/scheduled/{task_id}/status")
+def scheduled_set_status(task_id: str, req: SchedStatusIn) -> dict:
+    return {"ok": db.set_scheduled_task_status(task_id, req.status)}
+
+
+@router.post("/tasks/scheduled/{task_id}/run")
+def scheduled_run_now(task_id: str) -> dict:
+    """立即手动跑一次该任务(agent 经行动闸门)。"""
+    from .. import event_bus
+    t = db.get_scheduled_task(task_id)
+    if not t:
+        return {"ok": False, "error": "not found"}
+    return {"ok": True, "result": event_bus._run_task_row(t)}
+
+
+# ---------- 问题1:日程(schedule) ----------
+
+class ScheduleIn(BaseModel):
+    title: str
+    start_ts: int
+    remind_ts: int | None = None
+    note: str = ""
+    repeat: str = "none"
+
+
+class SchedulePatch(BaseModel):
+    title: str | None = None
+    start_ts: int | None = None
+    remind_ts: int | None = None
+    note: str | None = None
+    repeat: str | None = None
+    status: str | None = None
+
+
+@router.get("/schedule")
+def schedule_list(status: str = "", upcoming_hours: int = 0) -> dict:
+    from .. import schedule as sch
+    return {"ok": True, "items": sch.list_items(status=status, upcoming_hours=upcoming_hours), "stats": sch.stats()}
+
+
+@router.post("/schedule")
+def schedule_create(req: ScheduleIn) -> dict:
+    from .. import schedule as sch
+    sid = sch.create(title=req.title, start_ts=req.start_ts, remind_ts=req.remind_ts, note=req.note, repeat=req.repeat)
+    return {"ok": sid is not None, "id": sid}
+
+
+@router.patch("/schedule/{sid}")
+def schedule_update(sid: str, req: SchedulePatch) -> dict:
+    from .. import schedule as sch
+    fields = {k: v for k, v in req.model_dump().items() if v is not None}
+    return {"ok": sch.update(sid, **fields)}
+
+
+@router.post("/schedule/{sid}/done")
+def schedule_done(sid: str, done: bool = True) -> dict:
+    from .. import schedule as sch
+    return {"ok": sch.set_done(sid, done)}
+
+
+@router.delete("/schedule/{sid}")
+def schedule_delete(sid: str) -> dict:
+    from .. import schedule as sch
+    return {"ok": sch.delete(sid)}
+
+
+# ---------- P2：Calendar / CalDAV ----------
+
+class IcsImportIn(BaseModel):
+    ics: str
+    source: str = "calendar:ics"
+
+
+@router.post("/calendar/import-ics")
+def calendar_import_ics(req: IcsImportIn) -> dict:
+    """导入 ics 文本(本地日历文件内容/订阅链接抓回的文本)→ 落为日历事件。"""
+    from .. import calendar_sync
+    return calendar_sync.import_ics(req.ics, source=req.source)
+
+
+@router.post("/calendar/sync")
+def calendar_sync_caldav() -> dict:
+    """从配置的 CalDAV 拉取日历(需 [calendar].caldav_url + caldav 依赖)。"""
+    from .. import calendar_sync
+    return calendar_sync.sync_caldav()
+
+
+@router.get("/calendar/upcoming")
+def calendar_upcoming(hours: int = 168, limit: int = 50) -> dict:
+    """未来 N 小时的日历事件(给首页/收尾用)。"""
+    from .. import calendar_sync
+    return {"ok": True, "events": calendar_sync.upcoming(hours=hours, limit=limit)}
+
+
+# ---------- P4：深入调研(goal-based 多步) ----------
+
+class DeepResearchIn(BaseModel):
+    goal: str
+    max_sources: int = 5
+
+
+@router.post("/research/deep")
+def research_deep_run(req: DeepResearchIn) -> dict:
+    """对一个目标做多步网络调研:搜索→读源→目标导向抽取→综合报告。"""
+    from .. import research_deep
+    return research_deep.research(req.goal, max_sources=max(1, min(req.max_sources, 8)))
+
+
+@router.get("/search")
+def search_multi(q: str, limit: int = 8) -> dict:
+    """多源搜索(C2):免费源优先 + 相关/时效/权威排序。无源时优雅降级。"""
+    from .. import search_providers
+    return search_providers.search(q, limit=max(1, min(limit, 20)))
+
+
+# ---------- D：调研可视化报告 ----------
+
+@router.post("/research/report")
+def research_report(req: DeepResearchIn) -> dict:
+    """调研 + 渲染成自包含 HTML 报告(已消毒)。"""
+    from .. import research_deep, visual_report
+    result = research_deep.research(req.goal, max_sources=max(1, min(req.max_sources, 8)))
+    return {"ok": True, "goal": result.get("goal"), "html": visual_report.render_report(result)}
+
+
+# ---------- D：版本化文档 ----------
+
+class DocumentIn(BaseModel):
+    title: str
+    content: str = ""
+    kind: str = "doc"
+    tags: list[str] = Field(default_factory=list)
+
+
+class DocEditIn(BaseModel):
+    find: str
+    replace: str
+    count: int = 0
+
+
+@router.get("/documents")
+def documents_list(limit: int = 100) -> dict:
+    from .. import documents
+    return {"ok": True, "documents": documents.list_docs(limit=limit)}
+
+
+@router.post("/documents")
+def documents_create(req: DocumentIn) -> dict:
+    from .. import documents
+    return {"ok": True, "document": documents.create(req.title, req.content, kind=req.kind, tags=req.tags)}
+
+
+@router.get("/documents/{doc_id}")
+def documents_get(doc_id: str) -> dict:
+    from .. import documents
+    d = documents.get(doc_id)
+    return {"ok": d is not None, "document": d, "versions": documents.list_versions(doc_id) if d else []}
+
+
+@router.post("/documents/{doc_id}/edit")
+def documents_edit(doc_id: str, req: DocEditIn) -> dict:
+    from .. import documents
+    return documents.edit_replace(doc_id, req.find, req.replace, count=req.count)
+
+
+# ---------- B：技能库 ----------
+
+class SkillIn(BaseModel):
+    name: str
+    when_to_use: str
+    body: str = ""
+    category: str = "general"
+    keywords: list[str] = Field(default_factory=list)
+    procedure: list[str] = Field(default_factory=list)
+    pitfalls: list[str] = Field(default_factory=list)
+    verification: list[str] = Field(default_factory=list)
+
+
+@router.get("/skills")
+def skills_list(q: str = "", category: str = "") -> dict:
+    from .. import skills
+    return {"ok": True, "skills": skills.list_skills(q=q, category=category)}
+
+
+@router.post("/skills")
+def skills_create(req: SkillIn) -> dict:
+    from .. import skills
+    sid = skills.save_skill(req.model_dump(), source="manual")
+    return {"ok": sid is not None, "id": sid}
+
+
+class SkillImportIn(BaseModel):
+    # 二选一:贴 SKILL.md 文本,或给 GitHub 仓库 + 路径。
+    markdown: str = ""
+    repo: str = ""
+    path: str = "SKILL.md"
+    ref: str = "main"
+
+
+@router.post("/skills/import")
+def skills_import(req: SkillImportIn) -> dict:
+    from .. import skills
+    if req.markdown.strip():
+        return skills.import_markdown(req.markdown)
+    if req.repo.strip():
+        return skills.import_from_github(req.repo, req.path, req.ref)
+    return {"ok": False, "error": "请提供 markdown 文本或 GitHub repo"}
+
+
+@router.get("/skills/{sid}")
+def skills_get(sid: str) -> dict:
+    from .. import skills
+    s = skills.get_skill(sid)
+    return {"ok": s is not None, "skill": s}
+
+
+class SkillStatusIn(BaseModel):
+    status: str = Field(pattern="^(active|archived|deleted)$")
+
+
+@router.post("/skills/{sid}/status")
+def skills_set_status(sid: str, req: SkillStatusIn) -> dict:
+    from .. import skills
+    return {"ok": skills.set_status(sid, req.status)}
 
 
 # ---------- WorkDock 合并 M3：下班收尾 / 日报周报 ----------

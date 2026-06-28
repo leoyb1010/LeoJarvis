@@ -690,10 +690,20 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
     why = _display_chinese(why, context="为什么重要", max_chars=260, allow_llm=translate_source_detail) or why
     relation = _display_chinese(relation, context="和 Leo 的关系", max_chars=260, allow_llm=translate_source_detail) or relation
     next_step = _display_chinese(next_step, context="下一步建议", max_chars=260, allow_llm=translate_source_detail) or next_step
-    if detail and has_noisy_english(detail) and not source_detail_translated:
-        detail = ""
-    if source_detail and has_noisy_english(source_detail) and not source_detail_translated:
-        source_detail = ""
+    # 是否还有英文正文待翻译:有原文、含明显英文、尚未译。
+    pending_translation = bool(source_detail_raw) and has_noisy_english(str(source_detail_raw)) and not source_detail_translated
+    if translate_source_detail:
+        # 同步全译模式:译不出来就别露生英文(旧行为)。
+        if detail and has_noisy_english(detail) and not source_detail_translated:
+            detail = ""
+        if source_detail and has_noisy_english(source_detail) and not source_detail_translated:
+            source_detail = ""
+    else:
+        # 秒开快路径:先把原文露出来(前端会标「翻译中」并异步补译),不留空。
+        if not detail and source_detail_raw:
+            detail = str(source_detail_raw)
+        if not source_detail and source_detail_raw:
+            source_detail = str(source_detail_raw)
     velocity = meta.get("velocity") if isinstance(meta.get("velocity"), dict) else {}
     return {
         "event_id": row["event_id"],
@@ -712,6 +722,7 @@ def _briefing_item(row: dict, memories: list[str], github_lookup: dict[str, dict
         "source_detail_raw": source_detail_raw,
         "source_detail_translated": source_detail_translated,
         "source_detail_missing": not bool(source_detail_raw),
+        "pending_translation": pending_translation,
         "triage": row.get("triage") or "digest",
         "priority": priority,
         "reasons": [to_chinese(str(r), context="简报判断原因", max_chars=100) for r in reasons[:4]],
@@ -1309,10 +1320,12 @@ def build_today(*, compact: bool = False, limit: int = 0, force: bool = False) -
     return data
 
 
-def build_item_detail(event_id: str) -> dict | None:
+def build_item_detail(event_id: str, *, translate: bool = True) -> dict | None:
+    # translate=False 为「秒开」快路径:命中翻译缓存直接给中文,否则先返回原文并标 pending_translation,
+    # 由前端随后调 /briefing/items/{id}/translate 异步补译。translate=True 为同步全译(旧行为)。
     global _SOURCE_FETCH_BUDGET, _SOURCE_TRANSLATE_BUDGET
-    _SOURCE_FETCH_BUDGET = 1
-    _SOURCE_TRANSLATE_BUDGET = 2
+    _SOURCE_FETCH_BUDGET = 1 if translate else 0
+    _SOURCE_TRANSLATE_BUDGET = 2 if translate else 0
     with db.conn() as c:
         row = c.execute(
             """
@@ -1336,4 +1349,4 @@ def build_item_detail(event_id: str) -> dict | None:
         github_lookup = {r.get("repo_full_name"): r for r in github_radar(limit=120) if r.get("repo_full_name") == repo_name}
     except Exception:
         github_lookup = {}
-    return _briefing_item(dict(row), memories, github_lookup, translate_source_detail=True)
+    return _briefing_item(dict(row), memories, github_lookup, translate_source_detail=translate)

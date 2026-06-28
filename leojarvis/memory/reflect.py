@@ -210,3 +210,99 @@ def reflect_personal_data(limit: int = 200) -> dict:
     return {"ok": True, "created": created, "used_llm": used_llm,
             "episodes": len(episodes),
             "note": f"已从 {len(episodes)} 条情景记忆提炼出 {created} 条待确认的 fact/pattern/entity。"}
+
+
+# ---------- B 自动记忆:每轮抽 ≤2 条用户陈述事实(进待确认队列,不自动 active) ----------
+
+_TURN_FACT_SYSTEM = """从下面这轮对话里抽取**用户主动陈述的、长期有用的个人事实/偏好**(不是任务内容、不是你的话)。
+最多 2 条;没有就返回 []。只输出 JSON 数组:[{"layer":"fact|pattern|entity","subject":"主语","statement":"一句话事实","salience":0.5}]
+例:用户说"我用 Cursor 写代码"→ [{"layer":"pattern","subject":"Leo","statement":"用 Cursor 写代码","salience":0.6}]。
+营销/闲聊/一次性内容不要抽。"""
+
+
+def extract_turn_facts(messages: list[dict], reply: str) -> int:
+    """每轮跑完抽 ≤2 条用户事实 → status=pending(进现有 /memories/pending 确认队列,守"不自动记"不变量)。
+    返回新增条数。LLM 不可用则用极简规则(只认"我叫/我是/我用/我喜欢")。"""
+    user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+    if not user.strip():
+        return 0
+    facts: list[dict] = []
+    try:
+        from ..models_router import chat
+        raw = chat("agent", [
+            {"role": "system", "content": _TURN_FACT_SYSTEM},
+            {"role": "user", "content": f"用户:{user[:500]}\n助理:{reply[:300]}"},
+        ], temperature=0.2)
+        s, e = raw.find("["), raw.rfind("]")
+        arr = json.loads(raw[s:e + 1]) if s >= 0 else []
+        facts = [x for x in arr if isinstance(x, dict) and x.get("statement")][:2]
+    except Exception:
+        # 兜底:极简规则,只在明确自述时抽一条。
+        import re as _re
+        m = _re.search(r"我(叫|是|用|喜欢|讨厌|习惯)([^,。;\n]{1,30})", user)
+        if m:
+            facts = [{"layer": "fact", "subject": "Leo", "statement": ("我" + m.group(1) + m.group(2)).strip(), "salience": 0.5}]
+    created = 0
+    for f in facts:
+        stmt = str(f.get("statement") or "").strip()[:300]
+        if not stmt:
+            continue
+        layer = f.get("layer") if f.get("layer") in {"fact", "pattern", "entity"} else "fact"
+        mid = db.insert_memory(stmt, memory_type="semantic", subject=f.get("subject"),
+                               confidence=0.7, salience=float(f.get("salience", 0.5)),
+                               layer=layer, origin="auto_turn", status="pending")
+        # 向量化(可降级),便于以后召回。
+        try:
+            from .store import remember
+            remember(stmt, ref_id=mid, layer=layer)
+        except Exception:
+            pass
+        created += 1
+    return created
+
+
+_CURATE_SYSTEM = """下面是若干条记忆,有些是近义重复。请把**确属同一事实的重复**分组合并。
+只输出 JSON:{"groups":[["id1","id2"]]}(每组是该合并的 id 列表,保留第一个、归档其余)。没有重复就 {"groups":[]}。"""
+
+
+def curate_duplicates(limit: int = 100) -> dict:
+    """夜间整理:把近义重复的 fact/pattern 记忆合并(归档重复、强化留存)。LLM 不可用则按规范化文本去重。"""
+    db.init_db()
+    with db.conn() as c:
+        rows = c.execute("SELECT id, statement FROM memories WHERE status='active' AND type='semantic' "
+                         "AND layer IN ('fact','pattern') ORDER BY updated_ts DESC LIMIT ?", (limit,)).fetchall()
+    if len(rows) < 2:
+        return {"ok": True, "merged": 0}
+    groups: list[list[str]] = []
+    try:
+        from ..models_router import chat
+        raw = chat("agent", [
+            {"role": "system", "content": _CURATE_SYSTEM},
+            {"role": "user", "content": json.dumps([{"id": r["id"], "statement": r["statement"]} for r in rows], ensure_ascii=False)[:4000]},
+        ], temperature=0.1)
+        obj = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+        groups = [g for g in obj.get("groups", []) if isinstance(g, list) and len(g) >= 2]
+    except Exception:
+        # 兜底:规范化文本完全相同才算重复。
+        seen: dict[str, list[str]] = {}
+        for r in rows:
+            key = "".join(str(r["statement"] or "").lower().split())
+            seen.setdefault(key, []).append(r["id"])
+        groups = [ids for ids in seen.values() if len(ids) >= 2]
+    merged = 0
+    for g in groups:
+        keep, dupes = g[0], g[1:]
+        for did in dupes:
+            if db.update_memory_status(did, "archived") if hasattr(db, "update_memory_status") else None:
+                pass
+            try:
+                with db.conn() as c:
+                    c.execute("UPDATE memories SET status='archived', updated_ts=? WHERE id=?", (db.now_ms(), did))
+            except Exception:
+                pass
+            merged += 1
+        try:
+            db.adjust_memory(keep, salience_delta=0.1)
+        except Exception:
+            pass
+    return {"ok": True, "merged": merged, "groups": len(groups)}

@@ -362,11 +362,58 @@ def _port_alive(port: int, timeout: float = 0.3) -> bool:
         return False
 
 
-def external_running() -> list[dict]:
-    """探测本机已常驻运行的 agent 网关（Hermes :8642 / OpenClaw :18789 …）。
+# 进程命令行里出现这些片段 → 认定是某个 agent CLI 在跑(用户自己在终端/IDE 开的)。
+# 收集成「外部运行中的 agent」,让工作区显示真实运行态,而不只是 Jarvis 自己 spawn 的。
+_PROC_MARKERS: list[tuple[str, str, str]] = [
+    # (匹配片段, agent name, 显示名)
+    ("homebrew/bin/claude", "claude", "Claude Code"),
+    ("claude-code/", "claude", "Claude Code"),
+    ("/codex ", "codex", "Codex CLI"),
+    ("codex exec", "codex", "Codex CLI"),
+    ("cursor-agent", "cursor", "Cursor CLI"),
+    ("/grok ", "grok", "Grok CLI"),
+    ("/gemini ", "gemini", "Gemini CLI"),
+    ("opencode run", "opencode", "opencode"),
+]
 
-    这些不是 cortex spawn 的会话，但用户视角它们就是"正在运行的 agent"——
-    编排页要把它们显示为运行中，运行计数才真实（解决"明明在用却显示 0 个运行"）。
+
+def _scan_agent_processes() -> list[dict]:
+    """ps 扫本机正在跑的 agent CLI 进程(用户自己开的也算)。失败/无 ps 时返回空。"""
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,etime=,command="], capture_output=True, text=True, timeout=3).stdout
+    except Exception:
+        return []
+    seen: dict[str, dict] = {}
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, etime, cmd = parts[0], parts[1], parts[2]
+        low = cmd.lower()
+        # 跳过桌面 App 外壳(Helper/Framework/Renderer)与本进程,只认命令行 agent。
+        if any(x in cmd for x in ("Helper", "Framework", "Renderer", ".app/Contents/MacOS")):
+            continue
+        for marker, name, display in _PROC_MARKERS:
+            if marker.lower() in low:
+                # 每种 agent 只记一条(取第一个),计数器累加。
+                if name in seen:
+                    seen[name]["count"] += 1
+                else:
+                    seen[name] = {
+                        "agent": name, "display": display, "kind": "process",
+                        "status": "running", "pid": int(pid) if pid.isdigit() else 0,
+                        "etime": etime, "count": 1,
+                    }
+                break
+    return list(seen.values())
+
+
+def external_running() -> list[dict]:
+    """本机用户视角"正在运行的 agent":常驻网关(Hermes/OpenClaw 端口)+ 在跑的 agent CLI 进程
+    (用户自己在终端/IDE 开的 claude/codex/cursor… 也算)。解决"明明在用却显示 0 个运行 / 看不到自己的会话"。
     """
     out: list[dict] = []
     for spec in _SPECS:
@@ -382,4 +429,9 @@ def external_running() -> list[dict]:
                 "status": "running",
                 "docs": spec.get("docs", ""),
             })
+    # 合并进程扫描(去掉已作为网关列出的同名 agent)。
+    gw_names = {o["agent"] for o in out}
+    for p in _scan_agent_processes():
+        if p["agent"] not in gw_names:
+            out.append(p)
     return out

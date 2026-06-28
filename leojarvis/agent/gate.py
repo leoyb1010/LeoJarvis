@@ -46,6 +46,7 @@ TOOL_BASE_RISK = {
     "github_radar": "auto",
     "restart_service": "confirm",
     "write_file": "confirm",
+    "edit_document": "confirm",
     "service_logs": "auto",
     "list_agents": "auto",
     "agent_log": "auto",

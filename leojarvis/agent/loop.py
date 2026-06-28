@@ -143,8 +143,41 @@ def _build_convo(messages: list[dict]) -> list[dict]:
         {"role": "system", "content": build_static_system_prompt()},
         {"role": "system", "content": build_memory_prompt(recalled, context=_personal_context())},
     ]
+    # B：注入相关「技能」(以前从类似任务总结的可复用步骤),像记忆 RAG。
+    try:
+        from .. import skills
+        retrieved = skills.retrieve(user_last, k=3)
+        if retrieved:
+            convo.append({"role": "system", "content": skills.skills_prompt(retrieved)})
+            for s in retrieved:
+                skills._bump_use(s["id"], success=True)
+    except Exception:
+        pass
     convo += [{"role": m["role"], "content": m["content"]} for m in messages]
     return convo
+
+
+def _post_run(messages: list[dict], steps: list[dict], reply: str) -> str:
+    """B：每轮跑完的单一收尾钩子(不进 per-step 循环):
+       1) 多步成功 → 自动提炼 SKILL;2) 失败 → 教师升级(可能替换 reply);3) 抽 ≤2 条用户事实进待确认记忆。
+    全部 try 包裹,任何失败都不影响主回复。返回(可能被教师修正过的)reply。"""
+    try:
+        from .. import skills
+        # 教师升级:失败时用强模型纠正 + 写技能(过 eval)。仅 run_agent 用(stream 已吐字,不回炉)。
+        if skills.looks_failed(steps, reply):
+            rescue = skills.teacher_rescue(messages, steps, reply)
+            if rescue and rescue.get("corrective_reply"):
+                reply = rescue["corrective_reply"]
+        else:
+            skills.maybe_distill(messages, steps, reply)
+    except Exception:
+        pass
+    try:
+        from ..memory import reflect
+        reflect.extract_turn_facts(messages, reply)
+    except Exception:
+        pass
+    return reply
 
 
 def _personal_context(limit: int = 8) -> list[str]:
@@ -176,14 +209,15 @@ def run_agent(messages: list[dict]) -> dict:
         action = _parse_action(raw)
 
         if "final" in action and "action" not in action:
-            return {"reply": action.get("final", ""), "steps": steps, "pending_actions": []}
+            reply = _post_run(messages, steps, action.get("final", ""))
+            return {"reply": reply, "steps": steps, "pending_actions": []}
 
         act = action.get("action") or {}
         tool = act.get("tool", "")
         args = act.get("args", {}) or {}
         if not tool:
-            return {"reply": action.get("final") or action.get("thought") or raw,
-                    "steps": steps, "pending_actions": []}
+            reply = _post_run(messages, steps, action.get("final") or action.get("thought") or raw)
+            return {"reply": reply, "steps": steps, "pending_actions": []}
 
         decision = gate.evaluate(tool, args)
 
@@ -218,11 +252,14 @@ def run_agent(messages: list[dict]) -> dict:
 
 
 def _feedback_msg(tool: str, obs: str) -> str:
-    """把工具结果截断后喂回模型，避免跨步 prompt 膨胀。"""
+    """把工具结果截断后喂回模型，避免跨步 prompt 膨胀。
+    工具结果是不可信外部内容(read_file 读到的攻击文件、run_shell 跑到的爬取脚本、
+    recall 出的被污染记忆)→ 用防注入护栏包裹(C1),避免 prompt injection。"""
     body = obs if len(obs) <= _OBS_FEEDBACK_LIMIT else (
         obs[:_OBS_FEEDBACK_LIMIT] + "\n…（结果较长已截断；如需完整内容请用更精确的命令/参数再查）"
     )
-    return f"[工具 {tool} 的结果]\n{body}"
+    from ..prompt_security import wrap_untrusted
+    return f"[工具 {tool} 的结果]\n" + wrap_untrusted(body, source=f"tool:{tool}")
 
 
 def run_agent_stream(messages: list[dict]) -> Iterator[dict]:

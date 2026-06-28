@@ -157,6 +157,14 @@ def run_reflection() -> dict:
     return result
 
 
+def run_memory_curate() -> dict:
+    """B：合并近义重复记忆(反思之后)。"""
+    from .memory.reflect import curate_duplicates
+    result = curate_duplicates()
+    print(f"[memory_curate] {result}")
+    return result
+
+
 def run_maintenance() -> dict:
     """定时维护：裁日志 + 清旧快照。在线程里跑，避免文件/DB 操作阻塞事件循环。"""
     from .maintenance import run_maintenance as _do
@@ -204,6 +212,8 @@ def setup_scheduler() -> AsyncIOScheduler:
     sched.add_job(run_system_guard, "interval", minutes=int(cfg.get("guard_minutes", 5)), id="guard", replace_existing=True)
     from datetime import datetime, timedelta
     sched.add_job(run_reflection, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=0, id="reflect", replace_existing=True)
+    # B：记忆整理(合并近义重复),反思之后跑。
+    sched.add_job(run_memory_curate, "cron", hour=int(cfg.get("reflect_hour", 23)), minute=30, id="memory_curate", replace_existing=True)
     sched.add_job(lambda: print("[briefing] ready"), "cron",
                   hour=int(cfg.get("briefing_hour", 8)),
                   minute=int(cfg.get("briefing_minute", 0)),
@@ -218,4 +228,52 @@ def setup_scheduler() -> AsyncIOScheduler:
     sched.add_job(run_heartbeat, "interval", seconds=60, id="heartbeat", replace_existing=True)
     sched.add_job(run_heartbeat, "date", id="heartbeat_boot",
                   run_date=datetime.now() + timedelta(seconds=8), replace_existing=True)
+    # P3：定时/事件触发的 agent 任务。每分钟检查到点的 interval + 匹配当前 HH:MM 的 cron。
+    sched.add_job(run_scheduled_tasks, "interval", minutes=1, id="scheduled_tasks", replace_existing=True)
+    # 问题1：日程提醒。每分钟挑到点的日程,推桌面/应内/iOS。
+    sched.add_job(run_schedule_reminders, "interval", minutes=1, id="schedule_reminders", replace_existing=True)
+    # A：主动助理 check-in 配置 → 对账成 cron scheduled_tasks(启动时同步一次)。
+    try:
+        from . import assistant
+        assistant.sync_checkins()
+    except Exception:
+        pass
     return sched
+
+
+async def run_scheduled_tasks() -> dict:
+    """P3：跑到点的 interval 任务 + 匹配当前分钟的 cron 任务(agent 执行经行动闸门)。
+    check-in 攒下的 push 载荷在异步侧 await 推送(不在工作线程里碰 event loop)。"""
+    from datetime import datetime
+    from . import event_bus
+    now = datetime.now()
+
+    def _work():
+        r1 = event_bus.run_due_scheduled()
+        r2 = event_bus.run_due_cron(now.hour, now.minute)
+        return {"interval": r1, "cron": r2}
+    result = await asyncio.to_thread(_work)
+    # 主动 check-in 的提醒推送(A):异步侧统一发。
+    try:
+        from .notify.hub import hub
+        for payload in event_bus.drain_pushes():
+            await hub.push_event(payload)
+    except Exception:
+        pass
+    return result
+
+
+async def run_schedule_reminders() -> dict:
+    """问题1:日程到点提醒。挑出该提醒的日程,广播到 /ws/notify(桌面+应内复用),
+    iOS 推送也走同一 push 通道。"""
+    from . import schedule as sch
+    payloads = await asyncio.to_thread(sch.due_reminders)
+    if not payloads:
+        return {"reminded": 0}
+    try:
+        from .notify.hub import hub
+        for p in payloads:
+            await hub.push_event(p)
+    except Exception:
+        pass
+    return {"reminded": len(payloads)}

@@ -8,7 +8,9 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-type Theme = "dark" | "light";
+type Theme = "dark" | "light" | "auto";
+// auto → 跟随系统;其余按指定。xterm 配色只分明暗两档。
+const isDark = (t: Theme) => t === "dark" || (t === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 const row = (g = 8): CSSProperties => ({ display: "flex", alignItems: "center", gap: g });
 
 export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: string; themeMode: Theme; sessionKey: number }) {
@@ -17,7 +19,7 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const dark = themeMode === "dark";
+    const dark = isDark(themeMode);
     const term = new XTerm({
       fontFamily: "'IBM Plex Mono','SFMono-Regular',monospace",
       fontSize: 12.5, lineHeight: 1.32, cursorBlink: true, scrollback: 5000,
@@ -65,7 +67,7 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent, sessionKey]);
 
-  const bg = themeMode === "dark" ? "#0f141b" : "#f6f8fa";
+  const bg = isDark(themeMode) ? "#0f141b" : "#f6f8fa";
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0, background: bg }}>
       <div ref={hostRef} style={{ height: "100%", padding: "8px 4px 8px 12px" }} />

@@ -62,6 +62,74 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(inbox_state, priority, created_ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_event ON tasks(event_id);
 
+-- P1 Email 腔理缓存：每封邮件的 AI 摘要/标签/actionable 判定，按 event_id 缓存避免重判。
+CREATE TABLE IF NOT EXISTS email_triage (
+  event_id TEXT PRIMARY KEY,
+  summary TEXT,
+  tags TEXT DEFAULT '[]',         -- ["紧急","财务",...]
+  actionable INTEGER DEFAULT 0,   -- 0/1
+  action TEXT,                    -- reply/review/...（actionable 时）
+  object TEXT,
+  due TEXT,
+  task_title TEXT,                -- actionable 时抽出的待办标题
+  reply_draft TEXT,              -- 可选回复草稿(只生成不自动发)
+  model_used TEXT,
+  created_ts INTEGER
+);
+
+-- P3 定时/事件触发的 agent 任务。trigger=interval(每 N 分)/cron(每天 HH:MM)/event(事件计数到阈值)。
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,           -- 给 agent 的指令
+  trigger TEXT NOT NULL,          -- interval / cron / event
+  interval_minutes INTEGER,       -- trigger=interval
+  cron_hour INTEGER, cron_minute INTEGER,  -- trigger=cron
+  trigger_event TEXT,             -- trigger=event 的事件名(如 email_actionable)
+  trigger_count INTEGER DEFAULT 1,-- 事件累计到几次才触发
+  trigger_counter INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'active',    -- active / paused
+  last_run INTEGER, next_run INTEGER,
+  last_result TEXT,
+  created_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sched_status ON scheduled_tasks(status, trigger);
+
+-- 日程(问题1):真正的日程管理,区别于记事——有开始时间、可设提醒、独立存储、可重复。
+CREATE TABLE IF NOT EXISTS schedule (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  note TEXT DEFAULT '',
+  start_ts INTEGER NOT NULL,        -- 日程发生时间(毫秒)
+  remind_ts INTEGER,                -- 提醒时间(毫秒);NULL=不提醒
+  repeat TEXT DEFAULT 'none',       -- none / daily / weekly / monthly
+  status TEXT DEFAULT 'pending',    -- pending / done
+  reminded INTEGER DEFAULT 0,       -- 提醒是否已发(去重;repeat 滚动后清零)
+  source TEXT DEFAULT 'manual',     -- manual / inbox / calendar
+  event_id TEXT,                    -- 来源事件(从收件箱/日历转入时)
+  created_ts INTEGER, updated_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_start ON schedule(status, start_ts);
+CREATE INDEX IF NOT EXISTS idx_schedule_remind ON schedule(reminded, remind_ts);
+
+-- B 技能库:agent 从成功的多步运行里自动提炼可复用 SKILL,关键词检索后注入(像记忆 RAG)。
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT DEFAULT 'general',
+  when_to_use TEXT NOT NULL, body TEXT NOT NULL, keywords TEXT DEFAULT '[]',
+  source TEXT DEFAULT 'distill',           -- distill | teacher | manual
+  use_count INTEGER DEFAULT 0, success_count INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'active', created_ts INTEGER, updated_ts INTEGER );
+CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status, updated_ts);
+
+-- D 版本化文档:每次 edit 把旧内容快照进 document_versions(仿 personal_note_revisions)。
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '',
+  kind TEXT DEFAULT 'doc', tags TEXT DEFAULT '[]', created_ts INTEGER, updated_ts INTEGER );
+CREATE TABLE IF NOT EXISTS document_versions (
+  id TEXT PRIMARY KEY, document_id TEXT NOT NULL, content TEXT NOT NULL,
+  reason TEXT DEFAULT 'edit', created_ts INTEGER );
+CREATE INDEX IF NOT EXISTS idx_docver_doc ON document_versions(document_id, created_ts);
+
 CREATE TABLE IF NOT EXISTS memories (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
@@ -524,6 +592,133 @@ def task_state_counts() -> dict[str, int]:
     with conn() as c:
         rows = c.execute("SELECT inbox_state, COUNT(*) AS n FROM tasks GROUP BY inbox_state").fetchall()
     return {str(r["inbox_state"]): int(r["n"]) for r in rows}
+
+
+# ---------- P1 Email 腔理缓存 ----------
+
+def get_email_triage(event_id: str) -> sqlite3.Row | None:
+    init_db()
+    with conn() as c:
+        return c.execute("SELECT * FROM email_triage WHERE event_id=?", (event_id,)).fetchone()
+
+
+def upsert_email_triage(*, event_id: str, summary: str = "", tags: list[str] | None = None,
+                        actionable: bool = False, action: str | None = None, object: str | None = None,
+                        due: str | None = None, task_title: str | None = None,
+                        reply_draft: str | None = None, model_used: str = "") -> None:
+    init_db()
+    with conn() as c:
+        c.execute(
+            """INSERT INTO email_triage(event_id,summary,tags,actionable,action,object,due,task_title,reply_draft,model_used,created_ts)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(event_id) DO UPDATE SET
+                 summary=excluded.summary, tags=excluded.tags, actionable=excluded.actionable,
+                 action=excluded.action, object=excluded.object, due=excluded.due,
+                 task_title=excluded.task_title, reply_draft=excluded.reply_draft,
+                 model_used=excluded.model_used, created_ts=excluded.created_ts""",
+            (event_id, summary, json.dumps(tags or [], ensure_ascii=False), 1 if actionable else 0,
+             action, object, due, task_title, reply_draft, model_used, now_ms()),
+        )
+
+
+# ---------- P3 定时/事件触发 agent 任务 ----------
+
+def create_scheduled_task(*, name: str, prompt: str, trigger: str, interval_minutes: int | None = None,
+                          cron_hour: int | None = None, cron_minute: int | None = None,
+                          trigger_event: str | None = None, trigger_count: int = 1) -> str:
+    if trigger not in {"interval", "cron", "event"}:
+        raise ValueError("trigger must be interval/cron/event")
+    init_db()
+    tid = uuid.uuid4().hex
+    nxt = None
+    if trigger == "interval" and interval_minutes:
+        nxt = now_ms() + int(interval_minutes) * 60_000
+    with conn() as c:
+        c.execute(
+            """INSERT INTO scheduled_tasks(id,name,prompt,trigger,interval_minutes,cron_hour,cron_minute,
+               trigger_event,trigger_count,trigger_counter,status,next_run,created_ts)
+               VALUES(?,?,?,?,?,?,?,?,?,0,'active',?,?)""",
+            (tid, name, prompt, trigger, interval_minutes, cron_hour, cron_minute,
+             trigger_event, max(1, int(trigger_count)), nxt, now_ms()),
+        )
+    return tid
+
+
+def list_scheduled_tasks(status: str | None = None) -> list[sqlite3.Row]:
+    init_db()
+    with conn() as c:
+        if status:
+            return c.execute("SELECT * FROM scheduled_tasks WHERE status=? ORDER BY created_ts DESC", (status,)).fetchall()
+        return c.execute("SELECT * FROM scheduled_tasks ORDER BY created_ts DESC").fetchall()
+
+
+def get_scheduled_task(task_id: str) -> sqlite3.Row | None:
+    init_db()
+    with conn() as c:
+        return c.execute("SELECT * FROM scheduled_tasks WHERE id=?", (task_id,)).fetchone()
+
+
+def set_scheduled_task_status(task_id: str, status: str) -> bool:
+    if status not in {"active", "paused", "deleted"}:
+        raise ValueError("bad status")
+    init_db()
+    with conn() as c:
+        if status == "deleted":
+            cur = c.execute("DELETE FROM scheduled_tasks WHERE id=?", (task_id,))
+        else:
+            cur = c.execute("UPDATE scheduled_tasks SET status=? WHERE id=?", (status, task_id))
+    return cur.rowcount > 0
+
+
+def update_scheduled_task(task_id: str, **fields) -> bool:
+    """更新定时任务字段(name/prompt/cron_hour/cron_minute/interval_minutes/status/trigger_event/trigger_count)。"""
+    allowed = {"name", "prompt", "cron_hour", "cron_minute", "interval_minutes",
+               "status", "trigger_event", "trigger_count", "next_run"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    if not sets:
+        return False
+    init_db()
+    cols = ", ".join(f"{k}=?" for k in sets)
+    with conn() as c:
+        cur = c.execute(f"UPDATE scheduled_tasks SET {cols} WHERE id=?", (*sets.values(), task_id))
+    return cur.rowcount > 0
+
+
+def mark_scheduled_run(task_id: str, result: str, *, next_run: int | None = None) -> None:
+    init_db()
+    with conn() as c:
+        c.execute("UPDATE scheduled_tasks SET last_run=?, next_run=?, last_result=?, trigger_counter=0 WHERE id=?",
+                  (now_ms(), next_run, (result or "")[:1000], task_id))
+
+
+def due_interval_tasks() -> list[sqlite3.Row]:
+    """到点的 interval/cron 任务(cron 的到点判断在调度器里做粗粒度)。"""
+    init_db()
+    now = now_ms()
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM scheduled_tasks WHERE status='active' AND trigger='interval' "
+            "AND next_run IS NOT NULL AND next_run<=?", (now,),
+        ).fetchall()
+
+
+def bump_event_counter(event_name: str) -> list[sqlite3.Row]:
+    """事件计数 +1;返回**刚好到阈值、应触发**的任务(并已重置计数)。"""
+    init_db()
+    fired: list[sqlite3.Row] = []
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM scheduled_tasks WHERE status='active' AND trigger='event' AND trigger_event=?",
+            (event_name,),
+        ).fetchall()
+        for r in rows:
+            cnt = int(r["trigger_counter"] or 0) + 1
+            if cnt >= int(r["trigger_count"] or 1):
+                c.execute("UPDATE scheduled_tasks SET trigger_counter=0 WHERE id=?", (r["id"],))
+                fired.append(r)
+            else:
+                c.execute("UPDATE scheduled_tasks SET trigger_counter=? WHERE id=?", (cnt, r["id"]))
+    return fired
 
 
 def upsert_device_heartbeat(summary: dict[str, Any]) -> dict[str, Any]:
