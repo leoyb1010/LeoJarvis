@@ -9,11 +9,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
 type Theme = "dark" | "light" | "auto";
-// auto → 跟随系统;其余按指定。xterm 配色只分明暗两档。
-const isDark = (t: Theme) => t === "dark" || (t === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 const row = (g = 8): CSSProperties => ({ display: "flex", alignItems: "center", gap: g });
+// 终端始终深底(和 --panel-3 恒深、<pre> 代码块一致)—— 深底读 ANSI 输出最稳,也消除两套终端色不一致。
+// 配色对齐 theme.css 深色档:#0f141b = --panel-3,cursor 用酒红 accent-2。
+const TERM_THEME = { background: "#0f141b", foreground: "#cdd6e2", cursor: "#d9536b", cursorAccent: "#0f141b", selectionBackground: "rgba(217,83,107,.32)", black: "#0f141b", brightBlack: "#5b6573" } as const;
+const TERM_BG = "#0f141b";
 
-export default function PtyTerminal({ agent, themeMode, sessionKey, initialInput, cwd = "~", visible = true }: { agent: string; themeMode: Theme; sessionKey: number; initialInput?: string; cwd?: string; visible?: boolean }) {
+// themeMode 仍接收(签名兼容),但终端恒深底,不随明暗切换 —— 故无"切主题卡住"问题。
+export default function PtyTerminal({ agent, sessionKey, initialInput, cwd = "~", visible = true }: { agent: string; themeMode?: Theme; sessionKey: number; initialInput?: string; cwd?: string; visible?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const fitRef = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "exited">("connecting");
@@ -21,14 +24,11 @@ export default function PtyTerminal({ agent, themeMode, sessionKey, initialInput
     const host = hostRef.current;
     if (!host) return;
     let booted = false;  // 首次收到输出后,把 initialInput 作为任务发进去(只发一次)
-    const dark = isDark(themeMode);
     const term = new XTerm({
       fontFamily: "'IBM Plex Mono','SFMono-Regular',monospace",
       fontSize: 12.5, lineHeight: 1.32, cursorBlink: true, scrollback: 5000,
       allowProposedApi: true,
-      theme: dark
-        ? { background: "#0f141b", foreground: "#cdd6e2", cursor: "#d9536b", cursorAccent: "#0f141b", selectionBackground: "rgba(217,83,107,.32)", black: "#0f141b", brightBlack: "#5b6573" }
-        : { background: "#f6f8fa", foreground: "#1c2530", cursor: "#bc1d2a", cursorAccent: "#f6f8fa", selectionBackground: "rgba(188,29,42,.18)", black: "#1c2530", brightBlack: "#8a93a0" },
+      theme: { ...TERM_THEME },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -78,9 +78,8 @@ export default function PtyTerminal({ agent, themeMode, sessionKey, initialInput
   // 标签切换:面板从 display:none 重新显示时,xterm 量到的尺寸是 0,需要重新 fit。
   useEffect(() => { if (visible) setTimeout(() => fitRef.current?.(), 30); }, [visible]);
 
-  const bg = isDark(themeMode) ? "#0f141b" : "#f6f8fa";
   return (
-    <div style={{ position: "relative", height: "100%", minHeight: 0, background: bg }}>
+    <div style={{ position: "relative", height: "100%", minHeight: 0, background: TERM_BG }}>
       <div ref={hostRef} style={{ height: "100%", padding: "8px 4px 8px 12px" }} />
       <span style={{ position: "absolute", top: 9, right: 13, ...row(5), font: "600 9px 'IBM Plex Mono',monospace", color: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", pointerEvents: "none" }}>
         <b style={{ width: 6, height: 6, borderRadius: "50%", background: status === "live" ? "var(--good)" : status === "connecting" ? "var(--warn)" : "var(--text-mute)", display: "inline-block", boxShadow: status === "live" ? "0 0 6px var(--good)" : "none", animation: status === "live" ? "cxBreathe 2.5s ease infinite" : "none" }} />

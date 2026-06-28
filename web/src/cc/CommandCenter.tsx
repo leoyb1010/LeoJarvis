@@ -31,10 +31,11 @@ import { briefingMainFeed, pickBriefingLeads } from "../briefingOrder";
 import { useWhisperRecorder } from "../useWhisperRecorder";
 
 // Cortex · 指挥台 — 深/浅双主题 + 酒红强调色。颜色一律走 theme.css 的 CSS 变量。
+// 每个 agent 一个区分色;统一用主题语义变量(深浅各自适配),不再写死深色 hex。
 const TAG: Record<string, [string, string]> = {
-  claude: ["CC", "#d9536b"], codex: ["CX", "#36d39a"], cursor: ["CU", "#4da3ff"],
-  grok: ["GK", "#b69cff"], gemini: ["GM", "#ffb454"], opencode: ["OC", "#9aa6b2"],
-  hermes: ["HM", "#ff8f5a"], openclaw: ["OW", "#5ad1c0"],
+  claude: ["CC", "var(--accent-2)"], codex: ["CX", "var(--good)"], cursor: ["CU", "var(--info)"],
+  grok: ["GK", "var(--cat-purple)"], gemini: ["GM", "var(--warn)"], opencode: ["OC", "var(--text-dim)"],
+  hermes: ["HM", "var(--cat-orange)"], openclaw: ["OW", "var(--cat-teal)"],
 };
 const A = (f: string) => `/cc/${f}`;
 
@@ -331,7 +332,7 @@ function NotesOverlay({ openId, onClose, goFull }: { openId?: string; onClose: (
   async function del() { if (!sel || !window.confirm("删除这条记事？")) return; try { await deleteNote(sel); newNote(); load(); } catch { /* ignore */ } }
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: Z.drawer, background: "rgba(4,6,9,.5)", backdropFilter: "blur(2px)", display: "flex", justifyContent: "flex-end", animation: "cxFade .18s ease both" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,94vw)", height: "100%", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "-24px 0 60px rgba(0,0,0,.4)", display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", animation: "cxSlideIn .26s cubic-bezier(.22,.61,.36,1) both" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,94vw)", height: "100%", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow)", display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", animation: "cxSlideIn .26s cubic-bezier(.22,.61,.36,1) both" }}>
         <div style={{ borderRight: "1px solid var(--border-soft)", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0 }}>
           <div style={{ ...row(8), padding: "14px 14px 10px" }}><span style={lbl}>记事</span><span style={flex1} /><button onClick={newNote} title="新建" style={{ border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", width: 24, height: 24, borderRadius: 7, font: "700 15px 'Space Grotesk'", lineHeight: 0 }}>＋</button></div>
           <div style={{ overflowY: "auto", minHeight: 0, padding: "0 10px 12px", display: "grid", gap: 6, alignContent: "start" }}>
@@ -378,23 +379,25 @@ function AppIcon({ a, size = 46 }: { a: NotifApp; size?: number }) {
 //   在线 = 旋转+脉冲(rose，活着)；离线 = 停转、去饱和变灰(掉线一眼可辨)。
 // 不再「为酷而恒转」。reduced-motion 由 theme.css 统一收敛为静态。
 function CoreOrb({ online, onClick }: { online: boolean; onClick?: () => void }) {
-  const ringTint = online ? "194,59,84" : "107,116,128"; // rose vs muted gray
+  // 主题化:在线用 accent、离线用 text-mute;透明梯度用 color-mix(深浅各自适配,不再写死深色 rgb)。
+  const tint = online ? "var(--accent)" : "var(--text-mute)";
+  const mix = (pct: number) => `color-mix(in srgb, ${tint} ${pct}%, transparent)`;
   const spin = (dur: string, dir = "") => (online ? `cxSpin${dir} ${dur} linear infinite` : "none");
   return (
     <button onClick={onClick} title="点击和 Jarvis 对话" className="cx-orb" style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, animation: "cxRise .6s ease both", padding: 0, justifySelf: "center", filter: online ? "none" : "saturate(.25)", opacity: online ? 1 : 0.82, transition: "filter .5s, opacity .5s" }}>
       <div style={{ position: "relative", width: 124, height: 124, display: "grid", placeItems: "center", flex: "none" }}>
-        <div style={{ position: "absolute", width: 124, height: 124, borderRadius: "50%", border: `1px solid rgba(${ringTint},.18)`, animation: spin("26s") }} />
+        <div style={{ position: "absolute", width: 124, height: 124, borderRadius: "50%", border: `1px solid ${mix(18)}`, animation: spin("26s") }} />
         <div style={{ position: "absolute", width: 124, height: 124, animation: spin("26s") }}><span style={{ position: "absolute", top: -3, left: "50%", width: 5, height: 5, borderRadius: "50%", background: online ? "var(--accent)" : "var(--text-mute)", transform: "translateX(-50%)", boxShadow: online ? "0 0 8px var(--accent)" : "none" }} /></div>
-        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `1px dashed rgba(${ringTint},.28)`, animation: spin("18s", "R") }} />
-        {online && <div style={{ position: "absolute", width: 80, height: 80, borderRadius: "50%", border: "1px solid rgba(194,59,84,.4)", animation: "cxPing 3.4s ease-out infinite" }} />}
-        <div className="cx-orb-core" style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%,#1d232e,#0f141b)", boxShadow: "inset 0 0 14px rgba(0,0,0,.6),0 0 0 1px var(--border)", animation: online ? "cxCorePulse 4.5s ease infinite" : "none", overflow: "hidden" }}>
+        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `1px dashed ${mix(28)}`, animation: spin("18s", "R") }} />
+        {online && <div style={{ position: "absolute", width: 80, height: 80, borderRadius: "50%", border: `1px solid ${mix(40)}`, animation: "cxPing 3.4s ease-out infinite" }} />}
+        <div className="cx-orb-core" style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: "radial-gradient(circle at 38% 32%, var(--panel-2), var(--panel-3))", boxShadow: "inset 0 0 14px rgba(0,0,0,.35),0 0 0 1px var(--border)", animation: online ? "cxCorePulse 4.5s ease infinite" : "none", overflow: "hidden" }}>
           <img src={A("brand-mark.png")} alt="" style={{ width: 64, height: 64, objectFit: "cover", opacity: .92 }} />
-          <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 50% 120%,rgba(${ringTint},.4),transparent 60%)` }} />
+          <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 50% 120%, ${mix(40)}, transparent 60%)` }} />
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, flex: "none" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 2.5, height: 13 }}>
-          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 2.5, height: online ? "100%" : "30%", background: online ? "linear-gradient(#d9536b,var(--accent))" : "var(--text-mute)", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: online ? `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` : "none" }} />)}
+          {Array.from({ length: 9 }).map((_, i) => <i key={i} style={{ width: 2.5, height: online ? "100%" : "30%", background: online ? "linear-gradient(var(--accent-2),var(--accent))" : "var(--text-mute)", borderRadius: 2, display: "block", transformOrigin: "bottom", animation: online ? `cxBar ${(0.7 + (i % 4) * 0.22).toFixed(2)}s ease-in-out infinite ${(i * 0.09).toFixed(2)}s` : "none" }} />)}
         </div>
         <span style={{ ...row(4), font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: online ? "var(--accent)" : "var(--text-mute)", whiteSpace: "nowrap" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: online ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: online ? "0 0 5px var(--good)" : "none" }} />{online ? "点我 和 Jarvis 对话" : "Mac 离线"}</span>
       </div>
@@ -552,7 +555,7 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: Z.modal, background: "rgba(0,0,0,.34)", display: "grid", placeItems: "start center", paddingTop: 84, animation: "cxFade .16s ease both" }}>
       <div onClick={(e) => e.stopPropagation()} className="cx-pop-in" style={{ width: mode === "assistant" ? "min(720px,94vw)" : "min(580px,92vw)", height: "min(68vh,600px)", ...panel, padding: 0, display: "grid", gridTemplateRows: mode === "assistant" ? "auto minmax(0,1fr)" : "auto minmax(0,1fr) auto", minHeight: 0, overflow: "hidden", position: "relative", background: "linear-gradient(180deg,var(--panel),var(--panel-2))", boxShadow: "var(--shadow)" }}>
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}><span style={{ position: "absolute", top: 0, left: 0, width: "32%", height: "100%", background: "linear-gradient(90deg,transparent,rgba(194,59,84,.06),transparent)", animation: "cxSheen 7s ease-in-out infinite" }} /></div>
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}><span style={{ position: "absolute", top: 0, left: 0, width: "32%", height: "100%", background: "linear-gradient(90deg,transparent,var(--accent-soft),transparent)", animation: "cxSheen 7s ease-in-out infinite" }} /></div>
       <div style={{ ...row(9), padding: "12px 14px 11px", borderBottom: "1px solid var(--border-soft)", position: "relative" }}>
         <img src={A("brand-mark.png")} alt="" style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover", flex: "none" }} />
         <div style={{ flex: "none", display: "flex", gap: 4, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 3 }}>
@@ -570,7 +573,7 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
           if (tn.kind === "steps") return <div key={i} style={{ alignSelf: "flex-start", display: "grid", gap: 5, width: "94%" }}>{tn.steps.map((st, j) => { const tone = stepTone(st.status); return <div key={j} style={{ ...row(8), background: "var(--panel)", border: "1px solid var(--border)", borderLeft: `3px solid ${tone.bar}`, borderRadius: 8, padding: "6px 9px" }}><code style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: tone.bar }}>{st.tool}</code><span style={flex1} /><span style={mono(9)}>{tone.label}</span></div>; })}</div>;
           if (tn.kind === "assistant") return <div key={i} style={{ alignSelf: "flex-start", maxWidth: "92%", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text-dim)", font: "400 12.5px/1.6 'Space Grotesk',sans-serif", padding: "9px 12px", borderRadius: 12, borderBottomLeftRadius: 4, whiteSpace: "pre-wrap" }}>{tn.text}</div>;
           if (tn.kind === "system") return <div key={i} style={{ alignSelf: "center", ...mono(10, "var(--bad)") }}>{tn.text}</div>;
-          return <div key={i} style={{ alignSelf: "flex-start", display: "grid", gap: 5, maxWidth: "94%" }}>{tn.actions.map((act) => <div key={act.id} style={{ ...row(8), background: "rgba(255,180,84,.08)", border: "1px solid rgba(255,180,84,.3)", borderRadius: 10, padding: "8px 11px" }}><span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: "var(--warn)", whiteSpace: "nowrap" }}>待确认</span><code style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{act.reason || act.tool || act.id}</code><button onClick={() => approve(act.id)} disabled={approving === act.id} style={{ border: 0, cursor: "pointer", background: "var(--warn)", color: "#1a0f08", font: "600 10px 'Space Grotesk'", padding: "4px 10px", borderRadius: 6, whiteSpace: "nowrap", opacity: approving === act.id ? 0.6 : 1 }}>{approving === act.id ? "执行中" : "确认"}</button></div>)}</div>;
+          return <div key={i} style={{ alignSelf: "flex-start", display: "grid", gap: 5, maxWidth: "94%" }}>{tn.actions.map((act) => <div key={act.id} style={{ ...row(8), background: "var(--warn-soft)", border: "1px solid var(--warn-soft)", borderRadius: 10, padding: "8px 11px" }}><span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", color: "var(--warn)", whiteSpace: "nowrap" }}>待确认</span><code style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{act.reason || act.tool || act.id}</code><button onClick={() => approve(act.id)} disabled={approving === act.id} style={{ border: 0, cursor: "pointer", background: "var(--warn)", color: "#fff", font: "600 10px 'Space Grotesk'", padding: "4px 10px", borderRadius: 6, whiteSpace: "nowrap", opacity: approving === act.id ? 0.6 : 1 }}>{approving === act.id ? "执行中" : "确认"}</button></div>)}</div>;
         })}
         {single && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>{tips.map((q) => <button key={q} onClick={() => send(q)} className="cx-chip" style={{ border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text-dim)", cursor: "pointer", borderRadius: 999, padding: "5px 10px", font: "500 10.5px 'Space Grotesk'" }}>{q}</button>)}</div>}
         {busy && <div style={{ alignSelf: "flex-start", ...mono(10, "var(--text-mute)") }}>中枢思考中…</div>}
@@ -592,19 +595,19 @@ function synthBrief(opts: { news: BriefItem[]; services: Service[]; svcTotal: nu
   const lines: Omit<BriefLine, "idx">[] = [];
   // ① 第一条永远是系统脉搏（这是「整个系统的简报」，不是新闻简报）。
   const offline = opts.services.filter((s) => s.health === "offline");
-  if (offline.length) lines.push({ topic: "服务告警", detail: `${offline.map((s) => s.display || s.name).slice(0, 2).join("、")} 掉线，重启预案就绪，待你确认。`, tone: "#ff5d5d" });
-  else if (opts.ssd != null && opts.ssd >= 85) lines.push({ topic: "磁盘吃紧", detail: `SSD 已用 ${opts.ssd}%，建议清理热点目录释放空间。`, tone: "#ffb454" });
-  else if (opts.cpu != null && opts.cpu >= 85) lines.push({ topic: "CPU 高负载", detail: `当前负载 ${opts.cpu}%，留意占用最高的进程。`, tone: "#ffb454" });
+  if (offline.length) lines.push({ topic: "服务告警", detail: `${offline.map((s) => s.display || s.name).slice(0, 2).join("、")} 掉线，重启预案就绪，待你确认。`, tone: "var(--bad)" });
+  else if (opts.ssd != null && opts.ssd >= 85) lines.push({ topic: "磁盘吃紧", detail: `SSD 已用 ${opts.ssd}%，建议清理热点目录释放空间。`, tone: "var(--warn)" });
+  else if (opts.cpu != null && opts.cpu >= 85) lines.push({ topic: "CPU 高负载", detail: `当前负载 ${opts.cpu}%，留意占用最高的进程。`, tone: "var(--warn)" });
   else lines.push({ topic: "系统平稳", detail: `${opts.svcOnline}/${opts.svcTotal} 服务在线，健康分 ${opts.health ?? "—"}，磁盘 ${opts.ssd ?? "—"}%，无告警。`, tone: "var(--good)" });
   // ② 智能体 / 未读 —— 系统侧动态
   if (opts.running > 0) lines.push({ topic: "智能体在跑", detail: `${opts.running} 个会话运行中，切换页面不影响后台执行。`, tone: "var(--accent)" });
-  if (opts.unread > 0) lines.push({ topic: "未读消息", detail: `共 ${opts.unread} 条未读，可在右侧应用区直接打开处理。`, tone: "#ffb454" });
+  if (opts.unread > 0) lines.push({ topic: "未读消息", detail: `共 ${opts.unread} 条未读，可在右侧应用区直接打开处理。`, tone: "var(--warn)" });
   // ③ 顶级情报，把简报填到 4 条
   const top = pickBriefingLeads(opts.news, 4);
   for (const it of top) {
     if (lines.length >= 4) break;
     const title = String(it.title || "");
-    lines.push({ topic: (title.split(/[，。：、!?！？\s]/)[0] || title).slice(0, 16), detail: String(it.take || (it as { why_important?: string }).why_important || title).slice(0, 80), tone: it.priority === "高优先" ? "#ff5d5d" : "var(--accent)", id: it.event_id });
+    lines.push({ topic: (title.split(/[，。：、!?！？\s]/)[0] || title).slice(0, 16), detail: String(it.take || (it as { why_important?: string }).why_important || title).slice(0, 80), tone: it.priority === "高优先" ? "var(--bad)" : "var(--accent)", id: it.event_id });
   }
   return lines.slice(0, 4).map((l, i) => ({ idx: String(i + 1).padStart(2, "0"), ...l }));
 }
@@ -893,7 +896,7 @@ function IntelFeedDrawer({ items, total, pstyle, catColor, onOpenItem, goIntel, 
       title={<span style={{ ...row(6) }}>实时情报 <span style={{ ...row(4), font: "600 9px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 3s ease infinite" }} />直播 {total}</span></span>}>
         <div style={{ overflowY: "auto", minHeight: 0, padding: "11px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
           {feed.length === 0 && <div style={{ ...mono(11), padding: "16px 0", textAlign: "center" }}>正在接入情报流…</div>}
-          {feed.map((it, i) => { const [pf, pb] = pstyle(it.priority); const cat = (it as { category?: string }).category; const ac = (cat && catColor[cat]) || (it.priority === "高优先" ? "#ff5d5d" : "var(--accent)"); return (
+          {feed.map((it, i) => { const [pf, pb] = pstyle(it.priority); const cat = (it as { category?: string }).category; const ac = (cat && catColor[cat]) || (it.priority === "高优先" ? "var(--bad)" : "var(--accent)"); return (
             <button key={it.event_id || i} onClick={() => { if (it.event_id) onOpenItem(it.event_id); }} className="cx-feed cx-lift" style={{ flexShrink: 0, textAlign: "left", width: "100%", border: "1px solid var(--border-soft)", background: "var(--panel-2)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4, padding: "10px 13px 10px 15px", borderRadius: 12, position: "relative", overflow: "hidden" }}>
               <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: ac }} />
               <div style={{ ...row(7), flexWrap: "wrap" }}>
@@ -978,9 +981,8 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
   const briefLines = synthBrief({ news, services, svcTotal: services.length, svcOnline, health, ssd: ssdPct, ram: ramPct, cpu: cpuPct, unread: totalUnread, running: runningNow, sigCount: signalCount });
 
   // 情报抽屉用：优先级配色 + 分类配色（首页内联情报面板已收进抽屉）。
-  const PRI: Record<string, [string, string]> = { 高优先: ["#fff", "#ff5d5d"], 中优先: ["#fff", "var(--accent)"], 简报: ["#fff", "var(--accent)"], 观察: ["var(--text-dim)", "var(--panel-2)"] };
   const pstyle = (p?: string): [string, string] => PRI[p || "观察"] || PRI["观察"];
-  const catColor: Record<string, string> = { AI科技: "#4da3ff", 财经: "#ffb454", 军事: "#ff5d5d", 科技: "#36d39a", 中文科技: "#b69cff", 开发: "#5ad1c0", 综合资讯: "#9aa4b2", X社媒: "#d9536b" };
+  const catColor: Record<string, string> = { AI科技: "var(--info)", 财经: "var(--warn)", 军事: "var(--bad)", 科技: "var(--good)", 中文科技: "var(--cat-purple)", 开发: "var(--cat-teal)", 综合资讯: "var(--text-dim)", X社媒: "var(--accent-2)" };
 
   return (
     <div className="cx-page" style={{ position: "relative", height: "100%", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 18, padding: "16px 20px", minHeight: 0 }}>
@@ -996,7 +998,7 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
             <span style={{ ...row(5), font: "500 9px 'IBM Plex Mono',monospace", color: "var(--good)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 2.6s ease infinite" }} />在线</span>
             <span style={{ display: "flex", gap: 14, font: "500 9px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>
               <span>信号 <b style={{ color: "var(--text-dim)" }}>{signalCount}</b></span>
-              <span>未读 <b style={{ color: totalUnread > 0 ? "#ff8a8a" : "var(--text-dim)" }}>{totalUnread}</b></span>
+              <span>未读 <b style={{ color: totalUnread > 0 ? "var(--bad)" : "var(--text-dim)" }}>{totalUnread}</b></span>
               <span>服务 <b style={{ color: "var(--text-dim)" }}>{svcOnline}</b></span>
             </span>
           </div>
@@ -1012,7 +1014,7 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
             ))}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 5, alignItems: "center" }}>
-            <button onClick={goIntel} className="cx-chip" style={{ border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "6px 13px", borderRadius: 8, boxShadow: "0 6px 18px rgba(194,59,84,.28)" }}>读完整简报 →</button>
+            <button onClick={goIntel} className="cx-chip" style={{ border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "6px 13px", borderRadius: 8, boxShadow: "0 6px 18px var(--accent-soft)" }}>读完整简报 →</button>
             <button onClick={() => goNotes()} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12px 'Space Grotesk'", padding: "7px 14px", borderRadius: 8 }}>＋ 记一笔</button>
             <span style={{ width: 1, height: 18, background: "var(--border)", margin: "0 1px" }} />
             {/* 快速入口:从右下角收进 hero CTA 行,接在记一笔后面。chip 紧凑、超出换行。 */}
@@ -1060,7 +1062,7 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginTop: 1 }}>
             <div style={{ position: "relative", width: 34, height: 34, flex: "none" }}>
-              <svg width="34" height="34" viewBox="0 0 34 34" style={{ transform: "rotate(-90deg)" }}><circle cx="17" cy="17" r="14" fill="none" stroke="var(--border)" strokeWidth="3.5" /><circle cx="17" cy="17" r="14" fill="none" stroke="var(--accent)" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="87.96" strokeDashoffset={health != null ? +(87.96 * (1 - health / 100)).toFixed(1) : 87.96} style={{ filter: "drop-shadow(0 0 4px rgba(194,59,84,.6))", transition: "stroke-dashoffset .6s" }} /></svg>
+              <svg width="34" height="34" viewBox="0 0 34 34" style={{ transform: "rotate(-90deg)" }}><circle cx="17" cy="17" r="14" fill="none" stroke="var(--border)" strokeWidth="3.5" /><circle cx="17" cy="17" r="14" fill="none" stroke="var(--accent)" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="87.96" strokeDashoffset={health != null ? +(87.96 * (1 - health / 100)).toFixed(1) : 87.96} style={{ filter: "drop-shadow(0 0 4px var(--accent-line))", transition: "stroke-dashoffset .6s" }} /></svg>
               <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", font: "700 11px 'Space Grotesk'", color: "var(--text)" }}>{health ?? "—"}</div>
             </div>
             <div style={{ display: "grid", gap: 3, textAlign: "right" }}>
@@ -1167,7 +1169,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
 
   const installed = agents.filter((a) => a.installed);
   const runningCount = sessions.filter((s) => s.status === "running").length + external.length;
-  const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "#9aa6b2"];
+  const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "var(--text-dim)"];
   const cur = sessions.find((s) => s.id === active) || null;
 
   async function runWith(agentName: string, p: string) {
@@ -1859,7 +1861,7 @@ function AgentWorkspace({ goAgents, themeMode }: { goAgents: () => void; themeMo
   const [launchAgent, setLaunchAgent] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const keyRef = useRef(1);
-  const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "#9aa6b2"];
+  const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "var(--text-dim)"];
 
   useEffect(() => {
     let live = true;
@@ -2125,7 +2127,7 @@ function Intel() {
       <div style={{ ...panel, padding: "14px 16px", ...row(18), flexWrap: "wrap" }}>
         <div style={{ flex: "none", display: "flex", alignItems: "baseline", gap: 8 }}><b style={{ font: "700 26px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{total}</b><span style={mono(11)}>今日信号</span></div>
         <div style={{ flex: "none", display: "flex", gap: 8, font: "600 10.5px 'IBM Plex Mono',monospace" }}>
-          <span style={{ ...row(5), background: "rgba(216,58,58,.14)", color: "var(--bad)", borderRadius: 7, padding: "5px 9px" }}>高优先 {nHigh}</span>
+          <span style={{ ...row(5), background: "var(--bad-soft)", color: "var(--bad)", borderRadius: 7, padding: "5px 9px" }}>高优先 {nHigh}</span>
           <span style={{ ...row(5), background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 7, padding: "5px 9px" }}>中优先 {nMid}</span>
           <span style={{ ...row(5), background: "var(--panel-2)", color: "var(--text-dim)", borderRadius: 7, padding: "5px 9px" }}>观察 {nWatch}</span>
         </div>
@@ -2720,7 +2722,7 @@ function Settings({ theme, setTheme, scan, toggleScan }: { theme: Theme; setThem
             {[["首选 · 中枢/判断/翻译", "deepseek-v4-flash", "已生效"], ["备选 · 自动回退", "deepseek-v4-pro", "待命"]].map(([role, model, st]) => (
               <div key={model} style={{ ...card, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
                 <div><div style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{role}</div><div style={{ font: "500 12px 'IBM Plex Mono',monospace", color: "var(--accent)", marginTop: 3 }}>{model}</div><div style={{ ...mono(9.5), marginTop: 2 }}>https://api.deepseek.com</div></div>
-                <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: st === "已生效" ? "var(--good)" : "var(--text-dim)", background: st === "已生效" ? "rgba(54,211,154,.12)" : "var(--panel)", borderRadius: 999, padding: "5px 10px" }}>{st}</span>
+                <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: st === "已生效" ? "var(--good)" : "var(--text-dim)", background: st === "已生效" ? "var(--good-soft)" : "var(--panel)", borderRadius: 999, padding: "5px 10px" }}>{st}</span>
               </div>
             ))}
             <div style={{ ...mono(10.5), lineHeight: 1.7 }}>嵌入：本机 hash 向量（已移除 ollama 依赖）。密钥存 config/models.toml，不进 Git。</div>

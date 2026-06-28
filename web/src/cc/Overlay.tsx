@@ -47,7 +47,7 @@ export function Drawer({ open, onClose, title, eyebrow, children, footer, width,
     <div className="cx-ov-backdrop" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: z, background: isSheet ? "rgba(4,6,9,.35)" : "rgba(4,6,9,.5)", backdropFilter: "blur(3px)", display: "flex", justifyContent: "flex-end" }}>
       <div className="cx-ov-drawer" onClick={(e) => e.stopPropagation()}
-        style={{ width: `min(${w}px, ${isSheet ? 88 : 94}vw)`, height: "100%", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "-24px 0 60px rgba(0,0,0,.45)", display: "grid", gridTemplateRows: footer ? "auto minmax(0,1fr) auto" : "auto minmax(0,1fr)", minHeight: 0 }}>
+        style={{ width: `min(${w}px, ${isSheet ? 88 : 94}vw)`, height: "100%", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow)", display: "grid", gridTemplateRows: footer ? "auto minmax(0,1fr) auto" : "auto minmax(0,1fr)", minHeight: 0 }}>
         {title !== undefined ? titleBar(title, onClose, eyebrow) : null}
         <div style={{ overflowY: "auto", minHeight: 0 }}>{children}</div>
         {footer ? <div style={{ borderTop: "1px solid var(--border-soft)", padding: "10px 16px", flex: "none" }}>{footer}</div> : null}
