@@ -1,4 +1,4 @@
-/* Cortex · 指挥台 — 主题系统：深/浅双模式 + 酒红强调色（CSS 变量驱动）。
+/* LeoJarvis 指挥台: 主题系统，深/浅双模式 + 酒红强调色（CSS 变量驱动）。
    组件里一律用 var(--xxx)，不再写死颜色；切换 data-theme 即整体换肤。 */
 
 :root, [data-theme="dark"] {
@@ -187,3 +187,121 @@ input, button, textarea { font-family: inherit; }
 }
 .cx-navtip:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
 @media (prefers-reduced-motion: reduce) { .cx-navtip::after { transition: none; } }
+
+/* 小屏 shell：从固定左侧栏切到底部导航，并把桌面多列页面压成单列。
+   CommandCenter 里大量使用 inline style，移动端必须在这里集中兜底覆盖。 */
+@media (max-width: 720px) {
+  html, body, #root { height: 100dvh; }
+
+  /* nav 行用 auto:让底栏按内容 + 刘海/灵动岛 safe-area 自然撑开,
+     不死锁 58px(真机上 safe-area-inset-bottom≈34px 会把固定行高吃穿、切掉点击区)。
+     main 行 minmax(0,1fr) 吃掉剩余空间,100dvh 仍约束总高。 */
+  .cx-shell {
+    height: 100dvh !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+  }
+
+  .cx-shell-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .cx-shell-nav {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-around !important;
+    gap: 2px !important;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom)) !important;
+    border-right: 0 !important;
+    border-top: 1px solid var(--border-soft) !important;
+    overflow: hidden !important;
+  }
+
+  /* 底栏:logo 和 flex:1 的间隔条都隐藏(横排里间隔条会变弹簧撑乱布局);
+     9 个按钮(6 tab + 3 工具)等分铺满视口宽,免横向滚动。 */
+  .cx-shell-nav > img,
+  .cx-shell-nav > span {
+    display: none !important;
+  }
+
+  .cx-shell-nav .cx-navtip {
+    width: auto !important;
+    height: 44px !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    border-radius: 11px !important;
+  }
+
+  /* tab 激活指示竖条原定位在按钮左外侧(桌面竖排),横排底栏里要藏掉 */
+  .cx-shell-nav .cx-navtip > span:first-child {
+    display: none !important;
+  }
+
+  .cx-navtip::after {
+    display: none !important;
+  }
+
+  .cx-shell-header {
+    min-width: 0 !important;
+    padding: 0 12px !important;
+    gap: 8px !important;
+  }
+
+  .cx-shell-header > div:first-child {
+    min-width: 0 !important;
+  }
+
+  .cx-shell-vitals {
+    display: none !important;
+  }
+
+  .cx-page {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 12px !important;
+    gap: 12px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    align-content: start !important;
+  }
+
+  .cx-page,
+  .cx-page * {
+    min-width: 0;
+  }
+
+  .cx-page[style*="grid-template-columns"],
+  .cx-page div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* 但「内容 + 尾随窄徽标」这种 1fr auto 行(如设置页模型路由卡:模型名 + 状态徽标)
+     在窄屏也放得下,左列会自行收缩,徽标该留在右侧而非掉到下一行。精确豁免。 */
+  .cx-page div[style*="1fr auto"] {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .cx-page div[style*="max-height"] {
+    max-height: none !important;
+  }
+
+  .cx-page button,
+  .cx-page input,
+  .cx-page select,
+  .cx-page textarea,
+  .cx-page pre {
+    max-width: 100%;
+  }
+
+  /* 笔记编辑抽屉复用了 .cx-page(为拿内部防溢出兜底),但它是右侧滑入的覆盖层、
+     自管 padding:0 + 分区,不该吃页面级的 padding/gap。小屏下让它满宽并归零内边距。 */
+  .cx-page[style*="padding: 0"] {
+    width: 100% !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+}

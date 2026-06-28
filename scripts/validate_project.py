@@ -80,9 +80,11 @@ ENV_VAR_PATTERNS = [
 
 
 def find_files(root):
-    """Walk directory, skip hidden dirs and common vendor dirs."""
+    """Walk directory, skip generated, runtime, and common vendor dirs."""
     skip = {".git", "node_modules", ".next", "__pycache__", "target", ".dart_tool",
-            "build", "dist", ".venv", "venv", "vendor", ".turbo", "scripts"}
+            "build", "dist", ".venv", "venv", "vendor", ".turbo", "scripts",
+            "data", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".vite",
+            ".build", "DerivedData"}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in skip]
         for f in filenames:

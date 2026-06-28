@@ -115,6 +115,10 @@ if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
     def _serve_index() -> FileResponse:
         return _index_response()
 
+    @app.head("/")
+    def _serve_index_head() -> FileResponse:
+        return _index_response()
+
     # 后端路由前缀：命中但未被上面的 API 路由匹配 = 真正的 404，不能回退到 index.html，
     # 否则前端把 HTML 当成 JSON 解析，报“接口返回的不是 JSON”这种误导性错误。
     _BACKEND_PREFIXES = ("api/", "health", "ws/", "assets/")

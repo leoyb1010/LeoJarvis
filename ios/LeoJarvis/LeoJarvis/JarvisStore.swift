@@ -70,7 +70,7 @@ final class JarvisStore: ObservableObject {
         ),
         MacTarget(
             id: "mac-mini-cortex",
-            name: "Mac mini Cortex",
+            name: "Leo Mac mini",
             endpoint: "https://mac-mini-cortex.tail23de22.ts.net",
             detail: "Tailscale Funnel · 新版 Jarvis 8787"
         )

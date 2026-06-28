@@ -41,6 +41,13 @@ def test_health_endpoint():
     assert res.json()["ok"] is True
 
 
+def test_spa_root_supports_head_when_built():
+    with TestClient(app) as client:
+        res = client.head("/")
+    assert res.status_code in (200, 404)
+    assert res.status_code != 405
+
+
 def test_speech_status_contract():
     with TestClient(app) as client:
         res = client.get("/api/speech/status")

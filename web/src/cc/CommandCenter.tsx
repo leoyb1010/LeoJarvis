@@ -30,7 +30,7 @@ import { Drawer, Modal, Popover, Z } from "./Overlay";
 import { briefingMainFeed, pickBriefingLeads } from "../briefingOrder";
 import { useWhisperRecorder } from "../useWhisperRecorder";
 
-// Cortex · 指挥台 — 深/浅双主题 + 酒红强调色。颜色一律走 theme.css 的 CSS 变量。
+// LeoJarvis 指挥台: 深/浅双主题 + 酒红强调色。颜色一律走 theme.css 的 CSS 变量。
 // 每个 agent 一个区分色;统一用主题语义变量(深浅各自适配),不再写死深色 hex。
 const TAG: Record<string, [string, string]> = {
   claude: ["CC", "var(--accent-2)"], codex: ["CX", "var(--good)"], cursor: ["CU", "var(--info)"],
@@ -162,8 +162,8 @@ export default function CommandCenter() {
   };
 
   return (
-    <div style={{ height: "100vh", display: "grid", gridTemplateColumns: "68px 1fr", background: "var(--bg)", color: "var(--text)", fontFamily: "'Space Grotesk','PingFang SC','Microsoft YaHei',sans-serif", overflow: "hidden" }}>
-      <nav style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "14px 0", background: "var(--bg-2)", borderRight: "1px solid var(--border-soft)" }}>
+    <div className="cx-shell" style={{ height: "100vh", display: "grid", gridTemplateColumns: "68px 1fr", background: "var(--bg)", color: "var(--text)", fontFamily: "'Space Grotesk','PingFang SC','Microsoft YaHei',sans-serif", overflow: "hidden" }}>
+      <nav className="cx-shell-nav" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "14px 0", background: "var(--bg-2)", borderRight: "1px solid var(--border-soft)" }}>
         <img src={A("brand-mark.png")} alt="" style={{ width: 40, height: 40, borderRadius: 11, objectFit: "cover", boxShadow: "0 0 0 1px var(--border),0 0 18px var(--accent-soft)", marginBottom: 10 }} />
         {navBtn("cockpit", "驾驶舱", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="2" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" /></svg>)}
         {navBtn("agents", "智能体工作区", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="5" r="2.4" /><circle cx="5.5" cy="18" r="2.4" /><circle cx="18.5" cy="18" r="2.4" /><path d="M12 7.4v3M11 12l-4 4M13 12l4 4" /></svg>)}
@@ -190,14 +190,14 @@ export default function CommandCenter() {
         </button>
       </nav>
 
-      <div style={{ display: "grid", gridTemplateRows: page === "cockpit" ? "1fr" : "58px 1fr", minWidth: 0, minHeight: 0 }}>
-        {page !== "cockpit" && <header style={{ ...row(16), padding: "0 18px", borderBottom: "1px solid var(--border-soft)", background: "var(--bg-2)" }}>
+      <div className="cx-shell-main" style={{ display: "grid", gridTemplateRows: page === "cockpit" ? "1fr" : "58px 1fr", minWidth: 0, minHeight: 0 }}>
+        {page !== "cockpit" && <header className="cx-shell-header" style={{ ...row(16), padding: "0 18px", borderBottom: "1px solid var(--border-soft)", background: "var(--bg-2)" }}>
           <div style={{ flex: "none", minWidth: 128 }}>
             <div style={{ font: "600 14.5px 'Space Grotesk',sans-serif", color: "var(--text)", lineHeight: 1.1 }}>{META[page][0]}</div>
             <div style={{ font: "500 9.5px 'Space Grotesk',sans-serif", letterSpacing: ".04em", color: "var(--text-mute)", marginTop: 2 }}>{META[page][1]}</div>
           </div>
           <span style={flex1} />
-          <div style={{ flex: "none", ...row(9), font: "600 11px 'IBM Plex Mono',monospace" }}>
+          <div className="cx-shell-vitals" style={{ flex: "none", ...row(9), font: "600 11px 'IBM Plex Mono',monospace" }}>
             <span style={{ ...row(5), background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 9px", color: "var(--text-dim)" }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block", animation: "cxBreathe 4s ease infinite" }} />健康 <b style={{ color: "var(--text)" }}>{vitals.health ?? "—"}</b></span>
             <span style={{ ...row(5), background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 9px", color: "var(--text-dim)" }}>CPU <b style={{ color: "var(--text)" }}>{vitals.cpu != null ? `${vitals.cpu}%` : "—"}</b></span>
             <span style={{ ...row(5), background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 9px", color: "var(--text-dim)" }}>服务 <b style={{ color: "var(--good)" }}>{vitals.online}/{vitals.total}</b></span>
@@ -206,7 +206,7 @@ export default function CommandCenter() {
           </div>
         </header>}
 
-        <div style={{ position: "relative", minHeight: 0, overflow: "hidden", backgroundImage: "linear-gradient(var(--border-soft) 1px,transparent 1px),linear-gradient(90deg,var(--border-soft) 1px,transparent 1px)", backgroundSize: "38px 38px", backgroundBlendMode: "overlay", opacity: 1 }}>
+        <div className="cx-shell-surface" style={{ position: "relative", minHeight: 0, overflow: "hidden", backgroundImage: "linear-gradient(var(--border-soft) 1px,transparent 1px),linear-gradient(90deg,var(--border-soft) 1px,transparent 1px)", backgroundSize: "38px 38px", backgroundBlendMode: "overlay", opacity: 1 }}>
           {scan && <div className="cx-scanline" style={{ top: 0 }} />}
           {page === "cockpit" && <Cockpit themeMode={theme} goIntel={() => setPage("intel")} goNotes={(id) => { setNotesOpenId(id ?? null); setPage("notes"); }} goAgents={() => setPage("agents")} goSense={() => setPage("sense")} goDevices={() => setPage("devices")} />}
           {page === "agents" && <Agents themeMode={theme} />}
