@@ -17,7 +17,7 @@ import {
   getAssistantConfig, patchAssistantConfig, runCheckin, type AssistantConfig,
   getSkills, setSkillStatus, importSkill, type Skill,
   getMcpStatus, patchMcpSettings, type McpStatus,
-  getSchedule,
+  getSchedule, createSchedule, scheduleDone, deleteSchedule, getCalDavStatus, type ScheduleItem, type CalDavStatus,
   researchReport,
   type CliAgent, type CliSession, type ExternalAgent, type Vitals, type Service, type SystemOverview,
   type Briefing, type BriefItem, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
@@ -176,9 +176,9 @@ export default function CommandCenter() {
   const pad = (n: number) => String(n).padStart(2, "0");
   const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const META: Record<Page, [string, string]> = {
-    cockpit: ["全景驾驶舱", "COCKPIT"], agents: ["智能体工作区", "AGENTS"],
-    intel: ["情报中心", "INTELLIGENCE"], sense: ["感知接入", "SENSING"],
-    notes: ["记事 & 文档", "NOTES"], devices: ["设备舰队", "DEVICES"],
+    cockpit: ["全景驾驶舱", "实时总览"], agents: ["智能体工作区", "多会话并行"],
+    intel: ["情报中心", "时效优先"], sense: ["感知接入", "情境上下文"],
+    notes: ["记事与文档", "全能记事"], devices: ["设备舰队", "多端在线"],
   };
   const nav = (p: Page) => ({ fg: page === p ? "var(--accent)" : "var(--text-mute)", bg: page === p ? "var(--accent-soft)" : "transparent", bar: page === p ? "var(--accent)" : "transparent" });
   const navBtn = (p: Page, title: string, icon: ReactNode) => {
@@ -199,11 +199,11 @@ export default function CommandCenter() {
         {navBtn("agents", "智能体工作区", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="5" r="2.4" /><circle cx="5.5" cy="18" r="2.4" /><circle cx="18.5" cy="18" r="2.4" /><path d="M12 7.4v3M11 12l-4 4M13 12l4 4" /></svg>)}
         {navBtn("intel", "情报", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4.5" /><path d="M12 12l6-6" /></svg>)}
         {navBtn("sense", "感知接入", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 12a1.5 1.5 0 1 0 0-.01" /><path d="M8.5 8.5a5 5 0 0 1 7 0M5.6 5.6a9 9 0 0 1 12.8 0" /><path d="M9 15.5a4 4 0 0 0 6 0" /></svg>)}
-        {navBtn("notes", "记事 & 文档", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 3h11l3 3v15a0 0 0 0 1 0 0H5a0 0 0 0 1 0 0z" /><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" /></svg>)}
+        {navBtn("notes", "记事与文档", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 3h11l3 3v15a0 0 0 0 1 0 0H5a0 0 0 0 1 0 0z" /><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" /></svg>)}
         {navBtn("devices", "设备", <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M2 20h20M9 16v4M15 16v4" /></svg>)}
         <span style={flex1} />
         {/* 技能 + MCP 中枢(问题8):不占 tab,顶栏图标点开。 */}
-        <button onClick={() => setSkillsHubOpen(true)} className="cx-navtip" data-tip="技能 & MCP" style={{ width: 46, height: 46, border: 0, cursor: "pointer", borderRadius: 13, background: "transparent", color: "var(--text-mute)", display: "grid", placeContent: "center" }}>
+        <button onClick={() => setSkillsHubOpen(true)} className="cx-navtip" data-tip="技能与 MCP" style={{ width: 46, height: 46, border: 0, cursor: "pointer", borderRadius: 13, background: "transparent", color: "var(--text-mute)", display: "grid", placeContent: "center" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3l2.1 4.4 4.9.7-3.5 3.4.8 4.8L12 18l-4.3 2.3.8-4.8-3.5-3.4 4.9-.7z" /></svg>
         </button>
         {/* 深浅色:三态循环 auto → light → dark(问题10)。 */}
@@ -224,7 +224,7 @@ export default function CommandCenter() {
         {page !== "cockpit" && <header style={{ ...row(16), padding: "0 18px", borderBottom: "1px solid var(--border-soft)", background: "var(--bg-2)" }}>
           <div style={{ flex: "none", minWidth: 128 }}>
             <div style={{ font: "600 14.5px 'Space Grotesk',sans-serif", color: "var(--text)", lineHeight: 1.1 }}>{META[page][0]}</div>
-            <div style={{ font: "500 9px 'IBM Plex Mono',monospace", letterSpacing: ".2em", color: "var(--text-mute)", marginTop: 2 }}>{META[page][1]}</div>
+            <div style={{ font: "500 9.5px 'Space Grotesk',sans-serif", letterSpacing: ".04em", color: "var(--text-mute)", marginTop: 2 }}>{META[page][1]}</div>
           </div>
           <span style={flex1} />
           <div style={{ flex: "none", ...row(9), font: "600 11px 'IBM Plex Mono',monospace" }}>
@@ -238,7 +238,7 @@ export default function CommandCenter() {
 
         <div style={{ position: "relative", minHeight: 0, overflow: "hidden", backgroundImage: "linear-gradient(var(--border-soft) 1px,transparent 1px),linear-gradient(90deg,var(--border-soft) 1px,transparent 1px)", backgroundSize: "38px 38px", backgroundBlendMode: "overlay", opacity: 1 }}>
           {scan && <div className="cx-scanline" style={{ top: 0 }} />}
-          {page === "cockpit" && <Cockpit goIntel={() => setPage("intel")} goNotes={(id) => { setNotesOpenId(id ?? null); setPage("notes"); }} goAgents={() => setPage("agents")} goSense={() => setPage("sense")} goDevices={() => setPage("devices")} />}
+          {page === "cockpit" && <Cockpit themeMode={theme} goIntel={() => setPage("intel")} goNotes={(id) => { setNotesOpenId(id ?? null); setPage("notes"); }} goAgents={() => setPage("agents")} goSense={() => setPage("sense")} goDevices={() => setPage("devices")} />}
           {page === "agents" && <Agents themeMode={theme} />}
           {page === "intel" && <Intel />}
           {page === "sense" && <Sense />}
@@ -250,7 +250,7 @@ export default function CommandCenter() {
       <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} eyebrow="设置" title="LeoJarvis 设置" width={1000} maxHeight={780}>
         <Settings theme={theme} setTheme={setTheme} scan={scan} toggleScan={() => setScan((v) => !v)} />
       </Modal>
-      {/* 问题8:技能 & MCP 中枢(顶栏图标呼出) */}
+      {/* 问题8:技能与 MCP 中枢(顶栏图标呼出) */}
       {skillsHubOpen && <SkillsHub onClose={() => setSkillsHubOpen(false)} />}
       {notifyToast && (
         // 底部居中 toast——不再压右上角的时间/状态;轻浮起,4s 自动消失。
@@ -270,13 +270,28 @@ function stepTone(status?: string): { bar: string; label: string } {
   if (s.includes("pend") || s.includes("await") || s === "待确认") return { bar: "var(--warn)", label: "待确认" };
   return { bar: "var(--good)", label: status || "完成" };
 }
+// 问题4:时效第一。今天显 HH:MM,往日显 MM-DD HH:MM —— 6/26 的历史项不再看着像今天。
 function tsToTime(ts?: number): string {
   if (!ts) return "";
   const ms = ts > 1e12 ? ts : ts * 1000;
   const d = new Date(ms);
   if (isNaN(d.getTime())) return "";
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// GitHub 仓库的"最近更新"(pushed_at 是 ISO 字符串):显示相对时间。
+function githubPushedAgo(pushed?: string): string {
+  if (!pushed) return "";
+  const t = Date.parse(pushed);
+  if (Number.isNaN(t)) return "";
+  const days = Math.floor((Date.now() - t) / 86400000);
+  if (days <= 0) return "今天更新";
+  if (days === 1) return "昨天更新";
+  if (days < 30) return `${days} 天前更新`;
+  if (days < 365) return `${Math.floor(days / 30)} 个月前更新`;
+  return `${Math.floor(days / 365)} 年前更新`;
 }
 
 type Turn =
@@ -600,52 +615,226 @@ function synthBrief(opts: { news: BriefItem[]; services: Service[]; svcTotal: nu
 // 待办收件箱速览：未确认任务，行内直接确认/忽略（信息转任务的常驻操作位）。
 // 待办收件箱速览:紧凑行(一行一条),点行才展开出确认/忽略。只收真需处理的(邮件/日历),不堆新闻。
 const ACT_LABEL: Record<string, string> = { reply: "回复", review: "审阅", fill_form: "填表", create: "创建", follow_up: "跟进", approve: "审批", update_crm: "录入", prepare: "准备" };
-function NotesTodoPanel({ notes, onSaved, onOpen }: { notes: PersonalNote[]; onSaved: () => void; onOpen: (id?: string) => void }) {
+// 待办时间格式化:今天显 HH:MM,往日显 MM-DD HH:MM。
+function fmtSchedWhen(ts: number): string {
+  const d = new Date(ts), now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? hm : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
+}
+const REPEAT_ZH: Record<string, string> = { daily: "每天", weekly: "每周", monthly: "每月" };
+const REMIND_LEADS: { label: string; ms: number | null }[] = [
+  { label: "无提醒", ms: null }, { label: "准时", ms: 0 }, { label: "提前5分", ms: 5 * 60000 },
+  { label: "提前15分", ms: 15 * 60000 }, { label: "提前30分", ms: 30 * 60000 },
+  { label: "提前1小时", ms: 60 * 60000 }, { label: "提前1天", ms: 24 * 60 * 60000 },
+];
+
+// 问题2:全能记事——「新建」先选类型,每种类型有专属录入界面(借鉴 open-notebook 的 Sources)。
+type NoteKind = "blank" | "link" | "file" | "image" | "web";
+function NoteTypePicker({ onClose, onBlank, onCreated }: { onClose: () => void; onBlank: () => void; onCreated: (id?: string) => void }) {
+  const [kind, setKind] = useState<NoteKind | null>(null);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const imgRef = useRef<HTMLInputElement | null>(null);
+
+  const types: { k: NoteKind; name: string; desc: string; icon: ReactNode }[] = [
+    { k: "blank", name: "空白笔记", desc: "写长文 · Markdown · 版本历史", icon: <path d="M4 4h12l4 4v12H4z M14 4v4h4" /> },
+    { k: "link", name: "链接", desc: "存一个网址,自动抓标题+摘要", icon: <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /> },
+    { k: "file", name: "附件", desc: "上传任意文件,落为可检索来源", icon: <path d="M21 12.5V7l-5-4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6 M14 3v5h5 M16 16l3 3 3-3 M19 19v-7" /> },
+    { k: "image", name: "图片", desc: "上传/拖拽/粘贴图片,内嵌预览", icon: <path d="M4 5h16v14H4z M8 11l2.5 3 3.5-4.5L20 18" /> },
+    { k: "web", name: "网页导入", desc: "抓取网页正文(reader)落为笔记", icon: <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M3 12h18 M12 3c2.5 2.5 2.5 15.5 0 18 M12 3c-2.5 2.5-2.5 15.5 0 18" /> },
+  ];
+
+  async function importByUrl() {
+    const u = url.trim(); if (!u || busy) return;
+    setBusy(true); setErr("");
+    try { const r = await importNoteUrl(u); if (r?.note?.id) onCreated(r.note.id); else setErr("抓取失败,检查链接"); }
+    catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
+  async function importFile(file: File) {
+    if (!file || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await importNoteAttachment({ file_name: file.name, mime_type: file.type, data_base64: await fileToDataUrl(file) });
+      if (r?.note?.id) onCreated(r.note.id); else setErr("上传失败");
+    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
+
+  const card: CSSProperties = { display: "grid", gap: 8, justifyItems: "start", textAlign: "left", padding: "14px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel-2)", cursor: "pointer" };
+  const back = (
+    <button onClick={() => { setKind(null); setErr(""); }} style={{ ...row(4), border: 0, background: "transparent", color: "var(--text-dim)", cursor: "pointer", font: "600 10.5px 'Space Grotesk'", padding: 0 }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>返回选择
+    </button>
+  );
+
+  return (
+    <Modal open onClose={onClose} eyebrow="记事" title="新建记事" width={640} maxHeight={560}>
+      {kind === null && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {types.map((t) => (
+            <button key={t.k} className="cx-lift" onClick={() => { if (t.k === "blank") { onBlank(); } else setKind(t.k); }} style={card}>
+              <span style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeContent: "center", background: "var(--accent-soft)", color: "var(--accent)" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">{t.icon}</svg>
+              </span>
+              <b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{t.name}</b>
+              <span style={{ font: "400 10.5px/1.4 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{t.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {(kind === "link" || kind === "web") && (
+        <div style={{ display: "grid", gap: 12 }}>
+          {back}
+          <div style={{ font: "600 13px 'Space Grotesk'", color: "var(--text)" }}>{kind === "link" ? "存一个链接" : "导入网页正文"}</div>
+          <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") importByUrl(); }} placeholder="https://…" style={{ background: "var(--panel-3)", border: "1px solid var(--border)", borderRadius: 9, padding: "11px 13px", color: "var(--text)", font: "500 13px 'IBM Plex Mono',monospace", outline: "none" }} />
+          <span style={{ font: "400 10.5px 'Space Grotesk'", color: "var(--text-mute)" }}>{kind === "link" ? "会抓取标题与摘要,存成一条可检索的笔记。" : "会用 reader 抓取网页正文(去广告/导航),落为笔记全文。"}</span>
+          {err && <span style={{ font: "500 11px 'IBM Plex Mono'", color: "var(--bad)" }}>{err}</span>}
+          <button onClick={importByUrl} disabled={busy || !url.trim()} style={{ justifySelf: "start", border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", borderRadius: 9, padding: "9px 18px", font: "600 12px 'Space Grotesk'", opacity: busy || !url.trim() ? 0.5 : 1 }}>{busy ? "抓取中…" : "抓取并保存"}</button>
+        </div>
+      )}
+      {(kind === "file" || kind === "image") && (
+        <div style={{ display: "grid", gap: 12 }}>
+          {back}
+          <div style={{ font: "600 13px 'Space Grotesk'", color: "var(--text)" }}>{kind === "image" ? "上传图片" : "上传附件"}</div>
+          <input ref={kind === "image" ? imgRef : fileRef} type="file" accept={kind === "image" ? "image/*" : undefined} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); }} />
+          <button onClick={() => (kind === "image" ? imgRef : fileRef).current?.click()} disabled={busy}
+            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) importFile(f); }}
+            style={{ display: "grid", gap: 8, placeItems: "center", padding: "34px 16px", borderRadius: 12, border: "1.5px dashed var(--border)", background: "var(--panel-2)", color: "var(--text-dim)", cursor: "pointer" }}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 16V4 M7 9l5-5 5 5 M5 20h14" /></svg>
+            <span style={{ font: "500 12px 'Space Grotesk'" }}>{busy ? "上传中…" : (kind === "image" ? "点击或拖拽图片到此" : "点击或拖拽文件到此")}</span>
+          </button>
+          {err && <span style={{ font: "500 11px 'IBM Plex Mono'", color: "var(--bad)" }}>{err}</span>}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function NotesTodoPanel({ notes, onSaved, onOpen, onAdd }: { notes: PersonalNote[]; onSaved: () => void; onOpen: (id?: string) => void; onAdd: () => void }) {
   const [tab, setTab] = useState<"待办" | "记事">("待办");
-  const [time, setTime] = useState("");
+  // 记事录入
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const todos = notes.filter((n) => Array.isArray(n.tags) && n.tags.some((t: string) => /待办|todo|日程/i.test(t)));
-  async function add() {
+  // 待办=真日程
+  const [sched, setSched] = useState<ScheduleItem[]>([]);
+  const [caldav, setCaldav] = useState<CalDavStatus | null>(null);
+  const today = new Date();
+  const defDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const defTime = `${String((today.getHours() + 1) % 24).padStart(2, "0")}:00`;
+  const [sdate, setSdate] = useState(defDate);
+  const [stime, setStime] = useState(defTime);
+  const [srepeat, setSrepeat] = useState("none");
+  const [slead, setSlead] = useState(1); // 默认"准时"
+  const [stitle, setStitle] = useState("");
+
+  const loadSched = () => getSchedule("pending").then((d) => setSched(d.items || [])).catch(() => {});
+  useEffect(() => {
+    loadSched();
+    getCalDavStatus().then(setCaldav).catch(() => {});
+    const stop = subscribeNotify(() => loadSched());
+    return () => stop();
+  }, []);
+
+  async function addNote() {
     const t = text.trim(); if (!t || saving) return;
     setSaving(true);
+    try { await createNote({ title: t.slice(0, 40), content: t, tags: [] }); setText(""); onSaved(); }
+    catch { /* ignore */ } finally { setSaving(false); }
+  }
+  async function addSched() {
+    const t = stitle.trim(); if (!t || saving) return;
+    const start = Date.parse(`${sdate}T${stime}`);
+    if (!start || Number.isNaN(start)) return;
+    const lead = REMIND_LEADS[slead]?.ms;
+    const remind_ts = lead == null ? null : start - lead;
+    setSaving(true);
     try {
-      if (tab === "待办") await createNote({ title: (time.trim() ? time.trim() + " · " : "") + t, content: t, tags: ["日程"] });
-      else await createNote({ title: t.slice(0, 40), content: t, tags: [] });
-      setTime(""); setText(""); onSaved();
+      await createSchedule({ title: t, start_ts: start, remind_ts, repeat: srepeat });
+      setStitle(""); loadSched();
     } catch { /* ignore */ } finally { setSaving(false); }
   }
-  const list = tab === "待办" ? todos : notes;
+  async function toggleDone(it: ScheduleItem) { await scheduleDone(it.id, true).catch(() => {}); loadSched(); }
+  async function removeSched(id: string) { await deleteSchedule(id).catch(() => {}); loadSched(); }
+
+  const inp: CSSProperties = { flex: "none", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 8px", color: "var(--text)", font: "500 11px 'IBM Plex Mono',monospace", outline: "none" };
+  const sel: CSSProperties = { ...inp, cursor: "pointer", font: "600 10.5px 'Space Grotesk'" };
+
   return (
     <div style={{ ...panel, display: "grid", gridTemplateRows: "auto auto minmax(0,1fr)", minHeight: 0, gap: 10, animation: "cxRise .84s ease both" }}>
       <div style={{ ...row(8) }}>
         <div style={{ flex: "none", display: "flex", gap: 4, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 3 }}>
           {(["待办", "记事"] as const).map((f) => (<button key={f} onClick={() => setTab(f)} style={{ border: 0, cursor: "pointer", font: "600 11px 'Space Grotesk',sans-serif", padding: "5px 12px", borderRadius: 6, color: tab === f ? "#fff" : "var(--text-dim)", background: tab === f ? "var(--accent)" : "transparent", transition: "all .15s" }}>{f}</button>))}
         </div>
+        {/* 待办:CalDAV 同步状态徽标 */}
+        {tab === "待办" && caldav?.configured && <span title={`同步到 ${caldav.url_host || "CalDAV"} 日历`} style={{ ...row(4), font: "600 9px 'IBM Plex Mono'", color: "var(--good)" }}><b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} />同步中</span>}
         <span style={flex1} />
-        {/* 问题2:记事全能力入口——都点开同一个全功能编辑卡(链接/附件/图片/Markdown/版本) */}
-        <button onClick={() => onOpen()} title="新建(可写长文/链接/附件/图片)" className="cx-navtip" data-tip="新建文档" style={{ ...row(5), border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent)", cursor: "pointer", borderRadius: 8, padding: "5px 10px", font: "600 10.5px 'Space Grotesk'" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>新建
-        </button>
-        <span style={mono(9)}>{list.length}</span>
+        {tab === "记事" && (
+          <button onClick={onAdd} title="新建记事(空白/链接/附件/图片/网页)" className="cx-navtip" data-tip="新建记事" style={{ ...row(5), border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent)", cursor: "pointer", borderRadius: 8, padding: "5px 10px", font: "600 10.5px 'Space Grotesk'" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>新建
+          </button>
+        )}
+        <span style={mono(9)}>{tab === "待办" ? sched.length : notes.length}</span>
       </div>
-      <div style={{ ...row(7) }}>
-        {tab === "待办" && <input value={time} onChange={(e) => setTime(e.target.value)} placeholder="10:00" style={{ width: 60, flex: "none", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 8px", color: "var(--text)", font: "500 12px 'IBM Plex Mono',monospace", outline: "none", textAlign: "center" }} />}
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} placeholder={tab === "待办" ? "加一项待办，回车保存" : "记一笔，回车保存"} style={{ flex: 1, minWidth: 0, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 10px", color: "var(--text)", font: "400 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
-        <button onClick={add} disabled={saving || !text.trim()} style={{ flex: "none", border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", borderRadius: 8, padding: "7px 13px", font: "600 11px 'Space Grotesk'", opacity: saving || !text.trim() ? 0.5 : 1 }}>＋</button>
-      </div>
+
+      {/* 录入区 */}
+      {tab === "待办" ? (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <input type="date" value={sdate} onChange={(e) => setSdate(e.target.value)} style={{ ...inp, width: 124 }} />
+            <input type="time" value={stime} onChange={(e) => setStime(e.target.value)} style={{ ...inp, width: 86 }} />
+            <select value={srepeat} onChange={(e) => setSrepeat(e.target.value)} style={sel}>
+              <option value="none">不重复</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option>
+            </select>
+            <select value={slead} onChange={(e) => setSlead(Number(e.target.value))} style={sel}>
+              {REMIND_LEADS.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
+            </select>
+          </div>
+          <div style={{ ...row(7) }}>
+            <input value={stitle} onChange={(e) => setStitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addSched(); }} placeholder="待办内容，回车添加（带时间/提醒/重复）" style={{ flex: 1, minWidth: 0, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 10px", color: "var(--text)", font: "400 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
+            <button onClick={addSched} disabled={saving || !stitle.trim()} style={{ flex: "none", border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", borderRadius: 8, padding: "7px 13px", font: "600 11px 'Space Grotesk'", opacity: saving || !stitle.trim() ? 0.5 : 1 }}>＋</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ ...row(7) }}>
+          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addNote(); }} placeholder="记一笔，回车保存" style={{ flex: 1, minWidth: 0, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 10px", color: "var(--text)", font: "400 12.5px 'Space Grotesk',sans-serif", outline: "none" }} />
+          <button onClick={addNote} disabled={saving || !text.trim()} style={{ flex: "none", border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", borderRadius: 8, padding: "7px 13px", font: "600 11px 'Space Grotesk'", opacity: saving || !text.trim() ? 0.5 : 1 }}>＋</button>
+        </div>
+      )}
+
+      {/* 列表区 */}
       <div style={{ display: "grid", gap: 7, overflowY: "auto", minHeight: 0, alignContent: "start" }}>
-        {list.length === 0 && <div style={{ ...mono(10.5), padding: "6px 2px", lineHeight: 1.6 }}>{tab === "待办" ? "暂无待办。上面加一条，或给记事打「待办」标签。" : "暂无记事，上面记一笔。"}</div>}
-        {tab === "待办"
-          ? list.slice(0, 8).map((n) => (
-              <button key={n.id} onClick={() => onOpen(n.id)} className="cx-row" style={{ textAlign: "left", border: 0, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "5px 6px", borderRadius: 8 }}><span style={{ width: 15, height: 15, borderRadius: 5, border: "1.5px solid var(--accent)", flex: "none" }} /><span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.title || "未命名"}</span></button>
-            ))
-          : list.slice(0, 6).map((nt) => (
+        {tab === "待办" ? (
+          <>
+            {sched.length === 0 && <div style={{ ...mono(10.5), padding: "6px 2px", lineHeight: 1.6 }}>暂无待办。上面填时间、提醒、重复，加一条。{caldav && !caldav.configured && <><br /><span style={{ color: "var(--text-mute)" }}>本地日程已开启 · 配置 CalDAV 可同步到手机日历/提醒</span></>}</div>}
+            {sched.map((it) => (
+              <div key={it.id} className="cx-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 6px", borderRadius: 8 }}>
+                <button onClick={() => toggleDone(it)} title="标记完成" style={{ width: 16, height: 16, borderRadius: 5, border: "1.5px solid var(--accent)", flex: "none", background: "transparent", cursor: "pointer", padding: 0 }} />
+                <div style={{ minWidth: 0, flex: 1, display: "grid", gap: 1 }}>
+                  <span style={{ font: "500 12px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</span>
+                  <span style={{ ...row(6), font: "500 9px 'IBM Plex Mono',monospace", color: it.overdue ? "var(--bad)" : "var(--text-mute)" }}>
+                    <span>{fmtSchedWhen(it.start_ts)}</span>
+                    {it.remind_ts != null && <span style={{ ...row(2) }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>提醒</span>}
+                    {it.repeat && it.repeat !== "none" && <span style={{ ...row(2) }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>{REPEAT_ZH[it.repeat]}</span>}
+                    {caldav?.configured && (it as any).remote_href && <span title="已同步到日历" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} />}
+                  </span>
+                </div>
+                <button onClick={() => removeSched(it.id)} title="删除" className="cx-del" style={{ flex: "none", border: 0, background: "transparent", color: "var(--text-mute)", cursor: "pointer", padding: 2, opacity: 0.5 }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            {notes.length === 0 && <div style={{ ...mono(10.5), padding: "6px 2px", lineHeight: 1.6 }}>暂无记事，上面记一笔，或点「新建」选链接/附件/图片/网页。</div>}
+            {notes.slice(0, 6).map((nt) => (
               <button key={nt.id} onClick={() => onOpen(nt.id)} className="cx-row" style={{ textAlign: "left", background: "var(--panel-2)", border: "1px solid var(--border-soft)", borderRadius: 10, padding: "8px 10px", display: "grid", gap: 2, cursor: "pointer" }}>
                 <div style={{ ...row(6) }}>{nt.pinned && <svg width="9" height="9" viewBox="0 0 24 24" fill="var(--accent)"><path d="M9 4v6l-2 3v2h10v-2l-2-3V4z" /><path d="M12 17v3" stroke="var(--accent)" strokeWidth="2" /></svg>}<b style={{ font: "600 11px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{nt.title || "未命名"}</b><span style={{ font: "500 8px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>{nt.updated_ts ? fmtAgo(nt.updated_ts) : ""}</span></div>
                 <p style={{ margin: 0, font: "400 9.5px/1.4 'Space Grotesk',sans-serif", color: "var(--text-dim)", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{nt.excerpt || nt.content || ""}</p>
               </button>
             ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -662,7 +851,7 @@ function SensePreview({ goSense }: { goSense: () => void }) {
       const r: SenseResult = await ch.connect();
       let fed: string | undefined;
       if (r.status === "connected") { const ing = await ingestSensed(ch, r); fed = ing.ok ? `已投喂 ${ing.accepted ?? 0}` : "未投喂"; }
-      saveSenseStatus(ch.id, { status: r.status, fed, summary: r.summary, details: r.details, ts: Date.now() });
+      saveSenseStatus(ch.id, { status: r.status, fed, summary: r.summary, details: r.details, thumb: r.thumb, metrics: r.metrics, ts: Date.now() });
     } finally { setBusy(null); }
   };
   const tone = (s?: string) => s === "connected" ? "var(--good)" : s === "denied" ? "var(--bad)" : s === "unsupported" ? "var(--text-mute)" : "var(--warn)";
@@ -723,7 +912,7 @@ function IntelFeedDrawer({ items, total, pstyle, catColor, onOpenItem, goIntel, 
   );
 }
 
-function Cockpit({ goIntel, goNotes, goAgents, goSense, goDevices }: { goIntel: () => void; goNotes: (id?: string) => void; goAgents: () => void; goSense: () => void; goDevices: () => void }) {
+function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: { themeMode: Theme; goIntel: () => void; goNotes: (id?: string) => void; goAgents: () => void; goSense: () => void; goDevices: () => void }) {
   const [overview, setOverview] = useState<SystemOverview | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [notes, setNotes] = useState<PersonalNote[]>([]);
@@ -742,6 +931,7 @@ function Cockpit({ goIntel, goNotes, goAgents, goSense, goDevices }: { goIntel: 
   const [reportCardOpen, setReportCardOpen] = useState(false);  // 日报大卡片(问题5)
   const [inboxCount, setInboxCount] = useState(0);
   const [overlay, setOverlay] = useState<{ open: boolean; id?: string }>({ open: false });
+  const [noteTypePick, setNoteTypePick] = useState(false);  // 问题2:新建记事类型选择器
 
   const reloadNotes = () => { getNotes().then((d) => setNotes(Array.isArray(d?.notes) ? d.notes : [])).catch(() => {}); };
   useEffect(() => {
@@ -883,13 +1073,13 @@ function Cockpit({ goIntel, goNotes, goAgents, goSense, goDevices }: { goIntel: 
 
       {chatOpen && <JarvisChat onClose={() => setChatOpen(false)} />}
 
-      {/* 工作区:上排 记事 + 感知;下排 = agent 多会话工作区(占满横向,问题3/12)。整体不溢出视口。*/}
-      <div style={{ display: "grid", gridTemplateRows: "minmax(0,1.05fr) minmax(0,1fr)", gap: 14, minHeight: 0, overflow: "hidden" }}>
+      {/* 工作区:上排 记事 + 感知(收窄);下排 = agent 多会话工作区(占满横向、给足终端高度,问题5)。整体不溢出视口。*/}
+      <div style={{ display: "grid", gridTemplateRows: "minmax(0,0.78fr) minmax(0,1.5fr)", gap: 14, minHeight: 0, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 14, minHeight: 0, overflow: "hidden" }}>
-          <NotesTodoPanel notes={notes} onSaved={reloadNotes} onOpen={(id) => setOverlay({ open: true, id })} />
+          <NotesTodoPanel notes={notes} onSaved={reloadNotes} onOpen={(id) => setOverlay({ open: true, id })} onAdd={() => setNoteTypePick(true)} />
           <SensePreview goSense={goSense} />
         </div>
-        <AgentWorkspace goAgents={goAgents} />
+        <AgentWorkspace goAgents={goAgents} themeMode={themeMode} />
       </div>
 
       {/* 邮件 & 应用气泡(锚在 hero 快速入口的「邮件」chip):Popover portal 到 body,不被裁切。 */}
@@ -910,6 +1100,11 @@ function Cockpit({ goIntel, goNotes, goAgents, goSense, goDevices }: { goIntel: 
       {detailId && <IntelDetail id={detailId} onClose={() => setDetailId(null)} />}
       {intelOpen && <IntelFeedDrawer items={news} total={signalCount} pstyle={pstyle} catColor={catColor} onOpenItem={(id) => setDetailId(id)} goIntel={goIntel} onClose={() => setIntelOpen(false)} />}
       {overlay.open && <NotesOverlay openId={overlay.id} onClose={() => { setOverlay({ open: false }); reloadNotes(); }} goFull={(id) => { setOverlay({ open: false }); goNotes(id); }} />}
+      {noteTypePick && <NoteTypePicker
+        onClose={() => setNoteTypePick(false)}
+        onBlank={() => { setNoteTypePick(false); setOverlay({ open: true }); }}
+        onCreated={(id) => { setNoteTypePick(false); reloadNotes(); setOverlay({ open: true, id }); }}
+      />}
     </div>
   );
 }
@@ -1018,7 +1213,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
       {/* LEFT rail */}
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0,1fr)", gap: 14, minHeight: 0 }}>
         <div style={{ ...panel, padding: "14px 16px" }}>
-          <div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>编排台 · ORCHESTRATOR</div>
+          <div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>编排台</div>
           <div style={{ ...row(10), marginTop: 8 }}>
             <div style={{ font: "700 22px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{runningCount}<span style={{ font: "500 12px 'Space Grotesk'", color: "var(--text-mute)" }}> 运行中</span></div>
             <span style={flex1} />
@@ -1265,7 +1460,7 @@ function IntelDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
   return (
     // 情报详情用 Sheet:叠在情报抽屉之上(更窄、z 更高、左留边距),不再与抽屉完全重叠。
-    <Drawer open onClose={onClose} level="sheet" eyebrow="情报详情" title="DETAIL">
+    <Drawer open onClose={onClose} level="sheet" eyebrow="情报详情" title="详情">
         <div style={{ overflowY: "auto", minHeight: 0, padding: "20px 22px 28px" }}>
           {loading && (
             <div style={{ display: "grid", gap: 12, placeItems: "center", padding: "60px 0", textAlign: "center" }}>
@@ -1342,22 +1537,53 @@ function senseIcon(name: string): ReactNode {
   };
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">{p[name] || p.cpu}</svg>;
 }
-// 每种感知通道的专属"图形头"——不是纯文字,而是各自的视觉语言(问题4)。
-function SenseArt({ id, on }: { id: string; on: boolean }) {
+// 每种感知通道的专属"图形头"——各自的视觉语言,且与真实采到的数据联动(问题6/7)。
+// 统一高度 92,卡片对齐;on=已接入(accent),并按 metrics/thumb 反映实时读数。
+function SenseArt({ id, on, metrics, thumb }: { id: string; on: boolean; metrics?: Record<string, number>; thumb?: string }) {
   const c = on ? "var(--accent)" : "var(--text-mute)";
   const dim = on ? "var(--accent-soft)" : "var(--panel-3)";
-  const wrap = (kids: ReactNode) => (
-    <div style={{ position: "relative", height: 92, borderRadius: 12, overflow: "hidden", background: `radial-gradient(120% 120% at 80% 0%, ${dim}, transparent), var(--panel-2)`, border: "1px solid var(--border-soft)", display: "grid", placeItems: "center" }}>{kids}</div>
+  const m = metrics || {};
+  const wrap = (kids: ReactNode, badge?: string) => (
+    <div style={{ position: "relative", height: 92, borderRadius: 12, overflow: "hidden", background: `radial-gradient(120% 120% at 80% 0%, ${dim}, transparent), var(--panel-2)`, border: "1px solid var(--border-soft)", display: "grid", placeItems: "center" }}>
+      {kids}
+      {badge && <span style={{ position: "absolute", right: 8, bottom: 7, font: "600 9px 'IBM Plex Mono',monospace", color: "var(--accent)", background: "var(--accent-soft)", borderRadius: 6, padding: "2px 6px" }}>{badge}</span>}
+    </div>
   );
   switch (id) {
-    case "fs-folder": return wrap(<svg width="64" height="48" viewBox="0 0 64 48" fill="none"><path d="M6 12a3 3 0 0 1 3-3h12l4 4h24a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3z" stroke={c} strokeWidth="1.6" /><path d="M14 22h28M14 28h20M14 34h24" stroke={c} strokeWidth="1.4" opacity=".6" /></svg>);
-    case "screen": return wrap(<svg width="72" height="52" viewBox="0 0 72 52" fill="none"><rect x="8" y="6" width="56" height="34" rx="3" stroke={c} strokeWidth="1.6" /><path d="M26 46h20M36 40v6" stroke={c} strokeWidth="1.6" /><rect x="14" y="12" width="20" height="13" rx="1.5" fill={c} opacity=".25" /><path d="M40 14h16M40 19h12M40 24h16" stroke={c} strokeWidth="1.4" opacity=".6" /></svg>);
+    case "fs-folder": return wrap(<svg width="64" height="48" viewBox="0 0 64 48" fill="none"><path d="M6 12a3 3 0 0 1 3-3h12l4 4h24a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3z" stroke={c} strokeWidth="1.6" /><path d="M14 22h28M14 28h20M14 34h24" stroke={c} strokeWidth="1.4" opacity=".6" /></svg>, on && m.count ? `${m.count} 项` : undefined);
+    case "screen":
+      // 联动:有缩略图就直接展示采到的那一帧(thumb 仅本地显示,不投喂)。
+      if (on && thumb) return (
+        <div style={{ position: "relative", height: 92, borderRadius: 12, overflow: "hidden", border: "1px solid var(--accent)" }}>
+          <img src={thumb} alt="屏幕快照" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <span style={{ position: "absolute", left: 8, bottom: 7, font: "600 8.5px 'IBM Plex Mono'", color: "#fff", background: "rgba(0,0,0,.55)", borderRadius: 6, padding: "2px 6px" }}>已截一帧 · 本地</span>
+        </div>
+      );
+      return wrap(<svg width="72" height="52" viewBox="0 0 72 52" fill="none"><rect x="8" y="6" width="56" height="34" rx="3" stroke={c} strokeWidth="1.6" /><path d="M26 46h20M36 40v6" stroke={c} strokeWidth="1.6" /><rect x="14" y="12" width="20" height="13" rx="1.5" fill={c} opacity=".25" /><path d="M40 14h16M40 19h12M40 24h16" stroke={c} strokeWidth="1.4" opacity=".6" /></svg>);
     case "clipboard": return wrap(<svg width="52" height="60" viewBox="0 0 52 60" fill="none"><rect x="10" y="10" width="32" height="44" rx="4" stroke={c} strokeWidth="1.6" /><rect x="19" y="6" width="14" height="9" rx="2" fill={c} opacity=".3" stroke={c} strokeWidth="1.4" /><path d="M18 26h16M18 33h16M18 40h10" stroke={c} strokeWidth="1.4" opacity=".6" /></svg>);
     case "geo": return wrap(<svg width="56" height="64" viewBox="0 0 56 64" fill="none"><path d="M28 56s16-14 16-30a16 16 0 1 0-32 0c0 16 16 30 16 30z" stroke={c} strokeWidth="1.6" /><circle cx="28" cy="26" r="6" fill={c} opacity=".3" stroke={c} strokeWidth="1.4" /></svg>);
-    case "network": return wrap(<svg width="72" height="52" viewBox="0 0 72 52" fill="none"><path d="M12 30a34 34 0 0 1 48 0" stroke={c} strokeWidth="1.8" opacity={on ? 1 : .4} /><path d="M22 38a20 20 0 0 1 28 0" stroke={c} strokeWidth="1.8" opacity={on ? 1 : .4} /><path d="M8 22a48 48 0 0 1 56 0" stroke={c} strokeWidth="1.8" opacity={on ? .85 : .3} /><circle cx="36" cy="44" r="3.5" fill={c} /></svg>);
-    case "media-devices": return wrap(<svg width="74" height="48" viewBox="0 0 74 48" fill="none"><circle cx="20" cy="24" r="11" stroke={c} strokeWidth="1.6" /><circle cx="20" cy="24" r="4" fill={c} opacity=".4" /><rect x="40" y="10" width="26" height="20" rx="3" stroke={c} strokeWidth="1.6" /><rect x="48" y="34" width="10" height="6" rx="1" fill={c} opacity=".4" /></svg>);
+    case "network": {
+      // 联动:弧线条数随网络质量(rtt 越低越多弧),并标 rtt。
+      const arcs = !on ? 1 : m.rtt != null ? (m.rtt < 80 ? 3 : m.rtt < 200 ? 2 : 1) : 3;
+      return wrap(<svg width="72" height="52" viewBox="0 0 72 52" fill="none"><path d="M8 22a48 48 0 0 1 56 0" stroke={c} strokeWidth="1.8" opacity={arcs >= 3 ? .9 : .2} /><path d="M12 30a34 34 0 0 1 48 0" stroke={c} strokeWidth="1.8" opacity={arcs >= 2 ? 1 : .2} /><path d="M22 38a20 20 0 0 1 28 0" stroke={c} strokeWidth="1.8" opacity={arcs >= 1 ? 1 : .2} /><circle cx="36" cy="44" r="3.5" fill={c} /></svg>, on && m.rtt != null ? `${m.rtt}ms` : undefined);
+    }
+    case "media-devices": return wrap(<svg width="74" height="48" viewBox="0 0 74 48" fill="none"><circle cx="20" cy="24" r="11" stroke={c} strokeWidth="1.6" /><circle cx="20" cy="24" r="4" fill={c} opacity=".4" /><rect x="40" y="10" width="26" height="20" rx="3" stroke={c} strokeWidth="1.6" /><rect x="48" y="34" width="10" height="6" rx="1" fill={c} opacity=".4" /></svg>, on && (m.cam != null) ? `${m.cam}摄 ${m.mic ?? 0}麦` : undefined);
     case "locale": return wrap(<svg width="58" height="58" viewBox="0 0 58 58" fill="none"><circle cx="29" cy="29" r="22" stroke={c} strokeWidth="1.6" /><path d="M7 29h44M29 7a30 30 0 0 1 0 44M29 7a30 30 0 0 0 0 44" stroke={c} strokeWidth="1.3" opacity=".6" /></svg>);
     case "notify": return wrap(<svg width="56" height="60" viewBox="0 0 56 60" fill="none"><path d="M14 26a14 14 0 1 1 28 0c0 12 5 14 5 14H9s5-2 5-14z" stroke={c} strokeWidth="1.6" fill={c} fillOpacity={on ? .12 : 0} /><path d="M23 46a5 5 0 0 0 10 0" stroke={c} strokeWidth="1.6" />{on && <circle cx="42" cy="16" r="5" fill="var(--accent)" />}</svg>);
+    case "env": {
+      // 设备环境专属图:电池 + 电量填充随真实电量联动(消除掉默认通用图)。
+      const lvl = on && m.battery != null ? Math.max(0, Math.min(100, m.battery)) : 0;
+      const fillW = (28 * lvl) / 100;
+      return wrap(
+        <svg width="72" height="44" viewBox="0 0 72 44" fill="none">
+          <rect x="14" y="13" width="36" height="20" rx="3.5" stroke={c} strokeWidth="1.8" />
+          <rect x="51" y="19" width="4" height="8" rx="1.5" fill={c} />
+          {on && m.battery != null && <rect x="17" y="16" width={fillW} height="14" rx="1.5" fill={m.charging ? "var(--good)" : "var(--accent)"} />}
+          {on && m.charging === 1 && <path d="M32 14l-4 8h5l-3 8 8-11h-5z" fill="#fff" stroke={c} strokeWidth="0.6" />}
+        </svg>,
+        on && m.battery != null ? `${m.battery}%${m.charging ? "⚡" : ""}` : undefined,
+      );
+    }
     default: return wrap(<svg width="60" height="56" viewBox="0 0 60 56" fill="none"><rect x="14" y="14" width="32" height="32" rx="4" stroke={c} strokeWidth="1.6" /><path d="M22 6v6M38 6v6M22 50v6M38 50v6M4 22h6M4 36h6M50 22h6M50 36h6" stroke={c} strokeWidth="1.4" opacity=".6" /><rect x="24" y="24" width="12" height="12" rx="2" fill={c} opacity=".3" /></svg>);
   }
 }
@@ -1373,7 +1599,7 @@ function Sense() {
       const r = await ch.connect();
       let fed: string | undefined;
       if (r.status === "connected") { const ing = await ingestSensed(ch, r); fed = ing.ok ? `已投喂 · 收纳 ${ing.accepted ?? 0} 条` : (ing.reason ? `未投喂 · ${ing.reason}` : "未投喂"); }
-      saveSenseStatus(ch.id, { status: r.status, fed, summary: r.summary, details: r.details, ts: Date.now() });
+      saveSenseStatus(ch.id, { status: r.status, fed, summary: r.summary, details: r.details, thumb: r.thumb, metrics: r.metrics, ts: Date.now() });
     } finally { setBusy(null); }
   };
 
@@ -1388,19 +1614,28 @@ function Sense() {
         <PageHelp what="每张卡是一种感知通道。点「授权」触发浏览器系统弹窗,通过后这条通道的信息会作为上下文喂给 Jarvis——让它知道你此刻的处境、在看什么、在哪、设备如何。"
           points={["授权状态会记住,切换页面不丢(本地保存)", "投喂前过隐私闸门:脱敏 + 红线词拦截,被拦会显示原因", "通道越全,Jarvis 的判断和主动提醒越贴合你当前实际情况"]} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 12, alignItems: "stretch" }}>
         {SENSE_CHANNELS.map((ch) => {
           const r = results[ch.id]; const supported = ch.isSupported(); const on = r?.status === "connected";
+          // 统一卡片骨架:图形头 / 标题 / 说明 / 用途+隐私 / 读数 / 投喂态 / 按钮。
+          // 中段(读数)用 1fr 吸收高度差,按钮永远贴底 → 所有卡片底部对齐。
           return (
-            <div key={ch.id} className="cx-lift" style={{ ...panel, display: "grid", gap: 10, alignContent: "start", borderColor: on ? "var(--accent)" : "var(--border)" }}>
-              <SenseArt id={ch.id} on={on} />
+            <div key={ch.id} className="cx-lift" style={{ ...panel, display: "grid", gridTemplateRows: "auto auto auto auto minmax(0,1fr) auto", gap: 9, borderColor: on ? "var(--accent)" : "var(--border)" }}>
+              <SenseArt id={ch.id} on={on} metrics={r?.metrics} thumb={r?.thumb} />
               <div style={{ ...row(8) }}>
                 <b style={{ font: "600 13.5px 'Space Grotesk',sans-serif", color: "var(--text)", flex: 1 }}>{ch.name}</b>
                 <span style={{ ...row(5) }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: statusTone(r?.status), flex: "none", boxShadow: on ? "0 0 6px var(--good)" : "none" }} /><span style={mono(9.5)}>{r ? statusText(r.status) : supported ? "可接入" : "不支持"}</span></span>
               </div>
-              <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{ch.desc}</p>
-              {r?.details && r.details.length > 0 && <div style={{ ...sub, padding: "8px 10px", display: "grid", gap: 3, maxHeight: 110, overflowY: "auto" }}>{r.details.slice(0, 12).map((d, i) => <span key={i} style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d}</span>)}</div>}
-              {r?.fed && <div style={{ font: "600 10px 'IBM Plex Mono',monospace", color: r.fed.startsWith("已投喂") ? "var(--good)" : "var(--text-mute)" }}>{r.fed}</div>}
+              <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text-dim)", minHeight: 34 }}>{ch.desc}</p>
+              {/* 用途 + 隐私(问题7:说清每个通道干啥、隐私边界) */}
+              <div style={{ display: "grid", gap: 4, padding: "8px 10px", borderRadius: 9, background: "var(--panel-2)", border: "1px solid var(--border-soft)" }}>
+                <span style={{ ...row(5), font: "400 10px/1.45 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" style={{ flex: "none", marginTop: 1 }}><path d="M12 2a7 7 0 0 1 4 12.7V17H8v-2.3A7 7 0 0 1 12 2z" /><path d="M9 21h6" /></svg><span>{ch.purpose}</span></span>
+                <span style={{ ...row(5), font: "400 9.5px/1.45 'Space Grotesk',sans-serif", color: "var(--text-mute)" }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flex: "none", marginTop: 1 }}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg><span>{ch.privacy}</span></span>
+              </div>
+              <div style={{ minHeight: 0, overflowY: "auto", display: "grid", gap: 6, alignContent: "start" }}>
+                {r?.details && r.details.length > 0 && <div style={{ ...sub, padding: "8px 10px", display: "grid", gap: 3 }}>{r.details.slice(0, 12).map((d, i) => <span key={i} style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d}</span>)}</div>}
+                {r?.fed && <div style={{ font: "600 10px 'IBM Plex Mono',monospace", color: r.fed.startsWith("已投喂") ? "var(--good)" : "var(--text-mute)" }}>{r.fed}</div>}
+              </div>
               <button onClick={() => run(ch)} disabled={!supported || busy === ch.id} className="cx-nav" style={{ border: "1px solid var(--accent)", cursor: supported && busy !== ch.id ? "pointer" : "default", font: "600 11.5px 'Space Grotesk'", padding: "8px 0", borderRadius: 9, color: supported ? (on ? "var(--accent)" : "#fff") : "var(--text-mute)", background: supported ? (on ? "var(--accent-soft)" : "var(--accent)") : "var(--panel-2)" }}>{busy === ch.id ? "读取中…" : on ? "重新感知" : "授权接入"}</button>
             </div>
           );
@@ -1612,118 +1847,110 @@ function ReportCard({ onClose }: { onClose: () => void }) {
 }
 
 // ============ 问题3+12: 首页 agent 工作区(真实多会话,可切换) ============
-function AgentWorkspace({ goAgents }: { goAgents: () => void }) {
-  const [sessions, setSessions] = useState<CliSession[]>([]);
+// 问题5:智能体工作区 = 真 PTY 多会话。一个 CLI = 一个持续交互终端(xterm,/ws/term),
+// 像在自己 iTerm 里跑一样(claude 的 /model /clear 都真实可用,登录 shell 带凭证 → 不再 401)。
+// 多个 agent 并行 = 多个标签,每个标签一个常驻挂载的 xterm;切换用 display 切,绝不卸载(卸载会杀掉 PTY)。
+type PtyTab = { key: number; agent: string; label: string; initial?: string };
+function AgentWorkspace({ goAgents, themeMode }: { goAgents: () => void; themeMode: Theme }) {
+  const [tabs, setTabs] = useState<PtyTab[]>([]);
+  const [activeKey, setActiveKey] = useState<number | null>(null);
   const [external, setExternal] = useState<ExternalAgent[]>([]);
   const [agentsList, setAgentsList] = useState<CliAgent[]>([]);
-  const [active, setActive] = useState<string | null>(null);
-  const [launchAgent, setLaunchAgent] = useState<string>("");   // 在工作区里直接发任务时选的 agent
+  const [launchAgent, setLaunchAgent] = useState<string>("");
   const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const outRef = useRef<HTMLPreElement | null>(null);
+  const keyRef = useRef(1);
   const tagOf = (a: string): [string, string] => TAG[a] || [a.slice(0, 2).toUpperCase(), "#9aa6b2"];
-  const refresh = () => getCliSessions().then((d) => { setSessions(d.sessions || []); setExternal(d.external || []); }).catch(() => {});
+
   useEffect(() => {
     let live = true;
-    const poll = () => getCliSessions().then((d) => {
-      if (!live) return;
-      setSessions(d.sessions || []); setExternal(d.external || []);
-      setActive((cur) => cur || (d.sessions && d.sessions[0]?.id) || (d.external && d.external[0] ? `gw:${d.external[0].agent}` : null));
+    const poll = () => getCliSessions().then((d) => { if (live) setExternal(d.external || []); }).catch(() => {});
+    poll(); const t = setInterval(poll, 4000); const stop = subscribeNotify(() => poll());
+    getCliAgents().then((d) => {
+      const av = (d.agents || []).filter((a) => a.installed && PTY_CAPABLE.includes(a.name));
+      setAgentsList(av); setLaunchAgent((c) => c || av[0]?.name || "shell");
     }).catch(() => {});
-    poll(); const t = setInterval(poll, 3000); const stop = subscribeNotify(() => poll());
-    getCliAgents().then((d) => { const av = (d.agents || []).filter((a) => a.installed); setAgentsList(av); setLaunchAgent((c) => c || av[0]?.name || ""); }).catch(() => {});
     return () => { live = false; clearInterval(t); stop(); };
   }, []);
-  const runningExt = external.length;
-  const runningSess = sessions.filter((s) => s.status === "running").length;
-  const stopOne = async (id: string) => { await stopCliSession(id).catch(() => {}); refresh(); };
-  const curSess = active && !active.startsWith("gw:") ? sessions.find((s) => s.id === active) || null : null;
-  const curExt = active && active.startsWith("gw:") ? external.find((e) => `gw:${e.agent}` === active) || null : null;
-  const allEntries = sessions.length + external.length;
-  // 跟随到最新输出。
-  useEffect(() => { if (outRef.current) outRef.current.scrollTop = outRef.current.scrollHeight; }, [curSess?.output]);
-  const send = async () => {
-    const text = prompt.trim(); if (!text || !launchAgent || busy) return;
-    setBusy(true); setErr("");
-    try {
-      const r = await runCliAgent(launchAgent, text);
-      if (!r.ok) { setErr(r.error || "启动失败"); }
-      else { setPrompt(""); if (r.id) setActive(r.id); await refresh(); }
-    } catch (e) { setErr(String(e)); }
-    finally { setBusy(false); }
+
+  const openSession = () => {
+    const ag = launchAgent || "shell";
+    const task = prompt.trim();
+    const display = agentsList.find((a) => a.name === ag)?.display || ag;
+    const key = keyRef.current++;
+    const label = task ? `${display} · ${task.slice(0, 18)}` : display;
+    setTabs((ts) => [...ts, { key, agent: ag, label, initial: task || undefined }]);
+    setActiveKey(key);
+    setPrompt("");
   };
+  const closeTab = (key: number) => {
+    setTabs((ts) => ts.filter((t) => t.key !== key));
+    setActiveKey((cur) => (cur === key ? (tabs.filter((t) => t.key !== key).slice(-1)[0]?.key ?? null) : cur));
+  };
+
+  const running = tabs.length + external.length;
+
   return (
-    <div style={{ ...panel, padding: 0, display: "grid", gridTemplateColumns: "232px minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
-      {/* 左:会话/运行中 agent 列表 */}
-      <div style={{ borderRight: "1px solid var(--border-soft)", display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0 }}>
-        <div style={{ ...row(8), padding: "12px 13px 9px" }}>
-          <span style={lbl}>AGENT 工作区</span><span style={flex1} />
-          <span style={{ ...row(4), ...mono(9.5, runningExt + runningSess > 0 ? "var(--good)" : "var(--text-mute)") }}>
-            <b style={{ width: 6, height: 6, borderRadius: "50%", background: runningExt + runningSess > 0 ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: runningExt + runningSess > 0 ? "0 0 6px var(--good)" : "none" }} />{runningExt + runningSess} 运行
+    <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0, overflow: "hidden" }}>
+      {/* 顶部:标题 + 会话标签条 + 外部 agent 只读药丸 */}
+      <div style={{ borderBottom: "1px solid var(--border-soft)", display: "grid", gap: 0 }}>
+        <div style={{ ...row(8), padding: "11px 13px 8px" }}>
+          <span style={lbl}>智能体工作区</span>
+          <span style={{ ...row(4), ...mono(9.5, running > 0 ? "var(--good)" : "var(--text-mute)") }}>
+            <b style={{ width: 6, height: 6, borderRadius: "50%", background: running > 0 ? "var(--good)" : "var(--text-mute)", display: "inline-block", boxShadow: running > 0 ? "0 0 6px var(--good)" : "none" }} />{running} 运行
           </span>
+          <span style={flex1} />
+          <button onClick={goAgents} className="cx-chip cx-navtip" data-tip="完整编排台" style={{ ...row(5), border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text-dim)", cursor: "pointer", borderRadius: 8, padding: "5px 10px", font: "600 10px 'Space Grotesk'" }}>
+            完整编排<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
         </div>
-        <div style={{ overflowY: "auto", minHeight: 0, padding: "0 9px", display: "grid", gap: 6, alignContent: "start" }}>
-          {external.map((e) => { const [tg, fg] = tagOf(e.agent); const on = active === `gw:${e.agent}`; return (
-            <button key={`ext-${e.agent}`} onClick={() => setActive(`gw:${e.agent}`)} className="cx-lift" style={{ textAlign: "left", ...row(8), background: on ? "var(--accent-soft)" : "var(--panel-2)", border: `1px solid ${on ? "var(--accent)" : "var(--border-soft)"}`, borderRadius: 9, padding: "8px 9px", cursor: "pointer" }}>
-              <span style={{ width: 24, height: 24, borderRadius: 6, background: "var(--panel-3)", border: "1px solid var(--border)", display: "grid", placeContent: "center", font: "700 9px 'IBM Plex Mono'", color: fg, flex: "none" }}>{tg}</span>
-              <div style={{ minWidth: 0, flex: 1 }}><div style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.display}</div><div style={mono(8.5)}>{e.kind === "gateway" ? `:${e.port} 网关` : `运行中${(e as any).count > 1 ? ` ×${(e as any).count}` : ""}`}</div></div>
-              <b style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", flex: "none", animation: "cxBreathe 3s ease infinite" }} />
-            </button>
-          ); })}
-          {sessions.map((s) => { const [tg, fg] = tagOf(s.agent); const liveNow = s.status === "running"; const on = active === s.id; return (
-            <button key={s.id} onClick={() => setActive(s.id)} className="cx-lift" style={{ textAlign: "left", ...row(8), background: on ? "var(--accent-soft)" : "var(--panel-2)", border: `1px solid ${on ? "var(--accent)" : "var(--border-soft)"}`, borderRadius: 9, padding: "8px 9px", cursor: "pointer" }}>
-              <span style={{ width: 24, height: 24, borderRadius: 6, background: "var(--panel-3)", border: "1px solid var(--border)", display: "grid", placeContent: "center", font: "700 9px 'IBM Plex Mono'", color: fg, flex: "none" }}>{tg}</span>
-              <div style={{ minWidth: 0, flex: 1 }}><div style={{ font: "600 11.5px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div><div style={{ ...mono(8.5), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.prompt || "—"}</div></div>
-              <b style={{ width: 6, height: 6, borderRadius: "50%", background: liveNow ? "var(--good)" : "var(--text-mute)", flex: "none", boxShadow: liveNow ? "0 0 6px var(--good)" : "none" }} />
-            </button>
-          ); })}
-          {allEntries === 0 && <div style={{ ...mono(10), padding: "10px 4px", lineHeight: 1.7 }}>没有运行中的 agent。下面选一个 agent、发个任务就开跑;你在终端/IDE 自己起的也会自动出现在这里。</div>}
-        </div>
-        <button onClick={goAgents} className="cx-chip" style={{ margin: 9, ...row(6), justifyContent: "center", border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text-dim)", cursor: "pointer", borderRadius: 9, padding: "7px 0", font: "600 10.5px 'Space Grotesk'" }}>
-          完整编排 · 交互终端
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6l6 6-6 6" /></svg>
-        </button>
-      </div>
-      {/* 右:选中会话实时输出 + 发任务输入栏(真实可用) */}
-      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", minHeight: 0 }}>
-        <div style={{ ...row(9), padding: "11px 14px", borderBottom: "1px solid var(--border-soft)" }}>
-          {curExt ? <>
-            <b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{curExt.display}</b>
-            <span style={{ ...row(4), ...mono(9.5, "var(--good)") }}><b style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} />运行中</span>
-            <span style={flex1} /><span style={mono(9.5)}>{curExt.kind === "gateway" ? `网关 :${curExt.port}` : "本机进程"}</span>
-          </> : curSess ? <>
-            <b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{curSess.name}</b>
-            <span style={{ ...row(4), ...mono(9.5, curSess.status === "running" ? "var(--good)" : "var(--text-mute)") }}>{curSess.status === "running" ? "运行中" : "已结束"}</span>
-            <span style={flex1} />
-            {curSess.status === "running" && <button onClick={() => stopOne(curSess.id)} style={{ border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--bad)", cursor: "pointer", borderRadius: 7, padding: "4px 11px", font: "600 10px 'Space Grotesk'" }}>停止</button>}
-          </> : <span style={mono(10.5)}>下面选 agent 发任务,或点左侧看在跑的会话</span>}
-        </div>
-        <div style={{ overflowY: "auto", minHeight: 0, padding: "12px 16px" }}>
-          {curSess ? (
-            <pre ref={outRef} style={{ margin: 0, font: "400 11.5px/1.65 'IBM Plex Mono',monospace", color: "var(--text-dim)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{curSess.output?.trim() || "(运行中,等待输出…)"}</pre>
-          ) : curExt ? (
-            <div style={{ display: "grid", gap: 8, ...mono(11), lineHeight: 1.7 }}>
-              <span>{curExt.kind === "gateway" ? `常驻网关在 :${curExt.port} 监听,作为 agent 后端持续服务。` : `${curExt.display} 正在本机运行(你在终端/IDE 里开的会话)。`}</span>
-              <span style={mono(10, "var(--text-mute)")}>要带完整交互终端,点左下「完整编排」。</span>
-            </div>
-          ) : (
-            <div style={{ ...mono(11), padding: "24px 0", textAlign: "center", lineHeight: 1.8 }}>这里实时显示并驱动你机器上所有 AI agent —— Jarvis 发起的、你自己在终端开的,都在。<br />下面选一个 agent、给个任务,直接开跑。</div>
-          )}
-        </div>
-        {/* 发任务输入栏 —— 真实调 /agents/cli/run,输出流到上面 */}
-        <div style={{ borderTop: "1px solid var(--border-soft)", padding: "10px 12px", display: "grid", gap: 7 }}>
-          {err && <div style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: "var(--bad)" }}>{err}</div>}
-          <div style={{ ...row(8) }}>
-            <select value={launchAgent} onChange={(e) => setLaunchAgent(e.target.value)} style={{ flex: "none", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 9px", color: "var(--text)", font: "600 11px 'Space Grotesk'", outline: "none", cursor: "pointer" }}>
-              {agentsList.length === 0 && <option value="">无已装 agent</option>}
-              {agentsList.map((a) => <option key={a.name} value={a.name}>{a.display}</option>)}
-            </select>
-            <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-              placeholder={launchAgent ? `给 ${agentsList.find((a) => a.name === launchAgent)?.display || launchAgent} 发任务,回车开跑…` : "未检测到已装的 agent CLI"}
-              disabled={!launchAgent} style={{ flex: 1, minWidth: 0, background: "var(--panel-3)", border: `1px solid ${prompt ? "var(--accent)" : "var(--border)"}`, borderRadius: 8, padding: "9px 12px", color: "var(--text)", font: "500 12px 'IBM Plex Mono',monospace", outline: "none" }} />
-            <button onClick={send} disabled={busy || !launchAgent || !prompt.trim()} style={{ flex: "none", border: 0, cursor: busy || !prompt.trim() ? "default" : "pointer", background: "var(--accent)", color: "#fff", font: "600 11.5px 'Space Grotesk'", padding: "9px 16px", borderRadius: 8, opacity: busy || !launchAgent || !prompt.trim() ? 0.5 : 1 }}>{busy ? "启动中…" : "发任务"}</button>
+        {(tabs.length > 0 || external.length > 0) && (
+          <div style={{ ...row(6), padding: "0 11px 9px", overflowX: "auto", flexWrap: "nowrap" }}>
+            {tabs.map((tb) => { const [tg, fg] = tagOf(tb.agent); const on = tb.key === activeKey; return (
+              <div key={tb.key} onClick={() => setActiveKey(tb.key)} className="cx-chip" style={{ flex: "none", ...row(6), border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`, background: on ? "var(--accent-soft)" : "var(--panel-2)", borderRadius: 8, padding: "5px 8px 5px 8px", cursor: "pointer", maxWidth: 210 }}>
+                <span style={{ width: 17, height: 17, borderRadius: 5, background: "var(--panel-3)", display: "grid", placeContent: "center", font: "700 8px 'IBM Plex Mono'", color: fg, flex: "none" }}>{tg}</span>
+                <span style={{ font: "600 10.5px 'Space Grotesk',sans-serif", color: on ? "var(--accent)" : "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tb.label}</span>
+                <button onClick={(e) => { e.stopPropagation(); closeTab(tb.key); }} title="关闭会话" style={{ flex: "none", border: 0, background: "transparent", color: "var(--text-mute)", cursor: "pointer", padding: 0, display: "grid", placeContent: "center" }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
+              </div>
+            ); })}
+            {external.map((e) => { const [tg, fg] = tagOf(e.agent); return (
+              <div key={`ext-${e.agent}`} title={e.kind === "gateway" ? `常驻网关 :${e.port}` : "你在终端/IDE 自己开的会话"} style={{ flex: "none", ...row(5), border: "1px dashed var(--border)", background: "transparent", borderRadius: 8, padding: "5px 9px", opacity: 0.8 }}>
+                <span style={{ width: 15, height: 15, borderRadius: 4, background: "var(--panel-3)", display: "grid", placeContent: "center", font: "700 7.5px 'IBM Plex Mono'", color: fg, flex: "none" }}>{tg}</span>
+                <span style={{ font: "500 10px 'Space Grotesk',sans-serif", color: "var(--text-mute)" }}>{e.display}</span>
+                <b style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--good)", flex: "none", animation: "cxBreathe 3s ease infinite" }} />
+              </div>
+            ); })}
           </div>
+        )}
+      </div>
+
+      {/* 中部:所有 PTY 终端常驻挂载,active 用 display 切换(绝不卸载 → 不杀 PTY) */}
+      <div style={{ position: "relative", minHeight: 0, overflow: "hidden" }}>
+        {tabs.length === 0 && (
+          <div style={{ ...mono(11), height: "100%", display: "grid", placeContent: "center", textAlign: "center", lineHeight: 1.9, padding: "0 24px" }}>
+            这里是真·交互终端 —— 选一个 agent,给个任务,直接开一个会话。<br />
+            <span style={mono(10, "var(--text-mute)")}>和你在 iTerm 里跑 claude/codex 一样:原生斜杠命令、持续对话都在。多开几个就是并行多 agent。</span>
+          </div>
+        )}
+        {tabs.map((tb) => (
+          <div key={tb.key} style={{ position: "absolute", inset: 0, display: tb.key === activeKey ? "block" : "none" }}>
+            <Suspense fallback={<div style={{ ...mono(10.5), padding: 16 }}>加载终端…</div>}>
+              <PtyTerminal agent={tb.agent} themeMode={themeMode} sessionKey={tb.key} initialInput={tb.initial} visible={tb.key === activeKey} />
+            </Suspense>
+          </div>
+        ))}
+      </div>
+
+      {/* 底部:选 agent + 任务 → 开一个新会话 */}
+      <div style={{ borderTop: "1px solid var(--border-soft)", padding: "10px 12px" }}>
+        <div style={{ ...row(8) }}>
+          <select value={launchAgent} onChange={(e) => setLaunchAgent(e.target.value)} style={{ flex: "none", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 9px", color: "var(--text)", font: "600 11px 'Space Grotesk'", outline: "none", cursor: "pointer" }}>
+            {agentsList.length === 0 && <option value="shell">Shell</option>}
+            {agentsList.map((a) => <option key={a.name} value={a.name}>{a.display}</option>)}
+          </select>
+          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") openSession(); }}
+            placeholder={`给 ${agentsList.find((a) => a.name === launchAgent)?.display || launchAgent || "agent"} 一个任务,回车开会话（可留空,纯开终端）`}
+            style={{ flex: 1, minWidth: 0, background: "var(--panel-3)", border: `1px solid ${prompt ? "var(--accent)" : "var(--border)"}`, borderRadius: 8, padding: "9px 12px", color: "var(--text)", font: "500 12px 'IBM Plex Mono',monospace", outline: "none" }} />
+          <button onClick={openSession} style={{ flex: "none", border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 11.5px 'Space Grotesk'", padding: "9px 16px", borderRadius: 8 }}>开会话</button>
         </div>
       </div>
     </div>
@@ -1762,7 +1989,7 @@ function McpSettings() {
 function SkillsHub({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<"skills" | "mcp">("skills");
   return (
-    <Modal open onClose={onClose} eyebrow="能力中枢" title="技能 & MCP" width={920} maxHeight={760}>
+    <Modal open onClose={onClose} eyebrow="能力中枢" title="技能与 MCP" width={920} maxHeight={760}>
       <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr)", minHeight: 0, height: "100%" }}>
         <div style={{ ...row(8), padding: "12px 16px", borderBottom: "1px solid var(--border-soft)" }}>
           <div style={{ display: "flex", gap: 5, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 4 }}>
@@ -1856,6 +2083,7 @@ function Intel() {
   const [intelData, setIntelData] = useState<Intelligence | null>(null);
   const [filter, setFilter] = useState("全部");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [repoDetail, setRepoDetail] = useState<IntelRepo | null>(null);  // 问题3:GitHub 项目详情(不再一点就跳走)
   const filters = ["全部", "高优先", "中优先", "观察"];
 
   useEffect(() => {
@@ -1924,12 +2152,12 @@ function Intel() {
           </div>
         </div>
         <div style={col}>
-          <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>GITHUB 雷达</span><span style={flex1} /><span style={mono(10, "var(--text-dim)")}>高增速 · {repos.length}</span></div>
+          <div style={headBar}><span style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)" }}>GITHUB 雷达</span><span style={flex1} />{repos.length > 0 && (() => { const last = Math.max(...repos.map((r) => Number(r.observed_ts) || 0)); return last > 0 ? <span style={mono(9, "var(--text-mute)")}>刷新 {tsToTime(last)}</span> : null; })()}<span style={mono(10, "var(--text-dim)")}>高增速 · {repos.length}</span></div>
           <div style={{ overflowY: "auto", minHeight: 0, padding: "12px 16px 16px", display: "grid", gap: 11, alignContent: "start" }}>
             {intelData === null && <div style={{ ...mono(11), padding: "16px 0", textAlign: "center" }}>正在加载雷达…</div>}
             {intelData !== null && repos.length === 0 && <div style={{ ...mono(11), padding: "16px 0", textAlign: "center" }}>暂无仓库</div>}
-            {repos.map((rp, i) => { const speed = typeof rp.stars_per_day === "number" ? rp.stars_per_day : 0; const sg = repoSignal(speed); const name = rp.repo_full_name || "(未知仓库)"; const summary = rp.summary_zh || rp.display_description || rp.description || ""; const lang = rp.language || (Array.isArray(rp.display_topics) && rp.display_topics[0]) || ""; const href = rp.url; return (
-              <div key={rp.repo_full_name || i} onClick={() => { if (href) window.open(href, "_blank", "noopener,noreferrer"); }} className="cx-intel" style={{ border: "1px solid var(--border-soft)", background: "var(--panel-2)", borderRadius: 11, padding: 12, display: "grid", gap: 6, cursor: href ? "pointer" : "default" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</b><span style={{ flex: "none", font: "600 9px 'IBM Plex Mono',monospace", color: sg.fg, background: sg.bg, borderRadius: 999, padding: "2px 8px" }}>{sg.sig}</span></div>{summary && <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text-dim)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{summary}</p>}<div style={{ display: "flex", gap: 12, font: "500 10px 'IBM Plex Mono',monospace", color: "var(--text-mute)" }}>{lang && <span>{lang}</span>}<span>★ {compactNum(rp.stars)}</span>{speed > 0 && <span style={{ color: "var(--good)" }}>▲ {Math.round(speed)}/天</span>}</div></div>
+            {repos.map((rp, i) => { const speed = typeof rp.stars_per_day === "number" ? rp.stars_per_day : 0; const sg = repoSignal(speed); const name = rp.repo_full_name || "(未知仓库)"; const summary = rp.summary_zh || rp.display_description || rp.description || ""; const lang = rp.language || (Array.isArray(rp.display_topics) && rp.display_topics[0]) || ""; const pushed = githubPushedAgo(rp.pushed_at); return (
+              <div key={rp.repo_full_name || i} onClick={() => setRepoDetail(rp)} className="cx-intel" style={{ border: "1px solid var(--border-soft)", background: "var(--panel-2)", borderRadius: 11, padding: 12, display: "grid", gap: 6, cursor: "pointer" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><b style={{ font: "600 13px 'Space Grotesk',sans-serif", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</b><span style={{ flex: "none", font: "600 9px 'IBM Plex Mono',monospace", color: sg.fg, background: sg.bg, borderRadius: 999, padding: "2px 8px" }}>{sg.sig}</span></div>{summary && <p style={{ margin: 0, font: "400 11.5px/1.5 'Space Grotesk',sans-serif", color: "var(--text-dim)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{summary}</p>}<div style={{ display: "flex", gap: 12, font: "500 10px 'IBM Plex Mono',monospace", color: "var(--text-mute)", flexWrap: "wrap" }}>{lang && <span>{lang}</span>}<span>★ {compactNum(rp.stars)}</span>{speed > 0 && <span style={{ color: "var(--good)" }}>▲ {Math.round(speed)}/天</span>}{pushed && <span>{pushed}</span>}</div></div>
             ); })}
           </div>
         </div>
@@ -1950,7 +2178,47 @@ function Intel() {
         </div>
       </div>
       {selectedId && <IntelDetail id={selectedId} onClose={() => setSelectedId(null)} />}
+      {repoDetail && <GithubRepoDetail repo={repoDetail} onClose={() => setRepoDetail(null)} />}
     </div>
+  );
+}
+
+// 问题3:GitHub 项目详情——先看清楚是个啥(中文介绍/指标/相关性/下一步),再决定要不要跳转。
+function GithubRepoDetail({ repo, onClose }: { repo: IntelRepo; onClose: () => void }) {
+  const name = repo.repo_full_name || "GitHub 项目";
+  const speed = typeof repo.stars_per_day === "number" ? repo.stars_per_day : 0;
+  const topics = Array.isArray(repo.display_topics) && repo.display_topics.length ? repo.display_topics : (Array.isArray(repo.topics) ? repo.topics : []);
+  const block = (label: string, body?: string) => body ? (
+    <div style={{ display: "grid", gap: 4 }}>
+      <span style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".12em", color: "var(--text-mute)" }}>{label}</span>
+      <p style={{ margin: 0, font: "400 12.5px/1.6 'Space Grotesk',sans-serif", color: "var(--text-dim)" }}>{body}</p>
+    </div>
+  ) : null;
+  const footer = (
+    <div style={{ ...row(8) }}>
+      <span style={flex1} />
+      {repo.url && <button onClick={() => window.open(repo.url, "_blank", "noopener,noreferrer")} style={{ ...row(6), border: 0, background: "var(--accent)", color: "#fff", cursor: "pointer", borderRadius: 9, padding: "9px 16px", font: "600 12px 'Space Grotesk'" }}>
+        打开 GitHub<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 17 17 7M9 7h8v8" /></svg>
+      </button>}
+    </div>
+  );
+  return (
+    <Drawer open onClose={onClose} level="sheet" eyebrow="GitHub 项目" title={name} footer={footer}>
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", font: "500 11px 'IBM Plex Mono',monospace", color: "var(--text-dim)" }}>
+          {repo.language && <span>语言 {repo.language}</span>}
+          <span>★ {compactNum(repo.stars)}</span>
+          {typeof repo.forks === "number" && <span>Fork {compactNum(repo.forks)}</span>}
+          {speed > 0 && <span style={{ color: "var(--good)" }}>▲ {Math.round(speed)}/天</span>}
+          {githubPushedAgo(repo.pushed_at) && <span>{githubPushedAgo(repo.pushed_at)}</span>}
+        </div>
+        {topics.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{topics.slice(0, 8).map((t, i) => <span key={i} style={{ font: "500 10.5px 'Space Grotesk',sans-serif", color: "var(--text-dim)", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 10px" }}>{t}</span>)}</div>}
+        {block("项目介绍", repo.summary_zh || repo.display_description || repo.description)}
+        {block("为什么进雷达", repo.why_zh)}
+        {block("和你的关系", repo.relation_zh)}
+        {block("建议下一步", repo.next_step_zh)}
+      </div>
+    </Drawer>
   );
 }
 
@@ -2153,7 +2421,7 @@ function Notes({ openId }: { openId: string | null }) {
     <div className="cx-page" style={{ position: "relative", height: "100%", display: "grid", gridTemplateColumns: "278px minmax(0,1fr) 290px", gap: 14, padding: 16, minHeight: 0 }}>
       {/* ── 左：来源 ── */}
       <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto auto auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
-        <div style={{ ...row(8), padding: "13px 14px 9px" }}><span style={lbl}>笔记本 · NOTEBOOK</span><span style={flex1} /><span style={mono(9.5, "var(--accent)")}>{ws.sources.length} 来源</span></div>
+        <div style={{ ...row(8), padding: "13px 14px 9px" }}><span style={lbl}>笔记本</span><span style={flex1} /><span style={mono(9.5, "var(--accent)")}>{ws.sources.length} 来源</span></div>
         {/* 笔记本切换 */}
         <div style={{ ...row(6), padding: "0 12px 10px", overflowX: "auto", flexWrap: "nowrap" }}>
           {[{ name: "", note_count: 0, source_count: 0 } as NotebookMeta, ...notebooks.filter((n) => n.name && n.name !== "未归档"), ...notebooks.filter((n) => n.name === "未归档")].map((n) => { const on = nb === n.name; const label = n.name || "全部"; return (
@@ -2238,7 +2506,7 @@ function Notes({ openId }: { openId: string | null }) {
       {/* ── 右：工作室 + 笔记 ── */}
       <div style={{ ...panel, padding: 0, display: "grid", gridTemplateRows: "auto auto minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
         <div style={{ padding: "13px 14px 10px" }}>
-          <div style={{ ...row(8) }}><span style={lbl}>工作室 · STUDIO</span><span style={flex1} /></div>
+          <div style={{ ...row(8) }}><span style={lbl}>工作室</span><span style={flex1} /></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 9 }}>
             {(ws.templates.length ? ws.templates : [{ id: "overview", label: "文档概览", tag: "" }, { id: "faq", label: "常见问答", tag: "" }, { id: "timeline", label: "时间线", tag: "" }, { id: "briefing", label: "简报文档", tag: "" }, { id: "study_guide", label: "学习指南", tag: "" }]).map((t) => (
               <button key={t.id} onClick={() => runStudio(t.id)} disabled={!!studioBusy || !ws.sources.length} className="cx-chip" style={{ border: "1px solid var(--border)", background: studioBusy === t.id ? "var(--accent-soft)" : "var(--panel-2)", color: "var(--text-dim)", cursor: ws.sources.length ? "pointer" : "default", borderRadius: 9, padding: "9px 6px", font: "600 11px 'Space Grotesk'", opacity: ws.sources.length ? 1 : 0.5, display: "grid", gap: 2, lineHeight: 1.2 }}>
@@ -2374,8 +2642,8 @@ function CapabilitiesSettings({ card, h2, Switch }: { card: CSSProperties; h2: (
     { name: "主动助理", desc: "每日 check-in + 自定义后台自动任务(在 Jarvis 对话弹窗→主动助理 里配)", right: cfg ? Switch({ on: cfg.enabled, onClick: () => saveCfg({ enabled: !cfg.enabled }) }) : <span style={mono(10)}>…</span> },
     { name: "日程提醒", desc: `到点桌面/应内/iOS 推送。当前 ${sched} 条待办日程`, right: <span style={mono(10, "var(--text-dim)")}>{sched} 条</span> },
     { name: "感知接入", desc: `浏览器原生权限投喂上下文,授权状态已持久化。已接入 ${senseN} 个通道`, right: <span style={mono(10, senseN > 0 ? "var(--good)" : "var(--text-dim)")}>{senseN}/9</span> },
-    { name: "MCP 服务", desc: "外部能力接入(搜索/抓取/工具)。在顶栏「技能 & MCP」里开关、填密钥", right: <span style={mono(10, "var(--text-dim)")}>{mcp?.summary ? `${mcp.summary.ready}/${mcp.summary.total} 就绪` : "…"}</span> },
-    { name: "技能库", desc: "agent 自动提炼 + 手动/GitHub 导入,相关问题自动复用。顶栏「技能 & MCP」管理", right: <span style={mono(10, "var(--text-dim)")}>顶栏图标</span> },
+    { name: "MCP 服务", desc: "外部能力接入(搜索/抓取/工具)。在顶栏「技能与 MCP」里开关、填密钥", right: <span style={mono(10, "var(--text-dim)")}>{mcp?.summary ? `${mcp.summary.ready}/${mcp.summary.total} 就绪` : "…"}</span> },
+    { name: "技能库", desc: "agent 自动提炼 + 手动/GitHub 导入,相关问题自动复用。顶栏「技能与 MCP」管理", right: <span style={mono(10, "var(--text-dim)")}>顶栏图标</span> },
     { name: "深入调研", desc: "多源搜索→读源→带来源报告。在 记事 里发起", right: <span style={mono(10, "var(--text-dim)")}>记事内</span> },
   ];
   return (<>
@@ -2415,7 +2683,7 @@ function Settings({ theme, setTheme, scan, toggleScan }: { theme: Theme; setThem
     catch { /* ignore */ } finally { setSaving(false); }
   }
 
-  const tabMeta: [SetTab, string, string][] = [["appearance", "外观与动效", "APPEARANCE"], ["capabilities", "能力与自动化", "CAPABILITIES"], ["models", "模型路由", "MODELS"], ["sources", "情报源", "SOURCES"], ["notify", "通知", "NOTIFY"], ["amap", "高德地图", "AMAP"], ["system", "系统与守卫", "SYSTEM"]];
+  const tabMeta: [SetTab, string][] = [["appearance", "外观与动效"], ["capabilities", "能力与自动化"], ["models", "模型路由"], ["sources", "情报源"], ["notify", "通知"], ["amap", "高德地图"], ["system", "系统与守卫"]];
   const h2 = (t: string, d: string) => (<div style={{ marginBottom: 22 }}><h2 style={{ margin: 0, font: "600 20px 'Space Grotesk',sans-serif", color: "var(--text)" }}>{t}</h2><p style={{ margin: "6px 0 0", font: "400 13px/1.6 'Space Grotesk',sans-serif", color: "var(--text-dim)", maxWidth: 560 }}>{d}</p></div>);
   const Switch = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
     <button onClick={onClick} style={{ width: 40, height: 23, border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`, borderRadius: 999, background: on ? "var(--accent)" : "var(--panel-2)", position: "relative", cursor: "pointer", flex: "none" }}><i style={{ position: "absolute", top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: on ? "#fff" : "var(--text-mute)", transition: "left .18s" }} /></button>
@@ -2427,9 +2695,9 @@ function Settings({ theme, setTheme, scan, toggleScan }: { theme: Theme; setThem
   return (
     <div className="cx-page" style={{ height: "100%", display: "grid", gridTemplateColumns: "208px minmax(0,1fr)", gap: 14, padding: 16, minHeight: 0 }}>
       <div style={{ ...panel, padding: 12, display: "grid", gap: 3, alignContent: "start" }}>
-        <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)", padding: "8px 10px 10px" }}>设置台 · CONSOLE</div>
-        {tabMeta.map(([id, label, en]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ textAlign: "left", border: 0, cursor: "pointer", ...row(10), padding: "10px 11px", borderRadius: 10, background: tab === id ? "var(--panel-2)" : "transparent" }}><span style={{ width: 3, height: 15, borderRadius: 3, background: tab === id ? "var(--accent)" : "transparent", flex: "none" }} /><div style={{ minWidth: 0 }}><div style={{ font: "600 12.5px 'Space Grotesk',sans-serif", color: tab === id ? "var(--text)" : "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div><div style={{ font: "500 8.5px 'IBM Plex Mono',monospace", letterSpacing: ".1em", color: "var(--text-mute)", whiteSpace: "nowrap" }}>{en}</div></div></button>
+        <div style={{ font: "600 9.5px 'IBM Plex Mono',monospace", letterSpacing: ".16em", color: "var(--text-mute)", padding: "8px 10px 10px" }}>设置台</div>
+        {tabMeta.map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ textAlign: "left", border: 0, cursor: "pointer", ...row(10), padding: "11px 11px", borderRadius: 10, background: tab === id ? "var(--panel-2)" : "transparent" }}><span style={{ width: 3, height: 15, borderRadius: 3, background: tab === id ? "var(--accent)" : "transparent", flex: "none" }} /><div style={{ font: "600 12.5px 'Space Grotesk',sans-serif", color: tab === id ? "var(--text)" : "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div></button>
         ))}
         {savedAt > 0 && <div style={{ ...mono(9.5, "var(--good)"), padding: "10px 11px" }}>{saving ? "保存中…" : "已保存"}</div>}
       </div>

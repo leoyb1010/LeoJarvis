@@ -24,6 +24,32 @@ def _row(r) -> dict:
     return d
 
 
+def _writeback_after(sid: str, *, delete: bool = False) -> None:
+    """日程增/改/删后,把这条写回 CalDAV(配了才写)。best-effort,绝不影响本地。
+
+    已完成(status=done)的日程视作要从远端撤掉提醒 → 走 delete 分支。
+    写回成功时把 remote_href/remote_etag 落库(便于诊断)。"""
+    try:
+        from . import caldav_writeback
+        row = get(sid) if not delete else None
+        if delete:
+            # 删除场景:调用方已读过行并传 sid 对应内容;这里仅用 cal_uid 占位。
+            row = {"cal_uid": f"{sid}@leojarvis", "id": sid}
+            caldav_writeback.writeback(row, delete=True)
+            return
+        if not row:
+            return
+        do_delete = (row.get("status") == "done")
+        r = caldav_writeback.writeback(row, delete=do_delete)
+        # 同步写(block 路径)才有 ok;线程路径返回 queued,href 由后续诊断不强求。
+        if r.get("ok") and (r.get("remote_href") or r.get("remote_etag")):
+            with db.conn() as c:
+                c.execute("UPDATE schedule SET remote_href=?, remote_etag=? WHERE id=?",
+                          (r.get("remote_href") or "", r.get("remote_etag") or "", sid))
+    except Exception:
+        pass  # CalDAV 永远不能让本地写失败
+
+
 def create(*, title: str, start_ts: int, remind_ts: int | None = None, note: str = "",
            repeat: str = "none", source: str = "manual", event_id: str | None = None) -> str | None:
     title = str(title or "").strip()
@@ -33,13 +59,15 @@ def create(*, title: str, start_ts: int, remind_ts: int | None = None, note: str
     db.init_db()
     now = db.now_ms()
     sid = uuid.uuid4().hex
+    cal_uid = f"{sid}@leojarvis"
     with db.conn() as c:
         c.execute(
-            """INSERT INTO schedule(id,title,note,start_ts,remind_ts,repeat,status,reminded,source,event_id,created_ts,updated_ts)
-               VALUES(?,?,?,?,?,?,'pending',0,?,?,?,?)""",
+            """INSERT INTO schedule(id,title,note,start_ts,remind_ts,repeat,status,reminded,source,event_id,cal_uid,created_ts,updated_ts)
+               VALUES(?,?,?,?,?,?,'pending',0,?,?,?,?,?)""",
             (sid, title, str(note or ""), int(start_ts), (int(remind_ts) if remind_ts else None),
-             repeat, source, event_id, now, now),
+             repeat, source, event_id, cal_uid, now, now),
         )
+    _writeback_after(sid)
     return sid
 
 
@@ -82,7 +110,10 @@ def update(sid: str, **fields) -> bool:
     db.init_db()
     with db.conn() as c:
         cur = c.execute(f"UPDATE schedule SET {', '.join(sets)} WHERE id=?", tuple(args))
-    return cur.rowcount > 0
+    ok = cur.rowcount > 0
+    if ok:
+        _writeback_after(sid)  # 改时间/提醒/标题/完成态 → 同步到远端(done 会撤掉远端提醒)
+    return ok
 
 
 def set_done(sid: str, done: bool = True) -> bool:
@@ -93,7 +124,10 @@ def delete(sid: str) -> bool:
     db.init_db()
     with db.conn() as c:
         cur = c.execute("DELETE FROM schedule WHERE id=?", (sid,))
-    return cur.rowcount > 0
+    ok = cur.rowcount > 0
+    if ok:
+        _writeback_after(sid, delete=True)  # 本地删了 → 远端也删
+    return ok
 
 
 def _next_occurrence(start_ts: int, repeat: str) -> int | None:

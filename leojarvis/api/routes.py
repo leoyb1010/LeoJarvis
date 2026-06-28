@@ -1549,6 +1549,13 @@ def calendar_upcoming(hours: int = 168, limit: int = 50) -> dict:
     return {"ok": True, "events": calendar_sync.upcoming(hours=hours, limit=limit)}
 
 
+@router.get("/calendar/caldav-status")
+def calendar_caldav_status() -> dict:
+    """CalDAV 写回状态(给待办 UI 看是否已开启同步)。不回传密码。"""
+    from .. import caldav_writeback
+    return caldav_writeback.config_status()
+
+
 # ---------- P4：深入调研(goal-based 多步) ----------
 
 class DeepResearchIn(BaseModel):

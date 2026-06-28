@@ -13,12 +13,14 @@ type Theme = "dark" | "light" | "auto";
 const isDark = (t: Theme) => t === "dark" || (t === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 const row = (g = 8): CSSProperties => ({ display: "flex", alignItems: "center", gap: g });
 
-export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: string; themeMode: Theme; sessionKey: number }) {
+export default function PtyTerminal({ agent, themeMode, sessionKey, initialInput, cwd = "~", visible = true }: { agent: string; themeMode: Theme; sessionKey: number; initialInput?: string; cwd?: string; visible?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const fitRef = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "exited">("connecting");
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    let booted = false;  // 首次收到输出后,把 initialInput 作为任务发进去(只发一次)
     const dark = isDark(themeMode);
     const term = new XTerm({
       fontFamily: "'IBM Plex Mono','SFMono-Regular',monospace",
@@ -32,6 +34,7 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
     term.loadAddon(fit);
     term.open(host);
     const doFit = () => { try { fit.fit(); } catch { /* noop */ } };
+    fitRef.current = doFit;
     setTimeout(doFit, 0);
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -39,7 +42,7 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
     ws.binaryType = "arraybuffer";
     ws.onopen = () => {
       setStatus("live");
-      ws.send(JSON.stringify({ type: "start", agent, cwd: "~", cols: term.cols, rows: term.rows }));
+      ws.send(JSON.stringify({ type: "start", agent, cwd, cols: term.cols, rows: term.rows }));
       term.focus();
     };
     ws.onmessage = (e) => {
@@ -51,6 +54,11 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
         } catch { /* ignore */ }
       } else {
         term.write(new Uint8Array(e.data as ArrayBuffer));
+        // agent 的交互界面就绪(首次输出)后,把初始任务敲进去 —— 像在真终端里打字回车。
+        if (!booted && initialInput && initialInput.trim()) {
+          booted = true;
+          setTimeout(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data: initialInput.trim() + "\r" })); }, 350);
+        }
       }
     };
     ws.onclose = () => setStatus((s) => (s === "exited" ? s : "exited"));
@@ -66,6 +74,9 @@ export default function PtyTerminal({ agent, themeMode, sessionKey }: { agent: s
     // sessionKey 变化 = 用户点了「重启会话」，强制重建终端
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent, sessionKey]);
+
+  // 标签切换:面板从 display:none 重新显示时,xterm 量到的尺寸是 0,需要重新 fit。
+  useEffect(() => { if (visible) setTimeout(() => fitRef.current?.(), 30); }, [visible]);
 
   const bg = isDark(themeMode) ? "#0f141b" : "#f6f8fa";
   return (

@@ -18,6 +18,7 @@ export interface SenseResult {
   summary?: string;
   details?: string[];
   thumb?: string; // 屏幕感知缩略图 dataURL
+  metrics?: Record<string, number>; // 数值化指标(电量/rtt/文件数…),驱动卡片图形联动
   reason?: string;
 }
 
@@ -27,6 +28,8 @@ export interface SenseChannel {
   desc: string;
   icon: string; // 在 CommandCenter 里映射成 inline SVG（不引入图标库）
   reads: string; // 透明告知会读取什么
+  purpose: string; // 这条通道采到的信息给 Jarvis 做什么
+  privacy: string; // 隐私边界(脱敏/本地/不上传)
   domain: "local" | "personal";
   isSupported: () => boolean;
   connect: () => Promise<SenseResult>;
@@ -57,6 +60,8 @@ const fileSystem: SenseChannel = {
   desc: "选一个文件夹，读取其中的文件清单（名称/大小/类型）",
   icon: "folder",
   reads: "你选定文件夹内的文件名、大小、类型（不读文件内容）",
+  purpose: "让 Jarvis 知道你在整理哪些文件,便于关联记事、整理建议、找文件。",
+  privacy: "只读文件清单(名/大小/类型),不读文件内容;脱敏后入库。",
   domain: "local",
   isSupported: () => typeof window !== "undefined" && "showDirectoryPicker" in window,
   connect: async (): Promise<SenseResult> => {
@@ -81,7 +86,7 @@ const fileSystem: SenseChannel = {
           }
         }
       }
-      return { status: "connected", summary: `读取了「${dir.name}」文件夹，共 ${count} 个条目`, details };
+      return { status: "connected", summary: `读取了「${dir.name}」文件夹，共 ${count} 个条目`, details, metrics: { count } };
     } catch (e) {
       const err = e as DOMException;
       if (err?.name === "AbortError") return { status: "available", reason: "你取消了选择" };
@@ -97,6 +102,8 @@ const screen: SenseChannel = {
   desc: "经你确认，截取当前屏幕一帧用于上下文感知（不持续录屏）",
   icon: "monitor",
   reads: "你选定的屏幕/窗口单帧画面，截取后立即停止，不持续录制",
+  purpose: "让 Jarvis 知道你此刻在看什么界面,给出更贴合当前任务的帮助。",
+  privacy: "只截一帧、不持续录屏;缩略图仅存本地、不投喂,只投喂文字摘要。",
   domain: "personal",
   isSupported: () =>
     typeof navigator !== "undefined" &&
@@ -136,6 +143,8 @@ const clipboard: SenseChannel = {
   desc: "读取当前剪贴板文本，便于把你刚复制的内容转成记忆/任务",
   icon: "clipboard",
   reads: "你点击时剪贴板里的纯文本（一次性，不监听）",
+  purpose: "把你刚复制的内容一键转成记忆/任务/笔记。",
+  privacy: "一次性读取、不监听;敏感片段(密钥/令牌)入库前脱敏。",
   domain: "personal",
   isSupported: () =>
     typeof navigator !== "undefined" &&
@@ -163,6 +172,8 @@ const geo: SenseChannel = {
   desc: "经你授权读取当前位置，用于「在公司/在家」等情境感知",
   icon: "pin",
   reads: "你授权时的一次性地理坐标（不持续追踪）",
+  purpose: "判断「在公司/在家/在外」,做情境化提醒和建议。",
+  privacy: "一次性坐标、不持续追踪;坐标只精确到 3 位小数。",
   domain: "personal",
   isSupported: () => typeof navigator !== "undefined" && "geolocation" in navigator,
   connect: () =>
@@ -191,24 +202,29 @@ const environment: SenseChannel = {
   desc: "在线状态、平台、CPU、内存、电量等环境上下文（无需授权）",
   icon: "cpu",
   reads: "浏览器公开的环境信息：在线/平台/语言/CPU 核数/内存/电量",
+  purpose: "了解你的设备状态(电量/算力),据此调整建议(如低电量少跑重活)。",
+  privacy: "全是浏览器公开的环境字段,无隐私标识;入库前脱敏。",
   domain: "local",
   isSupported: () => typeof navigator !== "undefined",
   connect: async (): Promise<SenseResult> => {
     const nav = navigator as BatteryNav;
+    const metrics: Record<string, number> = {};
     const bits: string[] = [
       `在线：${navigator.onLine ? "是" : "否"}`,
       `平台：${navigator.platform || "未知"}`,
       `语言：${navigator.language}`,
       `CPU 核数：${navigator.hardwareConcurrency ?? "未知"}`,
     ];
-    if (nav.deviceMemory) bits.push(`内存：约 ${nav.deviceMemory} GB`);
+    if (navigator.hardwareConcurrency) metrics.cores = navigator.hardwareConcurrency;
+    if (nav.deviceMemory) { bits.push(`内存：约 ${nav.deviceMemory} GB`); metrics.memGB = nav.deviceMemory; }
+    metrics.online = navigator.onLine ? 1 : 0;
     try {
       const b = await nav.getBattery?.();
-      if (b) bits.push(`电量：${Math.round(b.level * 100)}%${b.charging ? "（充电中）" : ""}`);
+      if (b) { bits.push(`电量：${Math.round(b.level * 100)}%${b.charging ? "（充电中）" : ""}`); metrics.battery = Math.round(b.level * 100); metrics.charging = b.charging ? 1 : 0; }
     } catch {
       /* battery API optional */
     }
-    return { status: "connected", summary: "已感知设备环境", details: bits };
+    return { status: "connected", summary: "已感知设备环境", details: bits, metrics };
   },
 };
 
@@ -219,20 +235,23 @@ const network: SenseChannel = {
   desc: "当前网络类型、估算带宽与延迟（无需授权）",
   icon: "network",
   reads: "浏览器公开的网络信息：连接类型、下行带宽、RTT、省流模式",
+  purpose: "据网络质量调整行为(弱网少拉大数据、提示离线降级)。",
+  privacy: "只读连接质量指标,不涉及访问内容或地址。",
   domain: "local",
   isSupported: () => typeof navigator !== "undefined" && ("connection" in navigator || "onLine" in navigator),
   connect: async (): Promise<SenseResult> => {
     const c = (navigator as ConnNav).connection;
+    const metrics: Record<string, number> = { online: navigator.onLine ? 1 : 0 };
     const bits: string[] = [`在线：${navigator.onLine ? "是" : "否"}`];
     if (c) {
       if (c.effectiveType) bits.push(`网络等级：${c.effectiveType}`);
-      if (typeof c.downlink === "number") bits.push(`下行带宽：约 ${c.downlink} Mb/s`);
-      if (typeof c.rtt === "number") bits.push(`往返延迟：约 ${c.rtt} ms`);
+      if (typeof c.downlink === "number") { bits.push(`下行带宽：约 ${c.downlink} Mb/s`); metrics.downlink = c.downlink; }
+      if (typeof c.rtt === "number") { bits.push(`往返延迟：约 ${c.rtt} ms`); metrics.rtt = c.rtt; }
       if (c.saveData) bits.push("省流模式：开");
     } else {
       bits.push("浏览器未暴露详细网络信息");
     }
-    return { status: "connected", summary: "已感知网络状况", details: bits };
+    return { status: "connected", summary: "已感知网络状况", details: bits, metrics };
   },
 };
 
@@ -243,6 +262,8 @@ const mediaDevices: SenseChannel = {
   desc: "有几个摄像头/麦克风/扬声器（只清点数量，不开启）",
   icon: "devices",
   reads: "媒体输入输出设备的数量与种类（不访问画面或声音）",
+  purpose: "了解你有哪些输入输出设备,便于会议/录音/通话场景的建议。",
+  privacy: "只清点数量,不开启任何摄像头/麦克风,不取流。",
   domain: "local",
   isSupported: () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.enumerateDevices,
   connect: async (): Promise<SenseResult> => {
@@ -257,7 +278,7 @@ const mediaDevices: SenseChannel = {
       // 标签是否可读 → 反映是否已授权过媒体权限（不主动请求）。
       const labeled = list.some((d) => d.label);
       bits.push(labeled ? "设备名称：可读（曾授权）" : "设备名称：未授权（仅计数）");
-      return { status: "connected", summary: "已清点媒体设备", details: bits };
+      return { status: "connected", summary: "已清点媒体设备", details: bits, metrics: { cam: n("videoinput"), mic: n("audioinput"), spk: n("audiooutput") } };
     } catch (e) {
       return { status: "denied", reason: String(e) };
     }
@@ -271,6 +292,8 @@ const locale: SenseChannel = {
   desc: "首选语言、时区与本地时间偏好（无需授权）",
   icon: "locale",
   reads: "浏览器语言列表、时区、24/12 小时制等地区设置",
+  purpose: "用对的语言、时区与时间格式跟你沟通、安排日程。",
+  privacy: "只读地区偏好,无个人身份信息。",
   domain: "local",
   isSupported: () => typeof Intl !== "undefined" && typeof navigator !== "undefined",
   connect: async (): Promise<SenseResult> => {
@@ -292,6 +315,8 @@ const notify: SenseChannel = {
   desc: "授权后 Jarvis 可在重要事项时弹系统通知",
   icon: "bell",
   reads: "通知权限状态（不读取任何已有通知内容）",
+  purpose: "授权后 Jarvis 能在日程到点、重要事项时弹系统通知。",
+  privacy: "只申请通知权限,不读取你已有的任何通知内容。",
   domain: "local",
   isSupported: () => typeof window !== "undefined" && "Notification" in window,
   connect: async (): Promise<SenseResult> => {
@@ -310,7 +335,7 @@ export const SENSE_CHANNELS: SenseChannel[] = [fileSystem, screen, clipboard, ge
 
 // ---- 感知状态持久化(问题9):首页与感知 tab 共享同一份状态,切页不丢授权记录 ----
 const _SENSE_KEY = "cx-sense-state";
-export type SenseSaved = { status: SenseStatus; fed?: string; summary?: string; details?: string[]; ts: number };
+export type SenseSaved = { status: SenseStatus; fed?: string; summary?: string; details?: string[]; thumb?: string; metrics?: Record<string, number>; ts: number };
 
 export function loadSenseState(): Record<string, SenseSaved> {
   try { return JSON.parse(localStorage.getItem(_SENSE_KEY) || "{}"); } catch { return {}; }

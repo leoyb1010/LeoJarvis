@@ -275,6 +275,50 @@ def _clean_topic_label(topic: str) -> str:
     return ""
 
 
+# ---------- 翻译缓存(问题3:GitHub 描述中文化,扫描阶段 LLM 翻译一次,展示阶段读缓存) ----------
+import hashlib as _hashlib
+
+_TR_CACHE_READY = False
+
+
+def _ensure_translation_cache() -> None:
+    global _TR_CACHE_READY
+    if _TR_CACHE_READY:
+        return
+    try:
+        with db.conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS translation_cache (k TEXT PRIMARY KEY, zh TEXT, ts INTEGER)")
+        _TR_CACHE_READY = True
+    except Exception:
+        pass
+
+
+def _tr_key(text: str) -> str:
+    return _hashlib.sha1(text.strip().encode("utf-8", "ignore")).hexdigest()
+
+
+def _translation_cache_get(text: str) -> str:
+    _ensure_translation_cache()
+    try:
+        with db.conn() as c:
+            r = c.execute("SELECT zh FROM translation_cache WHERE k=?", (_tr_key(text),)).fetchone()
+        return str(r["zh"]) if r and r["zh"] else ""
+    except Exception:
+        return ""
+
+
+def _translation_cache_put(text: str, zh: str) -> None:
+    if not zh:
+        return
+    _ensure_translation_cache()
+    try:
+        with db.conn() as c:
+            c.execute("INSERT OR REPLACE INTO translation_cache(k, zh, ts) VALUES(?,?,?)",
+                      (_tr_key(text), zh, db.now_ms()))
+    except Exception:
+        pass
+
+
 def _repo_topic_tags(topics: list[str] | str | None, language: str | None = None, limit: int = 6) -> list[str]:
     if isinstance(topics, str):
         topics = _json_loads(topics, [])
@@ -305,22 +349,32 @@ def _repo_topic_tags(topics: list[str] | str | None, language: str | None = None
     return tags[:limit]
 
 
-def _repo_summary_zh(name: str, description: str | None, topics: list[str] | None, language: str | None) -> str:
+def _repo_summary_zh(name: str, description: str | None, topics: list[str] | None,
+                     language: str | None, *, allow_llm: bool = True) -> str:
+    """GitHub 项目中文介绍。扫描阶段(allow_llm=True)走一次 LLM 翻译并落库缓存,
+    保证中文显示;展示阶段读缓存即可。绝不直接甩整段英文给用户。"""
     raw = _clean_text(description or "", limit=500)
-    translated = to_chinese(raw, context="GitHub 项目中文介绍", max_chars=220, allow_llm=False) if raw else ""
-    if translated and "英文来源摘要" not in translated and not translated.startswith("中文摘要：") and not has_noisy_english(translated):
+    if not raw:
+        tags = _repo_topic_tags(topics, language, limit=4)
+        focus = "、".join(tags[:4]) or (f"{language} 生态" if language else "AI 与开发工具生态")
+        return f"{name}:仓库暂未提供 description。已按语言、主题和增长信号归入 {focus} 方向,需打开 README 判断实际用途。"
+    # 先查翻译缓存(按原文 hash),命中直接返回。
+    cached = _translation_cache_get(raw)
+    if cached:
+        return cached[:220]
+    # 扫描阶段:LLM 翻译一次并落库。展示阶段(allow_llm=False)只用无网络回退。
+    translated = to_chinese(raw, context="GitHub 项目中文介绍", max_chars=220, allow_llm=allow_llm)
+    if translated and not has_noisy_english(translated) and "英文来源摘要" not in translated and not translated.startswith("中文摘要："):
+        if allow_llm:
+            _translation_cache_put(raw, translated)
         return translated
-    if raw:
-        topic_tags = _repo_topic_tags(topics, language, limit=3)
-        prefix = f"{name}：{raw[:260]}"
-        if topic_tags:
-            prefix += f"。主题：{'、'.join(topic_tags)}"
-        return prefix
-    tags = _repo_topic_tags(topics, language, limit=4)
-    focus = "、".join(tags[:4])
-    if not focus:
-        focus = f"{language} 生态" if language else "AI 与开发工具生态"
-    return f"{name}：仓库暂未提供 description。已按语言、主题和增长信号归入 {focus} 方向，需打开 README 判断实际用途。"
+    # 回退:仍用字典尽量中文化,并补主题,绝不直接返回整段英文。
+    zh = to_chinese(raw, context="GitHub 项目描述要点", max_chars=200, allow_llm=False)
+    topic_tags = _repo_topic_tags(topics, language, limit=3)
+    base = zh if zh and not zh.startswith("中文摘要") else f"{name} 暂无可靠中文译文"
+    if topic_tags:
+        base += f"。方向:{'、'.join(topic_tags)}"
+    return base[:220]
 
 
 def _repo_reason_zh(repo: dict, velocity: dict, score: float, reasons: list[str]) -> str:
@@ -342,12 +396,13 @@ def _repo_next_step_zh(repo: dict) -> str:
     return f"打开 {name} 的 README、示例和最近提交，重点判断三点：是否能本地部署、是否有可复用架构、是否值得加入持续监控或个人记事。"
 
 
-def _github_analysis(repo: dict, query: str, velocity: dict, score: float, reasons: list[str]) -> dict:
+def _github_analysis(repo: dict, query: str, velocity: dict, score: float, reasons: list[str], *, allow_llm: bool = False) -> dict:
     name = repo.get("full_name") or repo.get("repo_full_name") or "GitHub 项目"
     topics = repo.get("topics") or []
     if isinstance(topics, str):
         topics = _json_loads(topics, [])
-    summary = _repo_summary_zh(name, repo.get("description") or "", topics, repo.get("language"))
+    # 展示路径(github_radar)allow_llm=False 只读缓存,扫描路径(_scan_github)allow_llm=True 翻译并落缓存。
+    summary = _repo_summary_zh(name, repo.get("description") or "", topics, repo.get("language"), allow_llm=allow_llm)
     stars = int(repo.get("stargazers_count") or repo.get("stars") or 0)
     forks = int(repo.get("forks_count") or repo.get("forks") or 0)
     speed = velocity.get("stars_per_day") or velocity.get("cold_stars_per_day")
@@ -1449,8 +1504,9 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                 forks = int(repo.get("forks_count") or 0)
                 topics = repo.get("topics") or []
                 original_description = repo.get("description") or "无描述"
-                description = to_chinese(original_description, context="GitHub 项目描述", max_chars=180, allow_llm=False)
-                analysis = _github_analysis(repo, query, velocity, score, reasons)
+                # 扫描阶段允许 LLM 翻译并落缓存,保证中文显示(展示阶段读缓存,快)。
+                description = _repo_summary_zh(full_name, original_description, topics, repo.get("language"), allow_llm=True)
+                analysis = _github_analysis(repo, query, velocity, score, reasons, allow_llm=True)
                 per_day = velocity.get("stars_per_day")
                 delta_24h = velocity.get("delta_24h")
                 delta_7d = velocity.get("delta_7d")
@@ -1493,6 +1549,7 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                         "reasons": reasons,
                         "created_at": repo.get("created_at"),
                         "pushed_at": repo.get("pushed_at"),
+                        "observed_ts": observed_ts,
                     },
                 )
                 event_id = db.insert_event(
@@ -1503,7 +1560,8 @@ async def _scan_github(client: httpx.AsyncClient) -> dict:
                     content=item.content,
                     url=item.url,
                     meta=item.meta,
-                    dedup_key=f"github:{full_name}:{_event_day()}",
+                    # 问题4:稳定 dedup(不带日期)——同一仓库不再每天重新插入、避免长期项目永远"新鲜"霸榜。
+                    dedup_key=f"github:{full_name}",
                 )
                 if event_id is None:
                     continue

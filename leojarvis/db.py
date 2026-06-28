@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS schedule (
   reminded INTEGER DEFAULT 0,       -- 提醒是否已发(去重;repeat 滚动后清零)
   source TEXT DEFAULT 'manual',     -- manual / inbox / calendar
   event_id TEXT,                    -- 来源事件(从收件箱/日历转入时)
+  cal_uid TEXT,                     -- CalDAV VEVENT 的稳定 UID(<id>@leojarvis),用于增改删round-trip
+  remote_href TEXT,                 -- CalDAV 资源 href(写回成功后记录,便于诊断/未来冲突检测)
+  remote_etag TEXT,                 -- CalDAV 资源 etag
   created_ts INTEGER, updated_ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_start ON schedule(status, start_ts);
@@ -329,6 +332,15 @@ def _init_db_impl() -> None:
             "import_meta": "ALTER TABLE personal_notes ADD COLUMN import_meta TEXT",
         }.items():
             if col not in note_cols:
+                c.execute(ddl)
+        # 日程 CalDAV 写回:记录远端 VEVENT 标识,支持增改删 round-trip。
+        sched_cols = {r["name"] for r in c.execute("PRAGMA table_info(schedule)").fetchall()}
+        for col, ddl in {
+            "cal_uid": "ALTER TABLE schedule ADD COLUMN cal_uid TEXT",
+            "remote_href": "ALTER TABLE schedule ADD COLUMN remote_href TEXT",
+            "remote_etag": "ALTER TABLE schedule ADD COLUMN remote_etag TEXT",
+        }.items():
+            if col not in sched_cols:
                 c.execute(ddl)
         judgment_cols = {r["name"] for r in c.execute("PRAGMA table_info(judgments)").fetchall()}
         if "analysis" not in judgment_cols:

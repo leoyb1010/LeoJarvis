@@ -352,6 +352,36 @@ def _battery_info() -> dict:
     }
 
 
+def _friendly_model_name(model: str, host: str) -> str:
+    """把 hw.model / 主机名 推断成实际机型显示名(问题10:别再显示带 -2 的 LocalHostName)。
+
+    hw.model 形如 Mac15,3 / MacBookAir10,1 / Macmini9,1 / MacStudio... —— 先按这些标识判断;
+    标识不含机型词时,再看主机名里的关键词(LeoMac-Studio-2 → Mac Studio,去掉 -2 噪声)。
+    """
+    m = (model or "").replace(" ", "").lower()
+    h = (host or "").lower()
+    def has(*kws: str) -> bool:
+        return any(k in m or k in h for k in kws)
+    if has("macbookair", "macbook-air", "air"):
+        return "MacBook Air"
+    if has("macbookpro", "macbook-pro"):
+        return "MacBook Pro"
+    if has("macstudio", "mac-studio", "studio"):
+        return "Mac Studio"
+    if has("macmini", "mac-mini", "mini"):
+        return "Mac mini"
+    if has("macbook"):
+        return "MacBook"
+    if has("imac"):
+        return "iMac"
+    if has("macpro", "mac-pro"):
+        return "Mac Pro"
+    # 兜底:主机名去掉自动追加的 "-N" 数字后缀,比裸 hostname 干净。
+    import re as _re
+    cleaned = _re.sub(r"-\d+$", "", host or "").replace("-", " ").strip()
+    return cleaned or "这台 Mac"
+
+
 def local_device_identity() -> dict:
     cfg = settings().get("device", {}) if isinstance(settings(), dict) else {}
     host = socket.gethostname().split(".")[0]
@@ -359,9 +389,11 @@ def local_device_identity() -> dict:
     model = model if model and "执行失败" not in model else platform.machine()
     seed = str(cfg.get("id") or f"{host}:{model}:{Path.home()}")
     device_id = str(cfg.get("id") or f"mac-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}")
+    # 显示名优先用配置的 [device].name;没配就按实际机型推断,而不是带 -2 的 LocalHostName。
+    device_name = str(cfg.get("name") or "").strip() or _friendly_model_name(model, host)
     return {
         "device_id": device_id,
-        "device_name": str(cfg.get("name") or host or "This Mac"),
+        "device_name": device_name,
         "host_name": host,
         "model": model,
         "role": str(cfg.get("role") or "mac"),

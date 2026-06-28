@@ -73,7 +73,7 @@ export type Briefing = { items?: BriefItem[]; counts?: Record<string, number> } 
 export const getBriefing = () => jget<Briefing>("/briefing/today?compact=1");
 
 // intelligence/overview: { github:[{ repo_full_name, display_description/summary_zh/description, language, stars, stars_per_day, delta_24h, momentum_score, url, topics, ... }], sources:[{ id, type, name, url, domain, enabled, last_scan_ts }], targets:[{ id, label, kind, query, enabled }], stats:{ enabled_targets, enabled_sources, notify_events, github_repos } }
-export type IntelRepo = { repo_full_name?: string; description?: string; display_description?: string; summary_zh?: string; language?: string; stars?: number; forks?: number; stars_per_day?: number; delta_24h?: number; momentum_score?: number; url?: string; topics?: string[]; display_topics?: string[] } & Record<string, any>;
+export type IntelRepo = { repo_full_name?: string; description?: string; display_description?: string; summary_zh?: string; why_zh?: string; relation_zh?: string; next_step_zh?: string; language?: string; stars?: number; forks?: number; stars_per_day?: number; delta_24h?: number; delta_7d?: number; momentum_score?: number; url?: string; topics?: string[]; display_topics?: string[]; pushed_at?: string; created_at?: string; observed_ts?: number } & Record<string, any>;
 export type IntelSource = { id?: string; type?: string; name?: string; url?: string; domain?: string; enabled?: number; last_scan_ts?: number | null } & Record<string, any>;
 export type IntelTarget = { id?: string; label?: string; kind?: string; query?: string; enabled?: number } & Record<string, any>;
 export type Intelligence = { github?: IntelRepo[]; sources?: IntelSource[]; targets?: IntelTarget[]; stats?: Record<string, number> } & Record<string, any>;
@@ -344,6 +344,8 @@ export type CalEvent = { event_id: string; title: string; start?: number; locati
 export const getUpcomingEvents = (hours = 168) => jget<{ ok: boolean; events: CalEvent[] }>(`/calendar/upcoming?hours=${hours}`);
 export const importIcs = (ics: string) => jpost<{ ok: boolean; parsed: number; added: number }>("/calendar/import-ics", { ics });
 export const syncCalendar = () => jpost<{ ok: boolean; reason?: string; added?: number }>("/calendar/sync");
+export type CalDavStatus = { configured: boolean; lib_present: boolean; url_host?: string; has_url?: boolean };
+export const getCalDavStatus = () => jget<CalDavStatus>("/calendar/caldav-status");
 
 // ---- P4 深入调研 ----
 export type DeepResearch = { ok: boolean; goal: string; report: string; sources: { n: number; title: string; url: string }[]; findings: any[]; note?: string };

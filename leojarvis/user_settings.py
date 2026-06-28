@@ -65,23 +65,31 @@ DEFAULTS: dict[str, Any] = {
             "amap_maps": {"enabled": False, "api_key": ""},
         },
     },
+    # 舰队公共端点(iOS 经 Tailscale Funnel 访问各 Mac)。显示名按实际机型,不带 -2 噪声;
+    # 运行时本机会按 device_id 标为「当前设备」,不重复显示成远端幽灵。
     "remote_public_endpoints": [
         {
             "id": "leoyuan-macbook-pro",
-            "name": "Leo MacBook Pro",
+            "name": "MacBook Pro",
             "endpoint": "https://leoyuanmacbook-pro.tail23de22.ts.net",
             "enabled": True,
         },
         {
             "id": "leo-mac-studio",
-            "name": "Leo Mac Studio",
+            "name": "Mac Studio",
             "endpoint": "https://leomac-studio.tail23de22.ts.net",
             "enabled": True,
         },
         {
             "id": "mac-mini-cortex",
-            "name": "Mac mini Cortex",
+            "name": "Mac mini",
             "endpoint": "https://mac-mini-cortex.tail23de22.ts.net",
+            "enabled": True,
+        },
+        {
+            "id": "leoyuan-macbook-air",
+            "name": "MacBook Air",
+            "endpoint": "https://leoyuanair.tail23de22.ts.net",
             "enabled": True,
         },
     ],
