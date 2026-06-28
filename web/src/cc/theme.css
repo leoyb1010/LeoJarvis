@@ -6,7 +6,11 @@
   --bg-2: #11151c;        /* 页面区底 */
   --panel: #161b24;       /* 卡片 */
   --panel-2: #1b212b;     /* 次级卡片 / 输入 */
-  --panel-3: #0f141b;     /* 终端/代码块底 */
+  --panel-3: #11161e;     /* 第三层面板/输入(跟随主题,比 panel-2 再深一档) */
+  /* 终端/代码块专用——恒深底 + 恒浅字(不随明暗切换,深底读 ANSI 最稳) */
+  --term-bg: #0f141b;
+  --term-fg: #cdd6e2;
+  --term-dim: #9aa6b2;
   --border: #242c38;
   --border-soft: #1b222d;
   --text: #e9edf2;
@@ -36,7 +40,11 @@
   --bg-2: #f4f5f8;
   --panel: #ffffff;
   --panel-2: #f6f7fa;
-  --panel-3: #0f141b;     /* 终端块在浅色下仍保持深底，便于读输出 */
+  --panel-3: #e8ebf0;     /* 第三层面板/输入(浅底,比 panel-2 再深一档) */
+  /* 终端/代码块恒深(两模式同值)——深底读输出最稳，配恒浅字 */
+  --term-bg: #0f141b;
+  --term-fg: #cdd6e2;
+  --term-dim: #9aa6b2;
   --border: #dfe3ea;
   --border-soft: #e9ecf1;
   --text: #1a1e25;

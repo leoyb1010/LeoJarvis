@@ -1307,7 +1307,7 @@ function Agents({ themeMode }: { themeMode: Theme }) {
               </>)}
             </div>
             {cur
-              ? <pre ref={termRef} style={{ margin: 0, padding: "14px 16px", background: "var(--panel-3)", font: "500 11.5px/1.62 'IBM Plex Mono',monospace", color: "#9aa6b2", overflowY: "auto", minHeight: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{cur.output || "启动中…"}</pre>
+              ? <pre ref={termRef} style={{ margin: 0, padding: "14px 16px", background: "var(--term-bg)", font: "500 11.5px/1.62 'IBM Plex Mono',monospace", color: "var(--term-dim)", overflowY: "auto", minHeight: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{cur.output || "启动中…"}</pre>
               : curGw
                 ? <div style={{ overflowY: "auto", minHeight: 0, display: "grid", placeContent: "center", textAlign: "center", padding: 30, gap: 12 }}>
                     <p style={{ margin: 0, font: "400 12.5px/1.75 'Space Grotesk',sans-serif", color: "var(--text-dim)", maxWidth: 420 }}>{curGw.docs || "本机常驻 agent 网关，一直在后台运行。"}</p>
