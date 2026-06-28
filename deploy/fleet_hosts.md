@@ -20,7 +20,15 @@
 - 验证：`curl -s http://127.0.0.1:8787/ | grep -oE 'index-[A-Za-z0-9_-]+\.js'` 四台应一致；
   `/health /schedule /mcp/status` 均 200；`/research/report` 是实时联网调研,耗时 ~12s 属正常,别用短 timeout 误判。
 
-## 最近一次部署（2026-06-28, commit b4b29c5 「R5 review+debug 8个产品级bug」）
+## 最近一次部署（2026-06-28, commit c3d954c 「R6 review+debug:字体自托管+移动端响应式修复」）
+- bundle: `index-y5YiKIYw.js` —— 四台已全部验证一致（health 全 ok / title 全 LeoJarvis）。
+- 内容: 字体自托管(@fontsource 替 Google Fonts CDN) / 移动端响应式(@media≤720px:侧栏→底栏等分免横滚、多列压单列、笔记抽屉满宽) / 移动端加固(nav 行高 58px→auto 适配 safe-area、设置页 1fr auto 行豁免) / 后端 HEAD `/` 路由 / 品牌 Cortex→LeoJarvis / validate_project 扩跳过目录。
+- **新依赖坑 @fontsource**：rsync 排除 node_modules,远端 build 前**必须先装新依赖**,否则 vite build 报 rolldown 错(CSS 只 8.59kB 无 @font-face)。
+  - 有 Node 机器:`npm --prefix web install` 后再 deploy.sh。**mac-studio 非交互 ssh 里 npm 不在 PATH**,要先 `export PATH="/opt/homebrew/bin:$PATH"`(npm 11.12.1)。mac-mini npm 在 PATH 直接装。
+  - Air 无 Node:本机 build 出 dist 后 `rsync -az --delete web/dist/ Air:.../web/dist/`,Air `launchctl stop/start com.leo.leojarvis`(不用 kickstart)。dist 含 32 个 woff2 字体 asset。
+- 验证:HEAD `/`=200(本轮新路由,探针不再 405)、/health /schedule /mcp/status /api/speech/status 全 200、字体 woff2 asset=200。
+
+## 历史部署（2026-06-28, commit b4b29c5 「R5 review+debug 8个产品级bug」）
 - bundle: `index-DYzvm-N4.js` —— 四台已全部验证一致。
 - 修复: streaming 脆弱性 / closeTab 闭包过期 / AgentRunsView cleanup 反转 / 静默失败 / 死代码(useWave+ACT_LABEL+ACTION_LABEL) / Gmail 白底 / 日期不刷新。净减 31 行。
 - mac-mini venv 重建(python3.14 + pip install requirements.txt)，plist LEOJARVIS_PY 改指 .venv/bin/python3。
