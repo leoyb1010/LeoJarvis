@@ -78,37 +78,6 @@ function PageHelp({ what, points }: { what: string; points: string[] }) {
   );
 }
 
-// 极轻的 live 波形（P5：细线、低幅、慢相位，仅作氛围，不刺眼）。
-function useWave(id: string, freq: number) {
-  useEffect(() => {
-    let phase = 1.3;
-    let raf = 0;
-    const run = () => {
-      raf = requestAnimationFrame(run);
-      const c = document.getElementById(id) as HTMLCanvasElement | null;
-      if (!c || !c.offsetParent) return;
-      const ctx = c.getContext("2d");
-      if (!ctx) return;
-      const w = (c.width = c.clientWidth);
-      const h = (c.height = c.clientHeight);
-      ctx.clearRect(0, 0, w, h);
-      phase += 0.022;
-      const accent = (getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#c23b54").trim();
-      const draw = (alpha: number, lw: number) => {
-        ctx.globalAlpha = alpha; ctx.lineWidth = lw; ctx.strokeStyle = accent; ctx.beginPath();
-        for (let x = 0; x <= w; x += 2) {
-          const env = 0.4 + 0.6 * Math.sin((x / w) * Math.PI);
-          const y = h / 2 + Math.sin((x / w) * Math.PI * freq + phase) * (h * 0.2) * env;
-          if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      };
-      draw(0.12, 0.7); draw(0.7, 1.1); ctx.globalAlpha = 1;
-    };
-    run();
-    return () => cancelAnimationFrame(raf);
-  }, [id, freq]);
-}
 
 // Gmail 图标（P8：后端不返回 gmail 图标 → 用品牌 SVG 兜底）。
 // 仅 Gmail 的 M 标志（不含外框）—— 外框由 AppIcon 的统一 tile 提供，保证和其它图标同款边缘。
@@ -327,9 +296,9 @@ function NotesOverlay({ openId, onClose, goFull }: { openId?: string; onClose: (
     if (saving || (!title.trim() && !content.trim())) return;
     setSaving(true);
     try { if (sel) await updateNote(sel, { title, content }); else { const r = await createNote({ title, content }); if (r?.note?.id) setSel(r.note.id); } setDirty(false); load(); }
-    catch { /* ignore */ } finally { setSaving(false); }
+    catch { alert("保存失败，请重试"); } finally { setSaving(false); }
   }
-  async function del() { if (!sel || !window.confirm("删除这条记事？")) return; try { await deleteNote(sel); newNote(); load(); } catch { /* ignore */ } }
+  async function del() { if (!sel || !window.confirm("删除这条记事？")) return; try { await deleteNote(sel); newNote(); load(); } catch { alert("删除失败，请重试"); } }
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: Z.drawer, background: "rgba(4,6,9,.5)", backdropFilter: "blur(2px)", display: "flex", justifyContent: "flex-end", animation: "cxFade .18s ease both" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,94vw)", height: "100%", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow)", display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", animation: "cxSlideIn .26s cubic-bezier(.22,.61,.36,1) both" }}>
@@ -368,7 +337,7 @@ function AppIcon({ a, size = 46 }: { a: NotifApp; size?: number }) {
   // 统一 tile：所有图标（含 Gmail）满铺 + 同一描边。描边用半透明灰，在「白底 Gmail」和
   // 「彩色满铺图标」上都同样轻——不会出现彩色图标看不见描边、白底 Gmail 却像加了边框的割裂感。
   const frame: CSSProperties = { width: size, height: size, borderRadius: Math.round(size * 0.26), boxShadow: "0 0 0 1px rgba(140,146,158,.16), 0 1px 3px rgba(0,0,0,.22)", display: "grid", placeContent: "center", overflow: "hidden", boxSizing: "border-box", flex: "none", background: "var(--panel-2)" };
-  if (a.id === "gmail" && !a.icon) return <span style={{ ...frame, background: "#fff" }}><GmailMark size={Math.round(size * 0.82)} /></span>;
+  if (a.id === "gmail" && !a.icon) return <span style={{ ...frame, background: "var(--panel)" }}><GmailMark size={Math.round(size * 0.82)} /></span>;
   if (src) return <span style={frame}><img src={src} alt={a.name || a.id} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></span>;
   return <span style={{ ...frame, font: `700 ${Math.round(size * 0.4)}px 'Space Grotesk'`, color: "var(--text-dim)" }}>{(a.name || a.id).slice(0, 1).toUpperCase()}</span>;
 }
@@ -511,7 +480,7 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
     const next: ChatMsg[] = [...history, { role: "user", content: msg }];
     setHistory(next); setBusy(true);
     let assistantText = "";
-    let assistantIdx = -1;
+    let streaming = false;
     const steps: ChatStep[] = [];
     try {
       await agentChatStream(next, (e) => {
@@ -523,11 +492,13 @@ function JarvisChat({ onClose }: { onClose: () => void }) {
           if (s) { s.status = e.status; s.result = e.result; }
         } else if (e.type === "token") {
           assistantText += e.text;
+          const snap = assistantText;
           setTurns((t) => {
-            const copy = [...t];
-            if (assistantIdx < 0) { copy.push({ kind: "assistant", text: assistantText }); assistantIdx = copy.length - 1; }
-            else copy[assistantIdx] = { kind: "assistant", text: assistantText };
-            return copy;
+            if (!streaming) { streaming = true; return [...t, { kind: "assistant", text: snap }]; }
+            let idx = -1;
+            for (let i = t.length - 1; i >= 0; i--) { if (t[i].kind === "assistant") { idx = i; break; } }
+            if (idx < 0) return [...t, { kind: "assistant", text: snap }];
+            const copy = [...t]; copy[idx] = { kind: "assistant", text: snap }; return copy;
           });
         } else if (e.type === "final") {
           if (e.reply) setHistory((h) => [...h, { role: "assistant", content: e.reply }]);
@@ -617,7 +588,6 @@ function synthBrief(opts: { news: BriefItem[]; services: Service[]; svcTotal: nu
 
 // 待办收件箱速览：未确认任务，行内直接确认/忽略（信息转任务的常驻操作位）。
 // 待办收件箱速览:紧凑行(一行一条),点行才展开出确认/忽略。只收真需处理的(邮件/日历),不堆新闻。
-const ACT_LABEL: Record<string, string> = { reply: "回复", review: "审阅", fill_form: "填表", create: "创建", follow_up: "跟进", approve: "审批", update_crm: "录入", prepare: "准备" };
 // 待办时间格式化:今天显 HH:MM,往日显 MM-DD HH:MM。
 function fmtSchedWhen(ts: number): string {
   const d = new Date(ts), now = new Date();
@@ -723,11 +693,10 @@ function NotesTodoPanel({ notes, onSaved, onOpen, onAdd }: { notes: PersonalNote
   // 待办=真日程
   const [sched, setSched] = useState<ScheduleItem[]>([]);
   const [caldav, setCaldav] = useState<CalDavStatus | null>(null);
-  const today = new Date();
-  const defDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const defTime = `${String((today.getHours() + 1) % 24).padStart(2, "0")}:00`;
-  const [sdate, setSdate] = useState(defDate);
-  const [stime, setStime] = useState(defTime);
+  const freshDate = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; };
+  const freshTime = () => { const n = new Date(); return `${String((n.getHours() + 1) % 24).padStart(2, "0")}:00`; };
+  const [sdate, setSdate] = useState(freshDate);
+  const [stime, setStime] = useState(freshTime);
   const [srepeat, setSrepeat] = useState("none");
   const [slead, setSlead] = useState(1); // 默认"准时"
   const [stitle, setStitle] = useState("");
@@ -744,7 +713,7 @@ function NotesTodoPanel({ notes, onSaved, onOpen, onAdd }: { notes: PersonalNote
     const t = text.trim(); if (!t || saving) return;
     setSaving(true);
     try { await createNote({ title: t.slice(0, 40), content: t, tags: [] }); setText(""); onSaved(); }
-    catch { /* ignore */ } finally { setSaving(false); }
+    catch { alert("记事创建失败，请重试"); } finally { setSaving(false); }
   }
   async function addSched() {
     const t = stitle.trim(); if (!t || saving) return;
@@ -756,10 +725,10 @@ function NotesTodoPanel({ notes, onSaved, onOpen, onAdd }: { notes: PersonalNote
     try {
       await createSchedule({ title: t, start_ts: start, remind_ts, repeat: srepeat });
       setStitle(""); loadSched();
-    } catch { /* ignore */ } finally { setSaving(false); }
+    } catch { alert("日程创建失败，请重试"); } finally { setSaving(false); }
   }
-  async function toggleDone(it: ScheduleItem) { await scheduleDone(it.id, true).catch(() => {}); loadSched(); }
-  async function removeSched(id: string) { await deleteSchedule(id).catch(() => {}); loadSched(); }
+  async function toggleDone(it: ScheduleItem) { try { await scheduleDone(it.id, true); } catch { alert("操作失败"); } loadSched(); }
+  async function removeSched(id: string) { try { await deleteSchedule(id); } catch { alert("删除失败"); } loadSched(); }
 
   const inp: CSSProperties = { flex: "none", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 8px", color: "var(--text)", font: "500 11px 'IBM Plex Mono',monospace", outline: "none" };
   const sel: CSSProperties = { ...inp, cursor: "pointer", font: "600 10.5px 'Space Grotesk'" };
@@ -785,7 +754,7 @@ function NotesTodoPanel({ notes, onSaved, onOpen, onAdd }: { notes: PersonalNote
       {tab === "待办" ? (
         <div style={{ display: "grid", gap: 6 }}>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <input type="date" value={sdate} onChange={(e) => setSdate(e.target.value)} style={{ ...inp, width: 124 }} />
+            <input type="date" value={sdate} onChange={(e) => setSdate(e.target.value)} onFocus={() => { if (sdate < freshDate()) setSdate(freshDate()); }} style={{ ...inp, width: 124 }} />
             <input type="time" value={stime} onChange={(e) => setStime(e.target.value)} style={{ ...inp, width: 86 }} />
             <select value={srepeat} onChange={(e) => setSrepeat(e.target.value)} style={sel}>
               <option value="none">不重复</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option>
@@ -1524,7 +1493,6 @@ function SourceChip({ kind }: { kind?: string }) {
 }
 
 // ============ WorkDock 合并 M2：任务收件箱（信息转任务） ============
-const ACTION_LABEL: Record<string, string> = { reply: "回复", review: "审阅", fill_form: "填表", create: "创建", follow_up: "跟进", approve: "审批", update_crm: "录入", prepare: "准备" };
 function senseIcon(name: string): ReactNode {
   const p: Record<string, ReactNode> = {
     folder: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>,
@@ -1650,7 +1618,7 @@ function Sense() {
 function AgentRunsView() {
   const [data, setData] = useState<AgentRunsOverview | null>(null);
   const load = () => getAgentRuns(48).then(setData).catch(() => setData((p) => p ?? { pending: [], recent: [] }));
-  useEffect(() => { let live = true; load().finally(() => { if (!live) setData(null); }); const t = setInterval(load, 8000); const stop = subscribeNotify(() => load()); return () => { live = false; clearInterval(t); stop(); }; }, []);
+  useEffect(() => { load(); const t = setInterval(load, 8000); const stop = subscribeNotify(() => load()); return () => { clearInterval(t); stop(); }; }, []);
 
   const verdictTone = (v?: string) => v === "deny" ? "var(--bad)" : v === "auto" ? "var(--good)" : "var(--warn)";
   const statusTone = (s?: string) => s === "denied" ? "var(--bad)" : (s === "ok" || s === "done" || s === "success") ? "var(--good)" : s === "error" ? "var(--bad)" : "var(--text-mute)";
@@ -1885,8 +1853,9 @@ function AgentWorkspace({ goAgents, themeMode }: { goAgents: () => void; themeMo
     setPrompt("");
   };
   const closeTab = (key: number) => {
-    setTabs((ts) => ts.filter((t) => t.key !== key));
-    setActiveKey((cur) => (cur === key ? (tabs.filter((t) => t.key !== key).slice(-1)[0]?.key ?? null) : cur));
+    const remaining = tabs.filter((t) => t.key !== key);
+    setTabs(remaining);
+    setActiveKey((cur) => (cur === key ? (remaining.slice(-1)[0]?.key ?? null) : cur));
   };
 
   const running = tabs.length + external.length;
@@ -2294,7 +2263,7 @@ function NoteEditorDrawer({ noteId, notebook, onClose, onSaved }: { noteId: stri
     } catch { setBusyMsg("保存失败"); setTimeout(() => setBusyMsg(""), 1600); return selId; }
     finally { setSaving(false); }
   }
-  async function del() { if (!selId) { onClose(); return; } if (!window.confirm("删除这条？")) return; try { await deleteNote(selId); onSaved(); onClose(); } catch { /* ignore */ } }
+  async function del() { if (!selId) { onClose(); return; } if (!window.confirm("删除这条？")) return; try { await deleteNote(selId); onSaved(); onClose(); } catch { alert("删除失败，请重试"); } }
   function insert(text: string) {
     const ta = taRef.current;
     if (!ta) { setContent((c) => c + text); return; }
