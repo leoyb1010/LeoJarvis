@@ -630,6 +630,25 @@ struct InboxStateRequest: Encodable {
     let state: String   // unconfirmed | confirmed | done | ignored
 }
 
+// MARK: - 日程
+
+/// 未来日历事件（/calendar/upcoming）。start 为毫秒时间戳。
+struct CalendarEvent: Codable, Identifiable, Equatable {
+    let event_id: String?
+    let title: String?
+    let start: Double?
+    let location: String?
+    let organizer: String?
+
+    var id: String { event_id ?? "\(title ?? "事件")-\(start ?? 0)" }
+    var displayTitle: String { title ?? "日程" }
+}
+
+struct CalendarUpcomingResponse: Codable {
+    let ok: Bool?
+    let events: [CalendarEvent]?
+}
+
 /// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
 struct PersonalDataStatus: Codable {
     let memory_layers: [String: Int]?

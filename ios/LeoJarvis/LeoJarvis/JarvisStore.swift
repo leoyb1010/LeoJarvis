@@ -20,6 +20,7 @@ final class JarvisStore: ObservableObject {
     @Published private(set) var sessions: [AgentSession] = []
     @Published private(set) var devices: [FleetDevice] = []
     @Published private(set) var inboxTasks: [InboxTask] = []
+    @Published private(set) var upcomingEvents: [CalendarEvent] = []
     @Published private(set) var macTargets: [MacTarget] = []
     @Published private(set) var macRuntime: [String: MacRuntimeSnapshot] = [:]
     @Published private(set) var isLoading = false
@@ -271,6 +272,7 @@ final class JarvisStore: ObservableObject {
         async let notesCall: PersonalNotesResponse = client.get("/personal-notes?compact=1&limit=20", timeout: 14)
         async let devicesCall: FleetDevicesResponse = client.get("/devices", timeout: 14)
         async let inboxCall: InboxListResponse = client.get("/inbox/list?states=unconfirmed,confirmed&limit=40", timeout: 12)
+        async let calendarCall: CalendarUpcomingResponse = client.get("/calendar/upcoming?hours=72&limit=20", timeout: 12)
         do {
             let notesPayload = try await notesCall
             notes = notesPayload.notes
@@ -289,6 +291,12 @@ final class JarvisStore: ObservableObject {
         } catch {
             // 待办失败不阻塞主流程，静默（驾驶舱卡片会显示空态）。
             _ = error
+        }
+        do {
+            let calendarPayload = try await calendarCall
+            upcomingEvents = calendarPayload.events ?? []
+        } catch {
+            _ = error   // 日程失败静默
         }
         await refreshBrowserPreferences(refresh: false)
         if !criticalFailures.isEmpty {

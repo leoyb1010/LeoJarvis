@@ -27,6 +27,8 @@ struct HomeView: View {
                 .appearLift(delay: 0.16)
             inboxPanel
                 .appearLift(delay: 0.17)
+            schedulePanel
+                .appearLift(delay: 0.175)
             liveIntelPanel
                 .appearLift(delay: 0.18)
             briefingPanel
@@ -423,6 +425,41 @@ struct HomeView: View {
             }
         }
         .panel()
+    }
+
+    @ViewBuilder private var schedulePanel: some View {
+        let events = Array(store.upcomingEvents.prefix(5))
+        if !events.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionTitle(title: "今日日程", icon: "calendar")
+                    Spacer()
+                    StatusPill(title: "\(store.upcomingEvents.count) 项", icon: nil, tint: AppTheme.accent)
+                }
+                ForEach(events) { event in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(DisplayFormat.shortDate(event.start.map { Int($0) }))
+                                .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                                .foregroundStyle(AppTheme.accent)
+                            Text(event.displayTitle)
+                                .font(.system(size: 14, weight: .heavy))
+                                .foregroundStyle(AppTheme.ink)
+                                .lineLimit(1)
+                            if let loc = nonEmpty(event.location) {
+                                Text(loc)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    if event.id != events.last?.id { Divider() }
+                }
+            }
+            .panel()
+        }
     }
 
     @ViewBuilder private var inboxPanel: some View {
