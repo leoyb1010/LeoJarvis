@@ -580,3 +580,24 @@ enum JSONValue: Codable, CustomStringConvertible, Equatable {
         return text
     }
 }
+
+// MARK: - 个人数据投喂（感知接入）
+
+/// /personal-data/ingest/text 请求体。kind∈{work,chat,preference,behavior}，layer∈{fact,episode,pattern,entity}。
+struct IngestTextRequest: Encodable {
+    let text: String
+    let kind: String
+    let layer: String
+    let source_ref: String
+    let subject: String?
+}
+
+struct IngestResponse: Codable {
+    let ok: Bool?
+    let ingested: Int?
+}
+
+/// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
+struct PersonalDataStatus: Codable {
+    let memory_layers: [String: Int]?
+}

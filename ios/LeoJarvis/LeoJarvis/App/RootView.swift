@@ -1,41 +1,54 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Hashable, Identifiable {
-    case today
-    case jarvis
-    case notes
-    case agents
-    case settings
+    case today      // 驾驶舱
+    case intel      // 情报（从今日页提级为一级 tab）
+    case notes      // 笔记
+    case jarvis     // Jarvis 对话
+    case mine       // 我的（设备舰队 + 感知 + Agent 入口 + 设置）
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .today: return "今日"
+        case .today: return "驾驶舱"
+        case .intel: return "情报"
+        case .notes: return "笔记"
         case .jarvis: return "Jarvis"
-        case .notes: return "记事"
-        case .agents: return "Agent"
-        case .settings: return "设备"
+        case .mine: return "我的"
         }
     }
 
     var icon: String {
         switch self {
         case .today: return "sparkles"
-        case .jarvis: return "message"
+        case .intel: return "antenna.radiowaves.left.and.right"
         case .notes: return "note.text"
-        case .agents: return "terminal"
-        case .settings: return "macbook.and.iphone"
+        case .jarvis: return "message"
+        case .mine: return "person.crop.circle"
         }
     }
 
     var selectedIcon: String {
         switch self {
         case .today: return "sparkles"
-        case .jarvis: return "message.fill"
+        case .intel: return "antenna.radiowaves.left.and.right"
         case .notes: return "note.text"
-        case .agents: return "terminal.fill"
-        case .settings: return "macbook.and.iphone"
+        case .jarvis: return "message.fill"
+        case .mine: return "person.crop.circle.fill"
+        }
+    }
+}
+
+extension NotifyDeepLink {
+    /// 通知深链 → tab 映射。.mine 涵盖设备/感知/设置。
+    var tab: AppTab {
+        switch self {
+        case .today: return .today
+        case .intel: return .intel
+        case .notes: return .notes
+        case .jarvis: return .jarvis
+        case .mine: return .mine
         }
     }
 }
@@ -80,20 +93,26 @@ struct RootView: View {
                 if !Task.isCancelled { store.infoNotice = nil }
             }
         }
+        .onAppear {
+            // 点击本地通知 → 按 deepLink 切到对应 tab。
+            NotificationManager.shared.onOpenDeepLink = { link in
+                withAnimation(.snappy) { selectedTab = link.tab }
+            }
+        }
     }
 
     @ViewBuilder private var selectedContent: some View {
         switch selectedTab {
         case .today:
             HomeView()
-        case .jarvis:
-            JarvisChatView()
+        case .intel:
+            IntelView()
         case .notes:
             NotesView()
-        case .agents:
-            AgentsView()
-        case .settings:
-            SettingsView()
+        case .jarvis:
+            JarvisChatView()
+        case .mine:
+            MineView()
         }
     }
 }

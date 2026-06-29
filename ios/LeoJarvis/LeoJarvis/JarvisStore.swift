@@ -781,6 +781,34 @@ final class JarvisStore: ObservableObject {
         }
     }
 
+    /// 感知投喂：把一段文本（剪贴板/拍照 OCR 结果等）投喂给后端记忆。
+    /// 成功返回 true。失败置 errorMessage 并返回 false（由调用方决定是否提示）。
+    @discardableResult
+    func ingestText(_ text: String, kind: String = "work", layer: String = "episode", sourceRef: String) async -> Bool {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        guard isMacReachable else {
+            errorMessage = "Mac 端 Jarvis 当前离线，无法投喂。可切换到在线的 Mac。"
+            return false
+        }
+        do {
+            let _: IngestResponse = try await client.post(
+                "/personal-data/ingest/text",
+                body: IngestTextRequest(text: clean, kind: kind, layer: layer, source_ref: sourceRef, subject: nil)
+            )
+            return true
+        } catch {
+            errorMessage = Self.userFacingErrorMessage(error)
+            return false
+        }
+    }
+
+    /// 拉取感知投喂的记忆层统计（让「我的」感知区显示 Jarvis 记了多少）。失败返回 nil。
+    func fetchPersonalDataStatus() async -> PersonalDataStatus? {
+        guard isMacReachable else { return nil }
+        return try? await client.get("/personal-data/status", timeout: 6)
+    }
+
     func createNote(title: String, content: String) async {
         let clean = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }

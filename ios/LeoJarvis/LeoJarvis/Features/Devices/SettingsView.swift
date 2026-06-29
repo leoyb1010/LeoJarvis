@@ -11,12 +11,15 @@ struct SettingsView: View {
     var body: some View {
         let onlineTargetCount = store.macTargets.filter { $0.online }.count
         let currentFastestTarget = fastestTarget
+        NavigationStack {
         ScreenScaffold(
-            title: "设备",
+            title: "我的",
             subtitle: "\(store.macTargets.count) 个控制端 · \(onlineTargetCount)/\(max(store.macTargets.count, 1)) 可控",
-            systemImage: "macbook.and.iphone",
+            systemImage: "person.crop.circle",
             trailing: { addMacButton }
         ) {
+            entriesCard
+                .appearLift(delay: 0.02)
             remoteControlHero(onlineTargets: onlineTargetCount, fastestTarget: currentFastestTarget)
                 .appearLift(delay: 0.03)
             fleetCommandCard
@@ -43,6 +46,67 @@ struct SettingsView: View {
             AddMacSheet()
                 .presentationDetents([.medium])
         }
+        .navigationDestination(for: MineDestination.self) { dest in
+            switch dest {
+            case .agents: AgentsView()
+            case .sense: SenseView()
+            }
+        }
+        }
+    }
+
+    /// 「我的」页顶部入口：Agent 工作区、感知接入。点进二级页。
+    private var entriesCard: some View {
+        VStack(spacing: 0) {
+            NavigationLink(value: MineDestination.agents) {
+                mineEntryRow(
+                    icon: "terminal.fill",
+                    title: "Agent 工作区",
+                    subtitle: "查看会话输出 · 启停 · 受控执行台",
+                    badge: store.sessions.isEmpty ? nil : "\(store.sessions.count)"
+                )
+            }
+            .buttonStyle(.plain)
+            Divider().padding(.leading, 52)
+            NavigationLink(value: MineDestination.sense) {
+                mineEntryRow(
+                    icon: "sparkles.rectangle.stack",
+                    title: "感知接入",
+                    subtitle: "拍照投喂 · 剪贴板记一笔 · Siri 快捷",
+                    badge: nil
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .panel()
+    }
+
+    private func mineEntryRow(icon: String, title: String, subtitle: String, badge: String?) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .heavy))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 40, height: 40)
+                .background(AppTheme.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if let badge {
+                StatusPill(title: badge, icon: nil, tint: AppTheme.success)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(AppTheme.faint)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 
     private func remoteControlHero(onlineTargets: Int, fastestTarget: MacTarget?) -> some View {
@@ -937,5 +1001,19 @@ struct AddMacSheet: View {
                 }
             }
         }
+    }
+}
+
+/// 「我的」页二级导航目标。
+enum MineDestination: Hashable {
+    case agents
+    case sense
+}
+
+/// 「我的」tab：当前直接复用 SettingsView（设备舰队 + 连接设置 + 顶部 Agent/感知入口）。
+/// 独立成 view 便于后续把纯设置项与设备项进一步分区，不影响 RootView 引用。
+struct MineView: View {
+    var body: some View {
+        SettingsView()
     }
 }
