@@ -65,10 +65,14 @@ final class LeoJarvisTests: XCTestCase {
 
     @MainActor
     func testStoreMigratesLocalSavedEndpointToPublicDefault() {
+        // 必须连同 lastGoodEndpoint 一起清：defaultEndpoint 优先返回 sticky 的"上次成功端点"，
+        // 模拟器上残留的 lastGood 会让本测试拿到非 remoteMacTargets[0] 的端点而 flaky。
         UserDefaults.standard.set("http://127.0.0.1:8787", forKey: "leojarvis.mobile.endpoint")
+        UserDefaults.standard.removeObject(forKey: "leojarvis.mobile.lastGoodEndpoint")
         defer {
             UserDefaults.standard.removeObject(forKey: "leojarvis.mobile.endpoint")
             UserDefaults.standard.removeObject(forKey: "leojarvis.mobile.macTargets")
+            UserDefaults.standard.removeObject(forKey: "leojarvis.mobile.lastGoodEndpoint")
         }
 
         let store = JarvisStore()
