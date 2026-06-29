@@ -25,6 +25,8 @@ struct HomeView: View {
                 .appearLift(delay: 0.12)
             attentionPanel
                 .appearLift(delay: 0.16)
+            CheckinCard()
+                .appearLift(delay: 0.165)
             inboxPanel
                 .appearLift(delay: 0.17)
             schedulePanel

@@ -825,6 +825,21 @@ final class JarvisStore: ObservableObject {
         }
     }
 
+    /// 立即跑一次 check-in（morning/midday/evening），返回助理回复文本。失败置 errorMessage。
+    func runCheckin(slot: String) async -> CheckinResult? {
+        guard isMacReachable else {
+            errorMessage = "Mac 端 Jarvis 当前离线，无法运行 check-in。"
+            return nil
+        }
+        do {
+            let result: CheckinResult = try await client.post("/assistant/checkins/\(slot)/run", body: EmptyBody(), timeout: 30)
+            return result
+        } catch {
+            errorMessage = Self.userFacingErrorMessage(error)
+            return nil
+        }
+    }
+
     /// 拉取待确认记忆（裸数组）。失败静默。
     func refreshPendingMemories() async {
         guard isMacReachable else { return }

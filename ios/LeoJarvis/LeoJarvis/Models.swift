@@ -667,6 +667,16 @@ struct MemoryDecisionRequest: Encodable {
     let decision: String   // accept | reject | later
 }
 
+// MARK: - 主动助理 check-in
+
+/// check-in 运行结果（/assistant/checkins/{slot}/run）。
+struct CheckinResult: Codable {
+    let ok: Bool?
+    let slot: String?
+    let title: String?
+    let reply: String?
+}
+
 /// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
 struct PersonalDataStatus: Codable {
     let memory_layers: [String: Int]?
