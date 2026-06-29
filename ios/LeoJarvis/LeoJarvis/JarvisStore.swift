@@ -51,6 +51,10 @@ final class JarvisStore: ObservableObject {
     @Published var pendingActions: [PendingAction] = []
     @Published var isSending = false
 
+    /// 实时通知通道（/ws/notify）。前台保活 + 断线退避重连；事件经 onEvent 投递。
+    /// Phase 4 会把这些事件落成本地通知；当前仅连接 + 收到事件时触发一次轻量刷新。
+    let notify = NotifyChannel()
+
     private static let endpointKey = "leojarvis.mobile.endpoint"
     private static let lastGoodEndpointKey = "leojarvis.mobile.lastGoodEndpoint"
     private static let tokenKey = "leojarvis.mobile.token"
@@ -116,12 +120,38 @@ final class JarvisStore: ObservableObject {
 
     func bootstrap() async {
         didAttemptFailover = false   // 新的启动周期，允许一次自动故障转移
+        setupNotifyChannel()
         // 先跑 refreshAll（内部失败会自动 ping+切到在线 Mac），再跑端侧情报（Mac 无关，离线也出内容）。
         // 不再让 refreshAll 与 refreshMacTargets 并发竞写 macTargets —— failover 内部已会 ping。
         async let localIntel: Void = scanLocalIntelIfNeeded()
         await refreshAll()
         _ = await localIntel
         await refreshFleetRuntime()
+        connectNotifyChannel()
+    }
+
+    /// 配置实时通道的事件处理。Phase 3：收到事件触发一次轻量刷新（不打扰）。
+    /// Phase 4 会在此基础上落本地通知。
+    private func setupNotifyChannel() {
+        notify.onEvent = { [weak self] event in
+            guard let self else { return }
+            // digest 投递（非紧急、已超当日预算）安静处理：不触发即时刷新。
+            guard event.delivery != "digest" else { return }
+            // 实时事件（情报命中 / 系统告警 / 提醒）到达 → 轻量刷新对应数据。
+            Task { await self.handleRealtimeEvent(event) }
+        }
+    }
+
+    /// 用当前端点连接 /ws/notify。端点可达时才连（避免对死端点空连）。
+    func connectNotifyChannel() {
+        guard isMacReachable else { return }
+        notify.connect(endpoint: endpoint, token: token)
+    }
+
+    /// 收到实时事件后的处理。当前：刷新简报/情报这类时效数据。失败静默。
+    private func handleRealtimeEvent(_ event: NotifyEvent) async {
+        // 简报/情报类事件 → 刷新远端（拿最新简报）。其它类型暂只记录，Phase 4 落通知。
+        await refreshAll()
     }
 
     var hasLocalTavilyKey: Bool {
