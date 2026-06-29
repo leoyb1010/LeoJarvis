@@ -103,4 +103,21 @@ final class RealtimeTests: XCTestCase {
         XCTAssertEqual(title, "LeoJarvis")
         XCTAssertEqual(link, .today)
     }
+
+    // MARK: - Agent 会话输出 ANSI 剥离
+
+    func testStripANSIRemovesColorCodes() {
+        let raw = "\u{001B}[31m错误\u{001B}[0m 完成"
+        XCTAssertEqual(SessionDetailView.stripANSI(raw), "错误 完成")
+    }
+
+    func testStripANSIRemovesCursorMoves() {
+        let raw = "行1\u{001B}[2K\u{001B}[1G行2"
+        XCTAssertEqual(SessionDetailView.stripANSI(raw), "行1行2")
+    }
+
+    func testStripANSILeavesPlainTextUntouched() {
+        let raw = "纯文本输出 no escapes"
+        XCTAssertEqual(SessionDetailView.stripANSI(raw), raw)
+    }
 }

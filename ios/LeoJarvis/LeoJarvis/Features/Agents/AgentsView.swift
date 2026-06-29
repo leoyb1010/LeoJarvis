@@ -152,12 +152,33 @@ struct AgentsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionTitle(title: "运行会话", icon: "waveform.path.ecg")
                 ForEach(store.sessions, id: \.stableID) { session in
-                    SessionRow(session: session)
+                    if let sid = session.id, !sid.isEmpty {
+                        // 有 id 的会话可下钻看实时输出流（只读）+ 停止。
+                        NavigationLink(value: SessionRoute(id: sid)) {
+                            HStack(spacing: 8) {
+                                SessionRow(session: session)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .heavy))
+                                    .foregroundStyle(AppTheme.faint)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        SessionRow(session: session)
+                    }
                 }
             }
             .panel()
+            .navigationDestination(for: SessionRoute.self) { route in
+                SessionDetailView(sessionID: route.id)
+            }
         }
     }
+}
+
+/// 会话详情路由（按 session id）。
+struct SessionRoute: Hashable {
+    let id: String
 }
 
 struct AgentRow: View {

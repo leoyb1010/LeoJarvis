@@ -907,6 +907,32 @@ final class JarvisStore: ObservableObject {
         }
     }
 
+    /// 轻量刷新 CLI 会话列表（会话详情页轮询用，看实时输出）。失败静默不打扰。
+    func refreshSessions() async {
+        guard isMacReachable else { return }
+        do {
+            let payload: AgentSessionsResponse = try await client.get("/agents/cli/sessions", timeout: 6)
+            sessions = (payload.sessions ?? []) + (payload.external ?? [])
+        } catch {
+            // 静默：轮询失败不影响已显示内容。
+        }
+    }
+
+    /// 停止一个 CLI 会话。成功后从列表移除。
+    @discardableResult
+    func stopSession(_ session: AgentSession) async -> Bool {
+        guard let sid = nonEmptyID(session.id) else { return false }
+        let encoded = sid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sid
+        do {
+            let _: OKResponse = try await client.post("/agents/cli/sessions/\(encoded)/stop", body: EmptyBody())
+            sessions.removeAll { $0.id == session.id }
+            return true
+        } catch {
+            errorMessage = Self.userFacingErrorMessage(error)
+            return false
+        }
+    }
+
     func runAgent(_ agent: CLIAgent, prompt: String) async {
         let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard agent.installed, !clean.isEmpty else { return }

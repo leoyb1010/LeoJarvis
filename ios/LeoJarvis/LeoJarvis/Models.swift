@@ -597,6 +597,9 @@ struct IngestResponse: Codable {
     let ingested: Int?
 }
 
+/// 空请求体：用于无 body 的 POST（如停止会话）。
+struct EmptyBody: Encodable {}
+
 /// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
 struct PersonalDataStatus: Codable {
     let memory_layers: [String: Int]?
