@@ -120,4 +120,40 @@ final class RealtimeTests: XCTestCase {
         let raw = "纯文本输出 no escapes"
         XCTAssertEqual(SessionDetailView.stripANSI(raw), raw)
     }
+
+    // MARK: - 离线待同步队列
+
+    private func isolatedDefaults() -> UserDefaults {
+        let d = UserDefaults(suiteName: "test.pendingsync.\(UUID().uuidString)")!
+        return d
+    }
+
+    func testPendingQueueEnqueueAndLoad() {
+        let d = isolatedDefaults()
+        XCTAssertTrue(PendingSyncQueue.isEmpty(defaults: d))
+        let note = PendingNote(id: "a", title: "T", content: "C", createdAt: 1)
+        PendingSyncQueue.enqueue(note, defaults: d)
+        let loaded = PendingSyncQueue.load(defaults: d)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.content, "C")
+        XCTAssertEqual(PendingSyncQueue.count(defaults: d), 1)
+    }
+
+    func testPendingQueueRemove() {
+        let d = isolatedDefaults()
+        PendingSyncQueue.enqueue(PendingNote(id: "a", title: "", content: "1", createdAt: 1), defaults: d)
+        PendingSyncQueue.enqueue(PendingNote(id: "b", title: "", content: "2", createdAt: 2), defaults: d)
+        PendingSyncQueue.remove(id: "a", defaults: d)
+        let loaded = PendingSyncQueue.load(defaults: d)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.id, "b")
+    }
+
+    func testPendingQueuePreservesOrder() {
+        let d = isolatedDefaults()
+        for i in 0..<3 {
+            PendingSyncQueue.enqueue(PendingNote(id: "\(i)", title: "", content: "\(i)", createdAt: Double(i)), defaults: d)
+        }
+        XCTAssertEqual(PendingSyncQueue.load(defaults: d).map(\.id), ["0", "1", "2"])
+    }
 }

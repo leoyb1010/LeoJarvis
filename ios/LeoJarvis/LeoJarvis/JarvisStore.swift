@@ -22,6 +22,8 @@ final class JarvisStore: ObservableObject {
     @Published private(set) var inboxTasks: [InboxTask] = []
     @Published private(set) var upcomingEvents: [CalendarEvent] = []
     @Published private(set) var pendingMemories: [PendingMemory] = []
+    /// 离线待同步的本地笔记数（>0 时 UI 可显示「N 条待同步」徽标）。
+    @Published private(set) var pendingNoteCount: Int = PendingSyncQueue.count()
     @Published private(set) var macTargets: [MacTarget] = []
     @Published private(set) var macRuntime: [String: MacRuntimeSnapshot] = [:]
     @Published private(set) var isLoading = false
@@ -132,6 +134,7 @@ final class JarvisStore: ObservableObject {
         _ = await localIntel
         await refreshFleetRuntime()
         connectNotifyChannel()
+        await flushPendingNotes()   // 联网后补发离线攒下的笔记。
     }
 
     /// 配置实时通道的事件处理。Phase 3：收到事件触发一次轻量刷新（不打扰）。
@@ -895,17 +898,44 @@ final class JarvisStore: ObservableObject {
     func createNote(title: String, content: String) async {
         let clean = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 离线：排入待同步队列，联网后自动补发，不丢笔记。
+        guard isMacReachable else {
+            let pending = PendingNote(id: UUID().uuidString, title: cleanTitle, content: clean, createdAt: Date().timeIntervalSince1970 * 1000)
+            PendingSyncQueue.enqueue(pending)
+            pendingNoteCount = PendingSyncQueue.count()
+            infoNotice = "已离线保存，联网后自动同步到 Mac。"
+            return
+        }
         do {
-            let request = NoteCreateRequest(
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                content: clean,
-                tags: ["iOS"],
-                source: "ios"
-            )
+            let request = NoteCreateRequest(title: cleanTitle, content: clean, tags: ["iOS"], source: "ios")
             let _: PersonalNoteCreateResponse = try await client.post("/personal-notes", body: request)
             await refreshAll()
         } catch {
             errorMessage = Self.userFacingErrorMessage(error)
+        }
+    }
+
+    /// flush 离线待同步笔记：逐条补发到 Mac，成功即出队。Mac 不可达时直接返回。
+    func flushPendingNotes() async {
+        guard isMacReachable else { return }
+        let queued = PendingSyncQueue.load()
+        guard !queued.isEmpty else { pendingNoteCount = 0; return }
+        var synced = 0
+        for note in queued {
+            do {
+                let request = NoteCreateRequest(title: note.title, content: note.content, tags: ["iOS"], source: "ios")
+                let _: PersonalNoteCreateResponse = try await client.post("/personal-notes", body: request)
+                PendingSyncQueue.remove(id: note.id)
+                synced += 1
+            } catch {
+                break   // 一条失败就停（网络又断了），剩余下次再补。
+            }
+        }
+        pendingNoteCount = PendingSyncQueue.count()
+        if synced > 0 {
+            infoNotice = "已同步 \(synced) 条离线笔记。"
+            await refreshAll()
         }
     }
 
