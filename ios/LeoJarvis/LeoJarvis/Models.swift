@@ -600,6 +600,36 @@ struct IngestResponse: Codable {
 /// 空请求体：用于无 body 的 POST（如停止会话）。
 struct EmptyBody: Encodable {}
 
+// MARK: - 待办收件箱
+
+/// 收件箱任务（信息→任务）。字段对齐后端 tasks 表 _row_to_dict。
+struct InboxTask: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String?
+    let action: String?
+    let object: String?
+    let due: String?
+    let priority: String?
+    let confidence: Double?
+    let inbox_state: String?
+    let risk_level: String?
+    let origin: String?
+    let context_preview: String?
+    let suggestion: String?
+
+    var displayTitle: String { title ?? "待办" }
+    var isHighRisk: Bool { (risk_level ?? "").lowercased() == "high" }
+}
+
+struct InboxListResponse: Codable {
+    let ok: Bool?
+    let tasks: [InboxTask]?
+}
+
+struct InboxStateRequest: Encodable {
+    let state: String   // unconfirmed | confirmed | done | ignored
+}
+
 /// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
 struct PersonalDataStatus: Codable {
     let memory_layers: [String: Int]?

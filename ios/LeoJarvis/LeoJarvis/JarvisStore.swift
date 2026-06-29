@@ -19,6 +19,7 @@ final class JarvisStore: ObservableObject {
     @Published private(set) var agents: [CLIAgent] = []
     @Published private(set) var sessions: [AgentSession] = []
     @Published private(set) var devices: [FleetDevice] = []
+    @Published private(set) var inboxTasks: [InboxTask] = []
     @Published private(set) var macTargets: [MacTarget] = []
     @Published private(set) var macRuntime: [String: MacRuntimeSnapshot] = [:]
     @Published private(set) var isLoading = false
@@ -269,6 +270,7 @@ final class JarvisStore: ObservableObject {
 
         async let notesCall: PersonalNotesResponse = client.get("/personal-notes?compact=1&limit=20", timeout: 14)
         async let devicesCall: FleetDevicesResponse = client.get("/devices", timeout: 14)
+        async let inboxCall: InboxListResponse = client.get("/inbox/list?states=unconfirmed,confirmed&limit=40", timeout: 12)
         do {
             let notesPayload = try await notesCall
             notes = notesPayload.notes
@@ -280,6 +282,13 @@ final class JarvisStore: ObservableObject {
             devices = devicesPayload.devices ?? []
         } catch {
             Self.appendFailure("设备", error: error, to: &softFailures)
+        }
+        do {
+            let inboxPayload = try await inboxCall
+            inboxTasks = inboxPayload.tasks ?? []
+        } catch {
+            // 待办失败不阻塞主流程，静默（驾驶舱卡片会显示空态）。
+            _ = error
         }
         await refreshBrowserPreferences(refresh: false)
         if !criticalFailures.isEmpty {
@@ -777,6 +786,32 @@ final class JarvisStore: ObservableObject {
                 chatBubbles.append(ChatBubble(role: "assistant", text: reply.result ?? "已拒绝，未执行。"))
             }
         } catch {
+            errorMessage = Self.userFacingErrorMessage(error)
+        }
+    }
+
+    /// 拉取待办收件箱（未确认+已确认）。失败静默——不覆盖已有列表。
+    func refreshInbox() async {
+        guard isMacReachable else { return }
+        do {
+            let resp: InboxListResponse = try await client.get("/inbox/list?states=unconfirmed,confirmed&limit=40", timeout: 8)
+            inboxTasks = resp.tasks ?? []
+        } catch {
+            // 静默
+        }
+    }
+
+    /// 更新一条待办状态（confirmed / done / ignored）。乐观移除，失败回滚刷新。
+    func setInboxState(_ task: InboxTask, state: String) async {
+        let previous = inboxTasks
+        // 乐观更新：confirmed 保留在列表（标记），done/ignored 移除。
+        if state == "done" || state == "ignored" {
+            inboxTasks.removeAll { $0.id == task.id }
+        }
+        do {
+            let _: OKResponse = try await client.post("/inbox/\(task.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? task.id)/state", body: InboxStateRequest(state: state))
+        } catch {
+            inboxTasks = previous   // 回滚
             errorMessage = Self.userFacingErrorMessage(error)
         }
     }

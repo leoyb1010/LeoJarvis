@@ -25,6 +25,8 @@ struct HomeView: View {
                 .appearLift(delay: 0.12)
             attentionPanel
                 .appearLift(delay: 0.16)
+            inboxPanel
+                .appearLift(delay: 0.17)
             liveIntelPanel
                 .appearLift(delay: 0.18)
             briefingPanel
@@ -421,6 +423,29 @@ struct HomeView: View {
             }
         }
         .panel()
+    }
+
+    @ViewBuilder private var inboxPanel: some View {
+        let tasks = Array(store.inboxTasks.prefix(6))
+        if !tasks.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionTitle(title: "待办收件箱", icon: "tray.full")
+                    Spacer()
+                    StatusPill(title: "\(store.inboxTasks.count) 条", icon: nil, tint: AppTheme.accent)
+                }
+                ForEach(tasks) { task in
+                    InboxTaskRow(
+                        task: task,
+                        onConfirm: { Task { await store.setInboxState(task, state: "confirmed") } },
+                        onDone: { Task { await store.setInboxState(task, state: "done") } },
+                        onIgnore: { Task { await store.setInboxState(task, state: "ignored") } }
+                    )
+                    if task.id != tasks.last?.id { Divider() }
+                }
+            }
+            .panel()
+        }
     }
 
     @ViewBuilder private var liveIntelPanel: some View {
