@@ -68,4 +68,39 @@ final class RealtimeTests: XCTestCase {
         let event = NotifyChannel.makeEvent(from: ["source": .string("X")])
         XCTAssertEqual(event.type, "notify")
     }
+
+    // MARK: - 本地通知渲染
+
+    func testRenderSystemGuardAlertGoesToToday() {
+        let event = NotifyEvent(type: "notify", source: "SystemGuard", urgent: true,
+                                delivery: nil, title: nil, body: "磁盘 95%", raw: [:])
+        let (title, body, link) = NotificationManager.render(event)
+        XCTAssertEqual(title, "系统告警")
+        XCTAssertEqual(body, "磁盘 95%")
+        XCTAssertEqual(link, .today)
+    }
+
+    func testRenderIntelHitGoesToIntel() {
+        let event = NotifyEvent(type: "notify", source: "IntelScanner", urgent: false,
+                                delivery: nil, title: nil, body: "新 GitHub 趋势", raw: [:])
+        let (title, _, link) = NotificationManager.render(event)
+        XCTAssertEqual(title, "情报命中")
+        XCTAssertEqual(link, .intel)
+    }
+
+    func testRenderScheduleReminderGoesToToday() {
+        let event = NotifyEvent(type: "remind", source: "schedule", urgent: false,
+                                delivery: nil, title: nil, body: "10 分钟后开会", raw: [:])
+        let (title, _, link) = NotificationManager.render(event)
+        XCTAssertEqual(title, "日程提醒")
+        XCTAssertEqual(link, .today)
+    }
+
+    func testRenderUnknownSourceFallsBack() {
+        let event = NotifyEvent(type: "notify", source: nil, urgent: false,
+                                delivery: nil, title: nil, body: "x", raw: [:])
+        let (title, _, link) = NotificationManager.render(event)
+        XCTAssertEqual(title, "LeoJarvis")
+        XCTAssertEqual(link, .today)
+    }
 }

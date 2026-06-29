@@ -121,6 +121,7 @@ final class JarvisStore: ObservableObject {
     func bootstrap() async {
         didAttemptFailover = false   // 新的启动周期，允许一次自动故障转移
         setupNotifyChannel()
+        await NotificationManager.shared.requestAuthorization()
         // 先跑 refreshAll（内部失败会自动 ping+切到在线 Mac），再跑端侧情报（Mac 无关，离线也出内容）。
         // 不再让 refreshAll 与 refreshMacTargets 并发竞写 macTargets —— failover 内部已会 ping。
         async let localIntel: Void = scanLocalIntelIfNeeded()
@@ -135,6 +136,8 @@ final class JarvisStore: ObservableObject {
     private func setupNotifyChannel() {
         notify.onEvent = { [weak self] event in
             guard let self else { return }
+            // 落本地通知（前台横幅/后台通知中心；digest 与去重在 manager 内处理）。
+            NotificationManager.shared.present(event)
             // digest 投递（非紧急、已超当日预算）安静处理：不触发即时刷新。
             guard event.delivery != "digest" else { return }
             // 实时事件（情报命中 / 系统告警 / 提醒）到达 → 轻量刷新对应数据。
