@@ -17,7 +17,27 @@ enum APIClientError: LocalizedError {
     }
 }
 
-struct JarvisAPIClient {
+/// 网络客户端抽象：只暴露 4 个 HTTP 动词，供 store 注入 mock 做单测（Phase 2/5 可测性前置）。
+/// 视图层仍直接用 JarvisAPIClient 具体类型做 URL 推导（normalizedBaseURL/isRemoteHTTPS/absoluteURL），
+/// 那部分不走这个协议。默认参数与具体实现保持一致，确保经 `any JarvisAPI` 调用时签名匹配。
+protocol JarvisAPI {
+    func get<T: Decodable>(_ path: String, timeout: TimeInterval) async throws -> T
+    func post<T: Decodable, Body: Encodable>(_ path: String, body: Body, timeout: TimeInterval) async throws -> T
+    func patch<T: Decodable, Body: Encodable>(_ path: String, body: Body) async throws -> T
+    func delete<T: Decodable>(_ path: String) async throws -> T
+}
+
+extension JarvisAPI {
+    // 便利重载：补回具体实现里的默认 timeout，让调用方 client.get("/x") 仍可省略 timeout。
+    func get<T: Decodable>(_ path: String) async throws -> T {
+        try await get(path, timeout: 20)
+    }
+    func post<T: Decodable, Body: Encodable>(_ path: String, body: Body) async throws -> T {
+        try await post(path, body: body, timeout: 60)
+    }
+}
+
+struct JarvisAPIClient: JarvisAPI {
     let baseURL: String
     let token: String
 
