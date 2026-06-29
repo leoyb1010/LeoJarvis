@@ -4482,13 +4482,6 @@ enum DisplayFormat {
     }
 }
 
-private func nonEmpty(_ value: String?) -> String? {
-    guard let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines), !clean.isEmpty else {
-        return nil
-    }
-    return clean
-}
-
 private func noteDisplayTitle(_ note: PersonalNote) -> String {
     if note.sensitive == true { return "敏感记事" }
     return nonEmpty(note.title) ?? "未命名记事"
