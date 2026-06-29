@@ -27,6 +27,7 @@ struct SenseView: View {
                     .appearLift(delay: 0.02)
             }
             memoryLayersCard.appearLift(delay: 0.04)
+            pendingMemoriesCard.appearLift(delay: 0.06)
             clipboardCard.appearLift(delay: 0.08)
             photoCard.appearLift(delay: 0.12)
             siriCard.appearLift(delay: 0.16)
@@ -69,6 +70,60 @@ struct SenseView: View {
             }
         }
         .panel()
+    }
+
+    // MARK: - 待确认记忆
+
+    @ViewBuilder private var pendingMemoriesCard: some View {
+        if !store.pendingMemories.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionTitle(title: "待确认记忆", icon: "checkmark.bubble")
+                    Spacer()
+                    StatusPill(title: "\(store.pendingMemories.count)", icon: nil, tint: AppTheme.violet)
+                }
+                Text("Jarvis 想记住这些，确认后才进入长期记忆。")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(Array(store.pendingMemories.prefix(8))) { memory in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(memory.displayText)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(3)
+                        HStack(spacing: 8) {
+                            memoryButton("记住", icon: "checkmark", tint: AppTheme.success) {
+                                Task { await store.decideMemory(memory, decision: "accept") }
+                            }
+                            memoryButton("以后", icon: "clock", tint: AppTheme.muted) {
+                                Task { await store.decideMemory(memory, decision: "later") }
+                            }
+                            memoryButton("忘掉", icon: "xmark", tint: AppTheme.danger) {
+                                Task { await store.decideMemory(memory, decision: "reject") }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    if memory.id != store.pendingMemories.prefix(8).last?.id { Divider() }
+                }
+            }
+            .panel()
+        }
+    }
+
+    private func memoryButton(_ title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.lightImpact()
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background(tint.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(PressScaleButtonStyle())
     }
 
     private let layerOrder = ["fact", "episode", "pattern", "entity"]
@@ -209,5 +264,6 @@ struct SenseView: View {
         if let status = await store.fetchPersonalDataStatus() {
             layers = status.memory_layers ?? [:]
         }
+        await store.refreshPendingMemories()
     }
 }

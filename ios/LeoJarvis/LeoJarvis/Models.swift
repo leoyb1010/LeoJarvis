@@ -649,6 +649,24 @@ struct CalendarUpcomingResponse: Codable {
     let events: [CalendarEvent]?
 }
 
+// MARK: - 记忆确认
+
+/// 待确认记忆（/memories/pending 返回裸数组）。
+struct PendingMemory: Codable, Identifiable, Equatable {
+    let id: String
+    let type: String?
+    let subject: String?
+    let statement: String?
+    let confidence: Double?
+    let layer: String?
+
+    var displayText: String { statement ?? subject ?? "待确认记忆" }
+}
+
+struct MemoryDecisionRequest: Encodable {
+    let decision: String   // accept | reject | later
+}
+
 /// /personal-data/status 简化响应：各记忆层条数（让用户看到 Jarvis 记了多少）。
 struct PersonalDataStatus: Codable {
     let memory_layers: [String: Int]?

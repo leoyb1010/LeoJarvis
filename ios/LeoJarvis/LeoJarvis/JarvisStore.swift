@@ -21,6 +21,7 @@ final class JarvisStore: ObservableObject {
     @Published private(set) var devices: [FleetDevice] = []
     @Published private(set) var inboxTasks: [InboxTask] = []
     @Published private(set) var upcomingEvents: [CalendarEvent] = []
+    @Published private(set) var pendingMemories: [PendingMemory] = []
     @Published private(set) var macTargets: [MacTarget] = []
     @Published private(set) var macRuntime: [String: MacRuntimeSnapshot] = [:]
     @Published private(set) var isLoading = false
@@ -820,6 +821,30 @@ final class JarvisStore: ObservableObject {
             let _: OKResponse = try await client.post("/inbox/\(task.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? task.id)/state", body: InboxStateRequest(state: state))
         } catch {
             inboxTasks = previous   // 回滚
+            errorMessage = Self.userFacingErrorMessage(error)
+        }
+    }
+
+    /// 拉取待确认记忆（裸数组）。失败静默。
+    func refreshPendingMemories() async {
+        guard isMacReachable else { return }
+        do {
+            let mems: [PendingMemory] = try await client.get("/memories/pending?limit=30", timeout: 8)
+            pendingMemories = mems
+        } catch {
+            // 静默
+        }
+    }
+
+    /// 对一条待确认记忆做决定（accept/reject/later）。乐观移除，失败回滚。
+    func decideMemory(_ memory: PendingMemory, decision: String) async {
+        let previous = pendingMemories
+        pendingMemories.removeAll { $0.id == memory.id }
+        do {
+            let encoded = memory.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? memory.id
+            let _: OKResponse = try await client.post("/memories/\(encoded)/decision", body: MemoryDecisionRequest(decision: decision))
+        } catch {
+            pendingMemories = previous
             errorMessage = Self.userFacingErrorMessage(error)
         }
     }
