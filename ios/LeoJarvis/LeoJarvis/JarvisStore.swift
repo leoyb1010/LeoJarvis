@@ -657,6 +657,65 @@ final class JarvisStore: ObservableObject {
         chatHistory.append(ChatMessage(role: "user", content: clean))
         defer { isSending = false }
 
+        // 优先走 SSE 流式（首字亚秒可见）；流式连接/HTTP 失败时回退非流式 /agent/chat。
+        do {
+            try await streamChat()
+        } catch {
+            // 流式失败（后端不支持 stream / 网络降级）→ 回退同步路径。
+            await sendChatFallback()
+        }
+    }
+
+    /// SSE 流式对话：建一个 assistant 占位气泡，随 token 事件逐步追加文本；final 时校正、提取待确认动作。
+    private func streamChat() async throws {
+        let streamClient = ChatStreamClient(baseURL: endpoint, token: token)
+        // 占位气泡：流式 token 往它的 text 追加。
+        chatBubbles.append(ChatBubble(role: "assistant", text: ""))
+        let bubbleIndex = chatBubbles.count - 1
+        var streamedText = ""
+        var sawAnyToken = false
+
+        func updateBubble(_ s: String) {
+            guard chatBubbles.indices.contains(bubbleIndex) else { return }
+            chatBubbles[bubbleIndex].text = s
+        }
+
+        try await streamClient.stream(messages: chatHistory) { [weak self] event in
+            guard let self else { return }
+            switch event {
+            case .token(let piece):
+                sawAnyToken = true
+                streamedText += piece
+                updateBubble(streamedText)
+            case .thought(let t):
+                // 还没有正文时，用思考行占位提示“正在想”，有正文后不再覆盖。
+                if !sawAnyToken { updateBubble("…\(t)") }
+            case .tool(let name, let status):
+                if !sawAnyToken { updateBubble("· \(name)（\(status)）") }
+            case .final(let reply):
+                let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    streamedText = trimmed
+                    updateBubble(streamedText)
+                }
+            case .failed(let message):
+                self.errorMessage = message
+            }
+        }
+
+        let finalText = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if finalText.isEmpty {
+            // 流式没产出任何文本（异常空流）→ 当作失败，让上层回退。
+            if chatBubbles.indices.contains(bubbleIndex) { chatBubbles.remove(at: bubbleIndex) }
+            throw ChatStreamError.http(-1)
+        }
+        chatHistory.append(ChatMessage(role: "assistant", content: finalText))
+        // 流式接口不直接返回 pending_actions。待确认动作（少数高风险工具才有）会在
+        // 受控执行台轮询 /agent-runs 时呈现，这里不额外猜测端点结构，保持流式路径稳健。
+    }
+
+    /// 非流式回退：原 /agent/chat 同步路径。
+    private func sendChatFallback() async {
         do {
             let reply: AgentChatReply = try await client.post("/agent/chat", body: AgentChatRequest(messages: chatHistory))
             let text = reply.reply?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -672,6 +731,7 @@ final class JarvisStore: ObservableObject {
             }
         }
     }
+
 
     func decide(_ action: PendingAction, approve: Bool) async {
         do {
