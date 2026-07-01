@@ -60,6 +60,13 @@ def spawn(name: str, command: str, cwd: str | None = None, meta: dict | None = N
 
 
 def spawn_agent(name: str, command: str, cwd: str | None = None) -> str:
+    # 纵深防御：spawn_agent 的 command 是 LLM 直接可控、且以 shell=True 执行的。
+    # 派发这个动作本身已过行动闸门（confirm），但 command 内容未经风险评估——
+    # 若内容命中不可恢复的破坏级黑名单（rm -rf /、mkfs、fork bomb 等），
+    # 直接硬拒，不给「确认后执行」的机会（与 run_shell 的 deny 口径一致）。
+    from .gate import _shell_risk
+    if _shell_risk(command) == "deny":
+        return "已拒绝：该命令命中破坏性黑名单（不可恢复的系统级操作），不予派发。"
     row = spawn(name, command, cwd)
     return f"已派发 agent『{row['name']}』(id={row['id']}, pid={row['pid']})。用 list_agents 看状态。"
 
