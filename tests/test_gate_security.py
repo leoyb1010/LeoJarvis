@@ -168,3 +168,30 @@ def test_readonly_commands_are_auto(cmd):
 def test_spawn_agent_rejects_destructive(cmd):
     result = agents_ctrl.spawn_agent("t", cmd)
     assert result.startswith("已拒绝"), f"spawn_agent 未拒破坏级 command: {cmd!r} → {result[:60]}"
+
+
+# --------------------------------------------------------------------------- #
+# 6) 工具注册表 ↔ 闸门风险表 同源保障
+#    防漂移双向:①新注册工具漏登记 gate 风险等级(会默认 confirm,不安全侧但可能过度打扰);
+#              ②gate 表残留已删除工具的死条目(如 write_file 被 edit_document 取代)。
+#    任一方向漂移都在这里失败,拿到「工具与闸门风险声明同源」的保障,无需重构耦合结构。
+# --------------------------------------------------------------------------- #
+def test_every_registered_tool_has_explicit_gate_risk():
+    from leojarvis.agent.gate import TOOL_BASE_RISK
+    from leojarvis.agent.tools import TOOLBUS
+    registered = {t.name for t in TOOLBUS.all()}
+    missing = registered - set(TOOL_BASE_RISK)
+    assert not missing, (
+        f"这些工具未在 gate.TOOL_BASE_RISK 显式登记风险等级(会静默默认 confirm): {sorted(missing)}。"
+        f"新增工具时必须同时在 gate 登记其风险(auto/confirm/dynamic)。"
+    )
+
+
+def test_no_dead_entries_in_gate_risk_table():
+    from leojarvis.agent.gate import TOOL_BASE_RISK
+    from leojarvis.agent.tools import TOOLBUS
+    registered = {t.name for t in TOOLBUS.all()}
+    dead = set(TOOL_BASE_RISK) - registered
+    assert not dead, (
+        f"gate.TOOL_BASE_RISK 有已删除工具的死条目: {sorted(dead)}。删工具时应同步清理 gate 表。"
+    )
