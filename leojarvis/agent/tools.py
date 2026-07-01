@@ -40,10 +40,15 @@ class ToolBus:
     def invoke(self, name: str, args: dict) -> str:
         tool = self._tools.get(name)
         if not tool:
+            from .. import obs
+            obs.incr("tool.unknown")
             return f"(未知工具: {name})"
         try:
             return tool.handler(args or {})
         except Exception as ex:  # noqa: BLE001
+            # 工具失败对上层不可见(被吞成字符串),埋点让 /metrics 能看到失败率。
+            from .. import obs
+            obs.incr("tool.error")
             return f"(工具 {name} 执行出错: {ex})"
 
     def describe(self) -> str:

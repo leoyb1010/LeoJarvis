@@ -28,6 +28,12 @@ _OBS_FEEDBACK_LIMIT = 2000
 _PENDING: dict[str, dict] = {}
 
 
+def _record_gate(decision: str) -> None:
+    """闸门决策埋点：让 /metrics 能看到「拒绝/待确认/自动」各多少，暴露安全事件维度。"""
+    from .. import obs
+    obs.incr(f"gate.{decision}")
+
+
 def _escape_ctrl_in_strings(s: str) -> str:
     """把 JSON 字符串值里的裸换行/制表符转义，修复模型在 final 里直接换行导致的解析失败。"""
     out: list[str] = []
@@ -200,6 +206,8 @@ def run_agent(messages: list[dict]) -> dict:
         try:
             raw = chat("agent", convo, temperature=0.2)
         except Exception as ex:  # noqa: BLE001
+            from .. import obs
+            obs.incr("llm.error")
             return {
                 "reply": f"还没法思考：{ex}\n请在 config/models.toml 配置一个可用的模型接口"
                          f"（routing.agent 或 routing.default）。",
@@ -220,6 +228,7 @@ def run_agent(messages: list[dict]) -> dict:
             return {"reply": reply, "steps": steps, "pending_actions": []}
 
         decision = gate.evaluate(tool, args)
+        _record_gate(decision)
 
         if decision == "deny":
             obs = "⛔ 该操作被安全策略拒绝，未执行。"
@@ -292,6 +301,8 @@ def run_agent_stream(messages: list[dict]) -> Iterator[dict]:
                     streamed_final = True
                     yield {"type": "token", "text": out}
         except Exception as ex:  # noqa: BLE001
+            from .. import obs
+            obs.incr("llm.error")
             yield {"type": "error",
                    "message": f"还没法思考：{ex}\n请在 config/models.toml 配置可用的模型接口。"}
             return
@@ -324,6 +335,7 @@ def run_agent_stream(messages: list[dict]) -> Iterator[dict]:
         yield {"type": "tool_start", "tool": tool, "args": args}
 
         decision = gate.evaluate(tool, args)
+        _record_gate(decision)
         if decision == "deny":
             obs = "⛔ 该操作被安全策略拒绝，未执行。"
             _log_action(tool, args, obs, "denied")
