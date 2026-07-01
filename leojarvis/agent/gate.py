@@ -81,6 +81,45 @@ _SUBST = re.compile(r"\$\(|`")
 # find 的执行/删除动作：-exec -execdir -ok -okdir -delete
 _FIND_WRITE = re.compile(r"\s-(?:exec|execdir|ok|okdir|delete)\b")
 
+# —— 白名单命令「靠 flag 就能改系统 / 落盘 / 执行任意代码」的收口 ——
+# 背景：_segment_risk 早期只看首词(git 还只看 parts[1])判风险，于是若干在 auto 白名单里的
+# 工具，其写文件 / 改配置 / 代码执行能力只需 flag、无需 shell 元字符，就绕过了所有基于
+# `; | && $( >` 的守卫，直接判 auto（无确认执行）。LLM 入口可被投喂内容注入，等同无人确认 RCE。
+# 下面按「定位真实子命令 / 识别写形式」把它们收回 confirm。
+
+# git 全局选项：出现在子命令前、能改变 git 行为的选项。
+#   -c / --exec-path 能注入配置或可执行路径 → 可直接 RCE（alias.x='!cmd'、core.sshCommand、
+#     core.pager…），一律 confirm。
+#   -C / --git-dir / --work-tree / --namespace 本身不 exec，但会把真正的写子命令藏在后面，
+#     所以要「跳过前导全局选项定位真实子命令」再对子命令套 _GIT_WRITE。
+_GIT_EXEC_OPTS = {"-c", "--exec-path"}
+_GIT_VALUE_OPTS = {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+
+# curl 把网络内容写入文件的选项：网络抓取一旦落盘就不是「只读」，需确认（等同 > 重定向）。
+_CURL_WRITE = re.compile(r"(?:^|\s)(?:-[oO]\b|--output\b|--output-dir\b|--remote-name\b|-T\b|--upload-file\b)")
+# networksetup 写形式（改 DNS/代理/服务）——只读查询(-get/-list/-print)才放行 auto。
+_NETSETUP_WRITE = re.compile(r"(?:^|\s)-(?:set|create|delete|remove|add|switchtolocation|ordernetworkservices)\w*")
+
+
+def _git_subcommand(parts: list[str]) -> tuple[str | None, bool]:
+    """跳过 git 的前导全局选项，返回 (真实子命令, 是否出现 exec 型全局选项)。
+    例：git -c x=y clean → ('clean', True)；git -C /tmp push → ('push', False)。"""
+    i = 1
+    exec_opt = False
+    while i < len(parts):
+        tok = parts[i]
+        if not tok.startswith("-"):
+            return tok, exec_opt
+        name = tok.split("=", 1)[0]
+        if name in _GIT_EXEC_OPTS:
+            exec_opt = True
+        # `-c x=y`（值另起一 token）要把值一并跳过；`-c=..`/`--git-dir=..`（含=）不额外跳。
+        if name in _GIT_VALUE_OPTS and "=" not in tok:
+            i += 2
+        else:
+            i += 1
+    return None, exec_opt
+
 # 敏感凭据路径：即便是只读，读这些也等于「无确认窃取凭据」，因此升级为 confirm。
 # 防的是：被注入恶意 prompt 的 agent 自动 `read_file ~/.ssh/id_rsa` / `cat ~/.aws/credentials`。
 _SENSITIVE_PATH = re.compile(
@@ -116,9 +155,22 @@ def _segment_risk(seg: str) -> str:
     first = parts[0]
     if first == "sudo" or first not in SHELL_AUTO_PREFIXES:
         return "confirm"
-    if first == "git" and len(parts) > 1 and parts[1] in _GIT_WRITE:
-        return "confirm"
+    # git：跳过前导全局选项定位真实子命令；-c/--exec-path 可注入配置/代码路径 → 直接 confirm。
+    if first == "git":
+        sub, exec_opt = _git_subcommand(parts)
+        if exec_opt or (sub in _GIT_WRITE):
+            return "confirm"
     if first == "brew" and len(parts) > 1 and parts[1] in _BREW_WRITE:
+        return "confirm"
+    # curl -o/-O 把网络内容落盘（覆写 ~/.zshrc 等即代码执行），非只读，需确认。
+    if first == "curl" and _CURL_WRITE.search(f" {seg} "):
+        return "confirm"
+    # 改网络/内核/系统配置的写形式（DNS 劫持、内核参数）需确认；只读查询仍 auto。
+    if first == "networksetup" and _NETSETUP_WRITE.search(f" {seg} "):
+        return "confirm"
+    if first == "scutil" and "--set" in parts:
+        return "confirm"
+    if first == "sysctl" and "-w" in parts:
         return "confirm"
     # find -exec/-delete 能跑任意命令或删文件，等同写操作。
     if first == "find" and _FIND_WRITE.search(f" {seg} "):
