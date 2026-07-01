@@ -703,6 +703,15 @@ def mark_scheduled_run(task_id: str, result: str, *, next_run: int | None = None
                   (now_ms(), next_run, (result or "")[:1000], task_id))
 
 
+def reschedule_task(task_id: str, next_run: int) -> None:
+    """只重排下次执行时间，不动 last_result/last_run。
+    interval 任务跑完后由调度器调用：_run_task_row 已写入本轮 summary，这里只补 next_run，
+    避免用执行前的旧快照 last_result 覆盖掉刚写的结果。"""
+    init_db()
+    with conn() as c:
+        c.execute("UPDATE scheduled_tasks SET next_run=? WHERE id=?", (next_run, task_id))
+
+
 def due_interval_tasks() -> list[sqlite3.Row]:
     """到点的 interval/cron 任务(cron 的到点判断在调度器里做粗粒度)。"""
     init_db()

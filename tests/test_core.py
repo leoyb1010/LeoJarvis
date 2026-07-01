@@ -1704,6 +1704,31 @@ def test_event_bus_threshold_triggers_task(monkeypatch):
         db.set_scheduled_task_status(tid, "deleted")
 
 
+def test_interval_task_reschedule_keeps_fresh_result(monkeypatch):
+    """P3 回归:interval 任务跑完后,重排 next_run 不能用执行前的旧快照覆盖刚写的 last_result。
+    历史 bug:run_due_scheduled 里第二次 mark_scheduled_run 传的是 task['last_result'](执行前值),
+    把 _run_task_row 刚写的本轮结果清掉了。"""
+    from leojarvis import event_bus
+    from leojarvis.agent import loop
+    db.init_db()
+    monkeypatch.setattr(loop, "run_agent",
+                        lambda msgs: {"reply": "本轮真实结果:处理了3封邮件", "pending_actions": []})
+    tid = db.create_scheduled_task(name="定时汇总", prompt="汇总",
+                                   trigger="interval", interval_minutes=30)
+    try:
+        # 手动把 next_run 提前到过去,让它到点
+        db.reschedule_task(tid, db.now_ms() - 1000)
+        stats = event_bus.run_due_scheduled()
+        assert stats["ran"] == 1
+        row = db.get_scheduled_task(tid)
+        assert "本轮真实结果" in (row["last_result"] or ""), \
+            f"本轮结果被旧快照覆盖了: {row['last_result']!r}"
+        # next_run 已被重排到未来(约 30 分钟后),任务不会立刻重复触发
+        assert row["next_run"] and row["next_run"] > db.now_ms()
+    finally:
+        db.set_scheduled_task_status(tid, "deleted")
+
+
 def test_calendar_ics_import_and_upcoming(monkeypatch):
     """P2 Calendar:内置 ics 解析 → 落为 kind=calendar 事件 → upcoming 取到未来事件。"""
     from leojarvis import calendar_sync, email_triage

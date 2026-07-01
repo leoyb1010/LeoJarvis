@@ -84,10 +84,10 @@ def run_due_scheduled() -> dict:
     ran = 0
     for task in due:
         try:
-            _run_task_row(task)
+            _run_task_row(task)  # 已写入本轮 summary 到 last_result
             mins = int(task["interval_minutes"] or 60)
-            db.mark_scheduled_run(task["id"], (task["last_result"] or "")[:200],
-                                  next_run=db.now_ms() + mins * 60_000)
+            # 只补 next_run 重排下次；不要用执行前快照的 task["last_result"] 覆盖刚写的结果。
+            db.reschedule_task(task["id"], db.now_ms() + mins * 60_000)
             ran += 1
         except Exception:
             log.exception("interval task %s failed", task["id"])

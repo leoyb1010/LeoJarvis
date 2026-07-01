@@ -15,7 +15,8 @@ def _open_table():
     import pyarrow as pa
 
     database = lancedb.connect(str(VECTORS_PATH))
-    names = database.table_names()
+    # 新版 lancedb 用 list_tables()，table_names() 已弃用（会告警，未来版本移除）；旧版无 list_tables。
+    names = database.list_tables() if hasattr(database, "list_tables") else database.table_names()
     if _TABLE_NAME not in names:
         dimension = int(settings().get("embeddings", {}).get("dimension", 768))
         schema = pa.schema([
