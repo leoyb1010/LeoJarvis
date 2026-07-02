@@ -412,6 +412,18 @@ def agent_approve(req: ApproveRequest) -> dict:
     return approve_action(req.id, req.decision)
 
 
+class PreviewRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/agent/preview")
+def agent_preview(req: PreviewRequest) -> dict:
+    """V4 行动预演沙箱：高危 shell 命令真跑前，看清将执行什么/预期影响/能否撤销。
+    破坏级直接阻断、不预演。纯预演无副作用。"""
+    from ..agent.sandbox import preview_shell
+    return {"ok": True, **preview_shell(req.command)}
+
+
 @router.get("/agent/tools")
 def agent_tools() -> list[dict]:
     return [{"name": t.name, "description": t.description, "parameters": t.parameters}
