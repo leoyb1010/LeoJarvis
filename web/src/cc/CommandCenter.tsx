@@ -19,6 +19,7 @@ import {
   getMcpStatus, patchMcpSettings, type McpStatus,
   getSchedule, createSchedule, scheduleDone, deleteSchedule, getCalDavStatus, type ScheduleItem, type CalDavStatus,
   researchReport,
+  getAuditLogs, undoAudit, type AuditLog,
   type CliAgent, type CliSession, type ExternalAgent, type Vitals, type Service, type SystemOverview,
   type Briefing, type BriefItem, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
   type Intelligence, type IntelRepo, type IntelSource, type IntelTarget, type BriefDetailItem,
@@ -114,6 +115,7 @@ export default function CommandCenter() {
   const [notifyToast, setNotifyToast] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState(false);  // 问题10:齿轮 → 全屏设置面
   const [skillsHubOpen, setSkillsHubOpen] = useState(false);  // 问题8:技能 + MCP 中枢(顶栏图标)
+  const [auditOpen, setAuditOpen] = useState(false);  // V4:动作审计账本(顶栏图标)
 
   // 主题:auto 跟随系统 prefers-color-scheme,light/dark 手动锁定。
   useEffect(() => {
@@ -176,6 +178,11 @@ export default function CommandCenter() {
         <button onClick={() => setSkillsHubOpen(true)} className="cx-navtip" data-tip="技能与 MCP" style={{ width: 46, height: 46, border: 0, cursor: "pointer", borderRadius: 13, background: "transparent", color: "var(--text-mute)", display: "grid", placeContent: "center" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3l2.1 4.4 4.9.7-3.5 3.4.8 4.8L12 18l-4.3 2.3.8-4.8-3.5-3.4 4.9-.7z" /></svg>
         </button>
+
+        {/* V4 可信执行层:动作审计账本(盾牌图标) —— 看 Jarvis 做过什么、能不能撤销。 */}
+        <button onClick={() => setAuditOpen(true)} className="cx-navtip" data-tip="审计账本" style={{ width: 46, height: 46, border: 0, cursor: "pointer", borderRadius: 13, background: "transparent", color: "var(--text-mute)", display: "grid", placeContent: "center" }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6z" /><path d="M9 12l2 2 4-4" /></svg>
+        </button>
         {/* 深浅色:三态循环 auto → light → dark(问题10)。 */}
         <button onClick={() => setTheme((t) => (t === "auto" ? "light" : t === "light" ? "dark" : "auto"))} className="cx-navtip" data-tip={theme === "auto" ? "主题:跟随系统" : theme === "light" ? "主题:浅色" : "主题:深色"} style={{ width: 46, height: 46, border: 0, cursor: "pointer", borderRadius: 13, background: "transparent", color: "var(--text-mute)", display: "grid", placeContent: "center" }}>
           {theme === "auto"
@@ -222,6 +229,7 @@ export default function CommandCenter() {
       </Modal>
       {/* 问题8:技能与 MCP 中枢(顶栏图标呼出) */}
       {skillsHubOpen && <SkillsHub onClose={() => setSkillsHubOpen(false)} />}
+      {auditOpen && <AuditLedger onClose={() => setAuditOpen(false)} />}
       {notifyToast && (
         // 底部居中 toast——不再压右上角的时间/状态;轻浮起,4s 自动消失。
         <div className="cx-pop-in" style={{ position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", zIndex: Z.toast, background: "var(--panel)", border: "1px solid var(--accent)", borderRadius: 999, padding: "10px 20px", font: "600 12.5px 'Space Grotesk'", color: "var(--text)", boxShadow: "var(--shadow)", maxWidth: "min(440px,90vw)", display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flex: "none", boxShadow: "0 0 7px var(--accent)" }} />{notifyToast}</div>
@@ -1954,6 +1962,75 @@ function McpSettings() {
       ))}
       {servers.length === 0 && <div style={{ ...mono(11), padding: "20px 0", textAlign: "center" }}>加载 MCP 状态…</div>}
     </div>
+  );
+}
+
+// V4 可信执行层：动作审计账本 —— Jarvis 做过的每件事都留痕、可筛选、可一键撤销。
+const RISK_META: Record<string, { label: string; fg: string; bg: string }> = {
+  auto: { label: "自动", fg: "var(--text-mute)", bg: "var(--bg-3)" },
+  confirm: { label: "已确认", fg: "#c98a00", bg: "rgba(201,138,0,.12)" },
+  deny: { label: "已拒绝", fg: "#e5484d", bg: "rgba(229,72,77,.12)" },
+};
+function AuditLedger({ onClose }: { onClose: () => void }) {
+  const [items, setItems] = useState<AuditLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [riskFilter, setRiskFilter] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const load = () => {
+    setBusy(true);
+    getAuditLogs({ risk: riskFilter, limit: 100 })
+      .then((r) => { setItems(r.items); setTotal(r.total); })
+      .catch(() => setMsg("加载失败"))
+      .finally(() => setBusy(false));
+  };
+  useEffect(load, [riskFilter]);
+  const doUndo = (a: AuditLog) => {
+    setMsg("");
+    undoAudit(a.id).then((r) => {
+      if (!r.ok) { setMsg(r.error || "回滚失败"); return; }
+      if (r.undone) setMsg("已回滚：" + (r.result || "还原成功"));
+      else setMsg(r.result || (r.reverse_command ? `反向命令：${r.reverse_command}` : "已处理"));
+      load();
+    }).catch(() => setMsg("回滚请求失败"));
+  };
+  const pill = (bg: string, fg: string) => ({ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: bg, color: fg, whiteSpace: "nowrap" as const });
+  return (
+    <Modal open onClose={onClose} eyebrow="可信执行" title="动作审计账本" width={960} maxHeight={780}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ color: "var(--text-mute)", fontSize: 13 }}>共 {total} 条 · Jarvis 做过的每件事都在这里，可回溯可撤销</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          {[["", "全部"], ["auto", "自动"], ["confirm", "已确认"], ["deny", "已拒绝"]].map(([v, lbl]) => (
+            <button key={v} onClick={() => setRiskFilter(v)} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 8, cursor: "pointer", border: "1px solid var(--border-soft)", background: riskFilter === v ? "var(--accent-soft)" : "transparent", color: riskFilter === v ? "var(--accent)" : "var(--text-mute)" }}>{lbl}</button>
+          ))}
+        </div>
+      </div>
+      {msg && <div style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent)", marginBottom: 10 }}>{msg}</div>}
+      {busy && items.length === 0 ? <div style={{ color: "var(--text-mute)", padding: 24, textAlign: "center" }}>加载中…</div> : null}
+      {!busy && items.length === 0 ? <div style={{ color: "var(--text-mute)", padding: 24, textAlign: "center" }}>暂无动作记录。Jarvis 执行工具后会出现在这里。</div> : null}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {items.map((a) => {
+          const rm = RISK_META[a.risk] || RISK_META.auto;
+          return (
+            <div key={a.id} style={{ border: "1px solid var(--border-soft)", borderRadius: 12, padding: "10px 14px", background: "var(--bg-2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <code style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{a.tool}</code>
+                <span style={pill(rm.bg, rm.fg)}>{rm.label}</span>
+                <span style={pill("var(--bg-3)", "var(--text-mute)")}>{a.status}</span>
+                {a.approved_by ? <span style={pill("var(--bg-3)", "var(--text-mute)")}>由 {a.approved_by}</span> : null}
+                {a.duration_ms ? <span style={{ fontSize: 11, color: "var(--text-mute)" }}>{a.duration_ms}ms</span> : null}
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-mute)" }}>{fmtAgo(a.ts)}</span>
+                {a.reversible && a.undo_ref
+                  ? <button onClick={() => doUndo(a)} style={{ fontSize: 12, padding: "3px 10px", borderRadius: 8, cursor: "pointer", border: "1px solid var(--border-soft)", background: "transparent", color: "var(--accent)" }}>↩ 撤销</button>
+                  : <span style={{ fontSize: 11, color: "var(--text-faint,var(--text-mute))" }}>不可撤销</span>}
+              </div>
+              {a.args && a.args !== "{}" ? <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 6, fontFamily: "var(--mono,monospace)", wordBreak: "break-all" }}>{a.args.slice(0, 240)}</div> : null}
+              {a.output_summary ? <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 4, whiteSpace: "pre-wrap", maxHeight: 72, overflow: "hidden" }}>{a.output_summary.slice(0, 300)}</div> : null}
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
 

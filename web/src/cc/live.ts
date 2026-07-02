@@ -381,3 +381,28 @@ export const getDocuments = () => jget<{ ok: boolean; documents: DocMeta[] }>("/
 export const getDocument = (id: string) => jget<{ ok: boolean; document: DocFull | null; versions: DocVersion[] }>(`/documents/${encodeURIComponent(id)}`);
 export const createDocument = (title: string, content = "") => jpost<{ ok: boolean; document: DocFull }>("/documents", { title, content });
 export const editDocument = (id: string, find: string, replace: string) => jpost<{ ok: boolean; replaced?: number; error?: string }>(`/documents/${encodeURIComponent(id)}/edit`, { find, replace });
+
+// ---- V4 可信执行层：审计账本 + 一键回滚 + 行动预演沙箱 ----
+export type AuditLog = {
+  id: string; ts: number; tool: string; args: string; output_summary: string;
+  risk: string; status: string; approved_by: string; reversible: boolean;
+  undo_ref: string | null; duration_ms: number;
+};
+export type AuditPage = { ok: boolean; total: number; limit: number; offset: number; items: AuditLog[] };
+export const getAuditLogs = (q: { tool?: string; status?: string; risk?: string; limit?: number; offset?: number } = {}) => {
+  const p = new URLSearchParams();
+  if (q.tool) p.set("tool", q.tool);
+  if (q.status) p.set("status", q.status);
+  if (q.risk) p.set("risk", q.risk);
+  p.set("limit", String(q.limit ?? 50));
+  p.set("offset", String(q.offset ?? 0));
+  return jget<AuditPage>(`/audit/logs?${p.toString()}`);
+};
+export const undoAudit = (id: string) => jpost<{ ok: boolean; undone?: boolean; kind?: string; result?: string; reverse_command?: string; error?: string }>(`/audit/${encodeURIComponent(id)}/undo`);
+
+export type ShellPreview = {
+  ok: boolean; command: string; risk: string; blocked: boolean; block_reason?: string;
+  dry_run_ran: boolean; dry_run_output?: string; expected_impact: string;
+  reversible_command: string | null; reversible_hint: string;
+};
+export const previewShell = (command: string) => jpost<ShellPreview>("/agent/preview", { command });
