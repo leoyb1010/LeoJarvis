@@ -30,7 +30,7 @@
 - 部署验证(远端各机用自身 gate 实评 `git -c alias` 应为 confirm):
   - **leomac-ssh**: rsync ok → kickstart → health/metrics/schedule=200、`gate_git_c_alias=confirm` ✅
   - **leo-cloudflare-mac**: rsync ok → kickstart → health/metrics/schedule=200、`gate_git_c_alias=confirm` ✅
-  - **leoyuanair**: ⚠️ **离线**(Tailscale 100.75.200.118 连接超时,设备休眠/关机)——**待补部署**。下次上线时 rsync leojarvis/+tests/ 后 `launchctl stop/start com.leo.leojarvis`(Air 不用 kickstart),再 curl 验证 gate。
+  - **leoyuanair**: (07-02 稍后补部署,设备上线后)rsync ok → import 冒烟 ok(系统 py3.9.6 兼容)→ stop/start → health/metrics/schedule=200、`gate_git_c_alias=confirm`、`gate_curl_o=confirm` ✅
 - 仓库瘦身: 清掉 ios/desktop 派生构建产物 + __pycache__ + 过期已合并分支(本地 3 + 远端 3),~1.9G→1.4G。
 
 ## 最近一次部署（2026-06-28, commit c3d954c 「R6 review+debug:字体自托管+移动端响应式修复」）
