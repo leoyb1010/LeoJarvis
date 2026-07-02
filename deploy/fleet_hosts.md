@@ -20,6 +20,19 @@
 - 验证：`curl -s http://127.0.0.1:8787/ | grep -oE 'index-[A-Za-z0-9_-]+\.js'` 四台应一致；
   `/health /schedule /mcp/status` 均 200；`/research/report` 是实时联网调研,耗时 ~12s 属正常,别用短 timeout 误判。
 
+## 最近一次部署（2026-07-02, commit 87eebe0 「R8 情报链路:本地化去沙拉 + 清生产库测试脏数据」）
+- 触发: 用户截图反馈信号流里「NVIDIA reported record 数据中心 收入 quarter…」中英混插碎片 + 同源重复"挂了好几天"。
+- 根因(一手核实):
+  1. **脏数据来源** = 测试 fixture(`_seed_judged_event`,source `rss:test`/`rss:Reuters`,写死 NVIDIA 内容)一个月来经**未隔离的测试套件**泄漏进**本机**生产库累积(86 条)。R7 的 conftest 隔离已堵住新泄漏;本轮清掉存量。**三台远端库 test_dirt=0**(远端只跑服务不跑 pytest),无需清远端。
+  2. **中英混插** = localize.fallback_chinese 对整段英文逐词映射(data center→数据中心…),结果仍大片英文时正文分支返回半译串。改为返回干净原句(短语/含中文输入仍照常清洁转中文)。
+- 代码改动(1 commit,纯后端): leojarvis/localize.py + 回归测试。289 测试全绿。
+- 数据清理(仅本机): 备份后删 86 条 rss:test/rss:Reuters 事件 + 同数 judgments,0 tasks 受影响,8751 条真实 intel 保留。
+- 复核结论(未改,避免有害改动): insert_event 的 `key=dedup_key or eid` 是**刻意设计**(occurrence-log 要每次唯一);真实 RSS 一律经 base.py 传稳定 sha256,CNBC/X 源实测 rows==distinct_urls==distinct_keys,**去重对真实来源正常**。CNBC"重复 80 条"是本地化模板标题("市场与财经资讯:X")观感,非真重复。retention(prune_old_data 90d,pin 记忆/反馈引用)健康。
+- 部署验证(三台各用自身 localize 实评整段英文,应 CLEAN 不吐沙拉):
+  - **leomac-ssh**: health=200、`localize=CLEAN` ✅
+  - **leo-cloudflare-mac**: health=200、`localize=CLEAN` ✅
+  - **leoyuanair**: health=200、`localize=CLEAN` ✅
+
 ## 最近一次部署（2026-07-02, commit 49b62fc 「R7 review+debug:闸门 flag-RCE 收口 + 测试隔离」）
 - 范围: **纯后端 Python**(leojarvis/ + tests/),前端 bundle 不变(仍 `index-y5YiKIYw.js`),故本轮只 rsync 源码 + kickstart,无需 npm build。
 - 内容(3 commit):
