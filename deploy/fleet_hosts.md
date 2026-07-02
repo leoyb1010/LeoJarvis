@@ -20,6 +20,19 @@
 - 验证：`curl -s http://127.0.0.1:8787/ | grep -oE 'index-[A-Za-z0-9_-]+\.js'` 四台应一致；
   `/health /schedule /mcp/status` 均 200；`/research/report` 是实时联网调研,耗时 ~12s 属正常,别用短 timeout 误判。
 
+## 最近一次部署（2026-07-02, commit 49b62fc 「R7 review+debug:闸门 flag-RCE 收口 + 测试隔离」）
+- 范围: **纯后端 Python**(leojarvis/ + tests/),前端 bundle 不变(仍 `index-y5YiKIYw.js`),故本轮只 rsync 源码 + kickstart,无需 npm build。
+- 内容(3 commit):
+  - **安全**(a0138a6): 堵住白名单命令靠 flag 绕过闸门的无确认 RCE——`git -c alias.x='!cmd'`/`-c core.sshCommand`(任意代码执行)、`git -c … clean/reset/push`(写子命令藏全局选项后)、`curl -o ~/.zshrc`/`-O`(落盘覆写登录脚本)、`networksetup -set*`/`sysctl -w`/`scutil --set`——全部 auto→confirm。`_git_subcommand()` 跳前导全局选项定位真实子命令;`-c/--exec-path` 一律 confirm(fail-closed)。+22 条对抗契约测试。
+  - **测试隔离**(5bbd365): conftest 把 LEOJARVIS_DATA_DIR 钉到 mkdtemp,pytest 不再读写生产库(此前污染真实库 + test_distill 因生产库 LIMIT 假性失败)。
+  - **修复**(49b62fc): interval 定时任务 last_result 被执行前旧快照覆盖(新增 db.reschedule_task 只补 next_run);lancedb table_names()→list_tables() 去弃用告警。
+- 测试: 本机 264→**288 全绿**且可复现。
+- 部署验证(远端各机用自身 gate 实评 `git -c alias` 应为 confirm):
+  - **leomac-ssh**: rsync ok → kickstart → health/metrics/schedule=200、`gate_git_c_alias=confirm` ✅
+  - **leo-cloudflare-mac**: rsync ok → kickstart → health/metrics/schedule=200、`gate_git_c_alias=confirm` ✅
+  - **leoyuanair**: ⚠️ **离线**(Tailscale 100.75.200.118 连接超时,设备休眠/关机)——**待补部署**。下次上线时 rsync leojarvis/+tests/ 后 `launchctl stop/start com.leo.leojarvis`(Air 不用 kickstart),再 curl 验证 gate。
+- 仓库瘦身: 清掉 ios/desktop 派生构建产物 + __pycache__ + 过期已合并分支(本地 3 + 远端 3),~1.9G→1.4G。
+
 ## 最近一次部署（2026-06-28, commit c3d954c 「R6 review+debug:字体自托管+移动端响应式修复」）
 - bundle: `index-y5YiKIYw.js` —— 四台已全部验证一致（health 全 ok / title 全 LeoJarvis）。
 - 内容: 字体自托管(@fontsource 替 Google Fonts CDN) / 移动端响应式(@media≤720px:侧栏→底栏等分免横滚、多列压单列、笔记抽屉满宽) / 移动端加固(nav 行高 58px→auto 适配 safe-area、设置页 1fr auto 行豁免) / 后端 HEAD `/` 路由 / 品牌 Cortex→LeoJarvis / validate_project 扩跳过目录。
