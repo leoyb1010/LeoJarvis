@@ -57,6 +57,27 @@ def list_versions(doc_id: str, limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def restore_latest_version(doc_id: str) -> dict:
+    """一键回滚：把文档还原到最近一个存档版本（撤销上一次编辑）。
+    还原本身也会把「当前内容」快照进版本（reason=undo），所以回滚也可再回滚。"""
+    db.init_db()
+    with db.conn() as c:
+        cur = c.execute("SELECT content FROM documents WHERE id=?", (doc_id,)).fetchone()
+        if not cur:
+            return {"ok": False, "error": "文档不存在"}
+        ver = c.execute(
+            "SELECT id,content FROM document_versions WHERE document_id=? ORDER BY created_ts DESC LIMIT 1",
+            (doc_id,)).fetchone()
+        if not ver:
+            return {"ok": False, "error": "没有可回滚的历史版本"}
+        _snapshot(c, doc_id, cur["content"] or "", "undo")          # 存当前，便于再回滚
+        c.execute("UPDATE documents SET content=?, updated_ts=? WHERE id=?",
+                  (ver["content"], db.now_ms(), doc_id))
+        # 删掉刚被还原的那个版本行，避免重复回滚原地打转
+        c.execute("DELETE FROM document_versions WHERE id=?", (ver["id"],))
+    return {"ok": True, "document": get(doc_id)}
+
+
 def _snapshot(c, doc_id: str, old_content: str, reason: str) -> None:
     """把旧内容快照进 document_versions(写前调用,和 personal_notes 同序)。"""
     c.execute("INSERT INTO document_versions(id,document_id,content,reason,created_ts) VALUES(?,?,?,?,?)",

@@ -456,6 +456,13 @@ def audit_logs(
     return {"ok": True, "total": total, "limit": limit, "offset": offset, "items": items}
 
 
+@router.post("/audit/{audit_id}/undo")
+def audit_undo(audit_id: str) -> dict:
+    """V4 一键回滚：撤销某条可逆动作（文档还原上一版 / 返回 shell 反向命令）。"""
+    from ..agent.rollback import undo
+    return undo(audit_id)
+
+
 @router.get("/metrics")
 def metrics() -> dict:
     """系统自身健康：LLM 调用数、批量 judge 规模、最近扫描耗时、DB 行数。本机只读。"""

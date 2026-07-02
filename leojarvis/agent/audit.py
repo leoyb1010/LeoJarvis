@@ -37,6 +37,11 @@ def record(*, tool: str, args: dict, result: str, status: str,
     try:
         if reversible is None:
             reversible = tool not in IRREVERSIBLE_TOOLS
+        # 已知可逆工具自动派生撤销句柄（回滚助手用）。edit_document 成功编辑 → doc:<id>。
+        if undo_ref is None and reversible and tool == "edit_document":
+            doc_id = str((args or {}).get("doc_id") or (args or {}).get("id") or "").strip()
+            if doc_id and "已替换" in (result or ""):   # 仅成功编辑才可回滚
+                undo_ref = f"doc:{doc_id}"
         return db.insert_audit_log(
             tool=tool, status=status, args=args or {},
             output_summary=result or "", risk=risk, approved_by=approved_by,
