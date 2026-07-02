@@ -406,3 +406,12 @@ export type ShellPreview = {
   reversible_command: string | null; reversible_hint: string;
 };
 export const previewShell = (command: string) => jpost<ShellPreview>("/agent/preview", { command });
+
+// ---- V5 主动智能：行动卡(今天你要做的事 + 已备草稿) ----
+export type ActionCard = {
+  id: string; type: "reply" | "decision" | "anticipate"; title: string; action: string;
+  object: string | null; priority: string; due: string | null; suggestion: string;
+  draft: string; has_draft: boolean; event_id: string | null; confidence: number; suggest_only: boolean;
+};
+export type ActionCardsResp = { ok: boolean; cards: ActionCard[]; counts: { total: number; by_type: Record<string, number>; with_draft: number } };
+export const getActionCards = (limit = 6) => jget<ActionCardsResp>(`/assistant/action-cards?limit=${limit}`);

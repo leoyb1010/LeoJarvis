@@ -20,6 +20,7 @@ import {
   getSchedule, createSchedule, scheduleDone, deleteSchedule, getCalDavStatus, type ScheduleItem, type CalDavStatus,
   researchReport,
   getAuditLogs, undoAudit, type AuditLog,
+  getActionCards, type ActionCard,
   type CliAgent, type CliSession, type ExternalAgent, type Vitals, type Service, type SystemOverview,
   type Briefing, type BriefItem, type PersonalNote, type NotifApp, type ChatMsg, type ChatStep, type PendingAction, type ChatReply,
   type Intelligence, type IntelRepo, type IntelSource, type IntelTarget, type BriefDetailItem,
@@ -910,6 +911,8 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
   const [inboxCardOpen, setInboxCardOpen] = useState(false);  // 收件箱大卡片(问题6)
   const [reportCardOpen, setReportCardOpen] = useState(false);  // 日报大卡片(问题5)
   const [inboxCount, setInboxCount] = useState(0);
+  const [actionCards, setActionCards] = useState<ActionCard[]>([]);  // V5:今天你要做的事
+  const [draftCard, setDraftCard] = useState<ActionCard | null>(null);  // 点开看已备草稿
   const [overlay, setOverlay] = useState<{ open: boolean; id?: string }>({ open: false });
   const [noteTypePick, setNoteTypePick] = useState(false);  // 问题2:新建记事类型选择器
 
@@ -927,6 +930,9 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
     reloadNotes();
     const pullInbox = () => getInbox("unconfirmed").then((d) => { if (live) setInboxCount((d.counts?.unconfirmed ?? d.tasks?.length) || 0); }).catch(() => {});
     pullInbox(); const ti = setInterval(pullInbox, 30000);
+    // V5 主动智能：今天你要做的事(行动卡)。确定性、随收件箱一起刷。
+    const pullCards = () => getActionCards(6).then((d) => { if (live && d?.ok) setActionCards(d.cards || []); }).catch(() => {});
+    pullCards(); const tac = setInterval(pullCards, 30000);
     getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {});
     const tn = setInterval(() => { getNotifications().then((d) => { if (live) setNotifApps(Array.isArray(d?.apps) ? d.apps : []); }).catch(() => {}); }, 30000);
     // 实时推送：情报命中/系统告警 → 立即刷新简报与系统态，不等下一个轮询周期。
@@ -937,7 +943,7 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
     getAmapConfig().then((c) => { if (live && c?.home_city) wxCity = c.home_city; loadWx(); }).catch(() => loadWx());
     const tw = setInterval(loadWx, 600000);
     ["天秤", "双鱼", "双子"].forEach((s) => getHoroscope(s).then((d) => { if (live && d?.ok) setHoros((p) => ({ ...p, [s]: d })); }).catch(() => {}));
-    return () => { live = false; clearInterval(clock); clearInterval(t); clearInterval(tb); clearInterval(tsv); clearInterval(tn); clearInterval(tw); clearInterval(ti); stopNotify(); };
+    return () => { live = false; clearInterval(clock); clearInterval(t); clearInterval(tb); clearInterval(tsv); clearInterval(tn); clearInterval(tw); clearInterval(ti); clearInterval(tac); stopNotify(); };
   }, []);
 
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -990,6 +996,32 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
               </button>
             ))}
           </div>
+          {/* V5 主动智能：今天你要做的事(行动卡)。从「一堆资讯」到「几件事 + 已备草稿」。 */}
+          {actionCards.length > 0 && (() => {
+            const meta: Record<string, { label: string; color: string }> = {
+              reply: { label: "回复", color: "var(--accent)" },
+              decision: { label: "决策", color: "var(--warn,#c98a00)" },
+              anticipate: { label: "预判", color: "var(--good,#3aa675)" },
+            };
+            return (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 10, background: "var(--panel-2)", border: "1px solid var(--border-soft)", maxWidth: 760 }}>
+                <div style={{ font: "600 9px 'IBM Plex Mono',monospace", letterSpacing: ".18em", color: "var(--accent)", marginBottom: 5 }}>今天要做的事 · {actionCards.length}</div>
+                <div style={{ display: "grid", gap: 3 }}>
+                  {actionCards.slice(0, 5).map((c, i) => {
+                    const m = meta[c.type] || meta.anticipate;
+                    return (
+                      <button key={c.id || i} onClick={() => { if (c.has_draft) setDraftCard(c); }} className="cx-row" title={c.suggestion || c.title}
+                        style={{ textAlign: "left", border: 0, background: "transparent", cursor: c.has_draft ? "pointer" : "default", display: "flex", alignItems: "center", gap: 8, padding: "2px 4px", borderRadius: 6 }}>
+                        <span style={{ font: "600 9px 'IBM Plex Mono'", color: m.color, background: "color-mix(in srgb," + m.color + " 14%, transparent)", padding: "1px 6px", borderRadius: 999, flex: "none" }}>{m.label}</span>
+                        <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", font: "500 11.5px 'Space Grotesk'", color: "var(--text)" }}>{c.title}</span>
+                        {c.has_draft && <span style={{ font: "600 9px 'IBM Plex Mono'", color: "var(--accent)", flex: "none" }}>已备草稿 →</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 5, alignItems: "center" }}>
             <button onClick={goIntel} className="cx-chip" style={{ border: 0, cursor: "pointer", background: "var(--accent)", color: "#fff", font: "600 12px 'Space Grotesk'", padding: "6px 13px", borderRadius: 8, boxShadow: "0 6px 18px var(--accent-soft)" }}>读完整简报 →</button>
             <button onClick={() => goNotes()} className="cx-chip" style={{ border: "1px solid var(--border)", cursor: "pointer", background: "var(--panel)", color: "var(--text)", font: "600 12px 'Space Grotesk'", padding: "7px 14px", borderRadius: 8 }}>＋ 记一笔</button>
@@ -1077,6 +1109,17 @@ function Cockpit({ themeMode, goIntel, goNotes, goAgents, goSense, goDevices }: 
       {inboxCardOpen && <InboxCard onClose={() => setInboxCardOpen(false)} />}
       {reportCardOpen && <ReportCard onClose={() => setReportCardOpen(false)} />}
       {detailId && <IntelDetail id={detailId} onClose={() => setDetailId(null)} />}
+      {draftCard && (
+        <Modal open onClose={() => setDraftCard(null)} eyebrow="已备草稿" title={draftCard.title} width={620} maxHeight={560}>
+          <div style={{ font: "500 12px 'Space Grotesk'", color: "var(--text-mute)", marginBottom: 10 }}>
+            Jarvis 已替你起草。改完你满意再发 —— 发送会经安全闸门 + 留审计，绝不自动外发。
+          </div>
+          <textarea defaultValue={draftCard.draft} style={{ width: "100%", minHeight: 220, resize: "vertical", padding: 12, borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text)", font: "400 13px/1.6 'Space Grotesk'" }} />
+          <div style={{ font: "400 11px 'IBM Plex Mono'", color: "var(--text-faint,var(--text-mute))", marginTop: 8 }}>
+            {draftCard.suggestion ? `背景：${draftCard.suggestion}` : ""}
+          </div>
+        </Modal>
+      )}
       {intelOpen && <IntelFeedDrawer items={news} total={signalCount} pstyle={pstyle} catColor={catColor} onOpenItem={(id) => setDetailId(id)} goIntel={goIntel} onClose={() => setIntelOpen(false)} />}
       {overlay.open && <NotesOverlay openId={overlay.id} onClose={() => { setOverlay({ open: false }); reloadNotes(); }} goFull={(id) => { setOverlay({ open: false }); goNotes(id); }} />}
       {noteTypePick && <NoteTypePicker

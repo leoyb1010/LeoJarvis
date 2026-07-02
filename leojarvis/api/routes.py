@@ -1467,6 +1467,14 @@ def assistant_run_checkin(slot: str) -> dict:
     return assistant.run_checkin(slot)
 
 
+@router.get("/assistant/action-cards")
+def assistant_action_cards(limit: int = Query(6, ge=1, le=20)) -> dict:
+    """V5 主动智能：今天你要做的事(行动卡)。reply 类附已备草稿。确定性、零 LLM。
+    供驾驶舱「今日」直接渲染 —— 从『一堆资讯』变『三件事 + 草稿』。"""
+    from ..action_compiler import compile_action_cards
+    return compile_action_cards(limit=limit)
+
+
 # ---------- P3：定时/事件触发的 agent 任务 ----------
 
 class ScheduledTaskIn(BaseModel):

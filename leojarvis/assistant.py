@@ -114,8 +114,27 @@ def run_checkin(slot: str) -> dict:
         return {"ok": False, "error": "bad slot"}
     cfg = get_config()
     ctx = _gather_context(slot)
+
+    # V5 主动智能：早/午 check-in 先给结构化「行动卡」（今天你要做的几件事 + 已备草稿），
+    # 再附数据。确定性产出、零 LLM，离线也有。晚间是收尾复盘，不走行动卡。
+    action_cards: list[dict] = []
+    if slot in ("morning", "midday"):
+        try:
+            from . import action_compiler
+            compiled = action_compiler.compile_action_cards(limit=5)
+            action_cards = compiled.get("cards", [])
+        except Exception:
+            log.exception("action-card compile failed")
     persona = cfg.get("persona", "")
     name = cfg.get("name", "Jarvis")
+    # 行动卡文本先行（确定性、始终可得），LLM 生成的叙述作为补充语境跟在后面。
+    cards_text = ""
+    if action_cards:
+        try:
+            from . import action_compiler
+            cards_text = action_compiler.render_cards_text(action_cards)
+        except Exception:
+            log.exception("render cards failed")
     body = ""
     try:
         from .agent.loop import run_agent
@@ -128,6 +147,9 @@ def run_checkin(slot: str) -> dict:
         log.exception("checkin agent failed")
     if not body:
         body = f"{_SLOT_ZH[slot]}汇总:\n{ctx}"   # 兜底:LLM 不可用也给数据
+    # 组合：行动卡（要做的事）打头，叙述在后。行动卡是主动智能的核心，不可被 LLM 波动挤掉。
+    if cards_text:
+        body = cards_text + ("\n\n———\n" + body if body else "")
 
     title = f"{name} · {_SLOT_ZH[slot]} check-in"
     try:
@@ -137,4 +159,5 @@ def run_checkin(slot: str) -> dict:
     except Exception:
         log.exception("checkin save_note failed")
     payload = {"kind": "checkin", "title": title, "body": body[:200], "slot": slot, "source": "assistant"}
-    return {"ok": True, "slot": slot, "title": title, "reply": body, "push": payload}
+    return {"ok": True, "slot": slot, "title": title, "reply": body,
+            "action_cards": action_cards, "push": payload}
