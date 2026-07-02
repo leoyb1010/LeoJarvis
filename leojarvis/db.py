@@ -262,6 +262,27 @@ CREATE TABLE IF NOT EXISTS device_heartbeats (
   updated_ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_device_heartbeats_seen ON device_heartbeats(last_seen_ts);
+
+-- V4 可信执行层：全量动作审计账本。每个工具调用留痕——做了什么、为什么、结果、风险、
+-- 是否人确认、耗时、如何撤销。是 dry-run 预演 / 一键回滚 / 主动智能动手的共同兜底。
+-- 会无限增长 → 接入 prune_old_data 的保留窗口(默认 90 天)。
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL,                -- 毫秒
+  tool TEXT NOT NULL,                 -- 工具名
+  args TEXT,                          -- 入参 JSON
+  output_summary TEXT,               -- 出参摘要(截断)
+  risk TEXT,                          -- auto / confirm / deny(闸门判定)
+  status TEXT NOT NULL,               -- auto / approved / rejected / denied
+  approved_by TEXT DEFAULT '',        -- 谁批准的(user / '' 表示无需批准)
+  session_id TEXT DEFAULT '',         -- 归属会话(可空)
+  reversible INTEGER DEFAULT 0,       -- 是否可撤销(1/0)
+  undo_ref TEXT,                      -- 撤销句柄(反向命令 / 旧版本 id 等,回滚助手用)
+  duration_ms INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_logs(tool, ts);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status, ts);
 """
 
 
@@ -371,6 +392,70 @@ def insert_event(*, source: str, kind: str, content: str, domain: str | None = N
         return eid
     except sqlite3.IntegrityError:
         return None
+
+
+# ---------- V4 可信执行层：审计账本 ----------
+
+def insert_audit_log(*, tool: str, status: str, args: dict | None = None,
+                     output_summary: str = "", risk: str = "", approved_by: str = "",
+                     session_id: str = "", reversible: bool = False,
+                     undo_ref: str | None = None, duration_ms: int = 0) -> str:
+    """记一条动作审计。绝不因写审计失败而打断主流程(调用方已 try 包裹)。"""
+    init_db()
+    aid = uuid.uuid4().hex
+    with conn() as c:
+        c.execute(
+            """INSERT INTO audit_logs(id,ts,tool,args,output_summary,risk,status,
+               approved_by,session_id,reversible,undo_ref,duration_ms)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (aid, now_ms(), tool, json.dumps(args or {}, ensure_ascii=False),
+             (output_summary or "")[:2000], risk, status, approved_by, session_id,
+             1 if reversible else 0, undo_ref, int(duration_ms)),
+        )
+    return aid
+
+
+def list_audit_logs(*, tool: str = "", status: str = "", risk: str = "",
+                    since_ms: int | None = None, until_ms: int | None = None,
+                    limit: int = 50, offset: int = 0) -> list[sqlite3.Row]:
+    init_db()
+    where, params = ["1=1"], []
+    if tool:
+        where.append("tool=?"); params.append(tool)
+    if status:
+        where.append("status=?"); params.append(status)
+    if risk:
+        where.append("risk=?"); params.append(risk)
+    if since_ms is not None:
+        where.append("ts>=?"); params.append(int(since_ms))
+    if until_ms is not None:
+        where.append("ts<=?"); params.append(int(until_ms))
+    params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+    with conn() as c:
+        return c.execute(
+            f"SELECT * FROM audit_logs WHERE {' AND '.join(where)} "
+            f"ORDER BY ts DESC LIMIT ? OFFSET ?", params,
+        ).fetchall()
+
+
+def get_audit_log(audit_id: str) -> sqlite3.Row | None:
+    init_db()
+    with conn() as c:
+        return c.execute("SELECT * FROM audit_logs WHERE id=?", (audit_id,)).fetchone()
+
+
+def count_audit_logs(*, tool: str = "", status: str = "", risk: str = "") -> int:
+    init_db()
+    where, params = ["1=1"], []
+    if tool:
+        where.append("tool=?"); params.append(tool)
+    if status:
+        where.append("status=?"); params.append(status)
+    if risk:
+        where.append("risk=?"); params.append(risk)
+    with conn() as c:
+        return int(c.execute(f"SELECT COUNT(*) FROM audit_logs WHERE {' AND '.join(where)}",
+                             params).fetchone()[0])
 
 
 def insert_judgment(*, event_id: str, score: float, take: str, triage: str,
@@ -819,7 +904,7 @@ def prune_old_data(
     init_db()
     snap_cutoff = now_ms() - int(snapshot_days) * 86_400_000
     evt_cutoff = now_ms() - int(event_days) * 86_400_000
-    removed = {"snapshots": 0, "events": 0, "judgments": 0, "revisions": 0}
+    removed = {"snapshots": 0, "events": 0, "judgments": 0, "revisions": 0, "audit_logs": 0}
     with conn() as c:
         cur = c.execute(
             """
@@ -884,6 +969,10 @@ def prune_old_data(
             (int(revisions_per_note),),
         )
         removed["revisions"] = rc.rowcount
+
+        # V4 审计账本：删 event_days 之前的旧记录(审计本身不被别处引用，直接按窗口删)。
+        ac = c.execute("DELETE FROM audit_logs WHERE ts < ?", (evt_cutoff,))
+        removed["audit_logs"] = ac.rowcount
     return removed
 
 

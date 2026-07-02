@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 
 from collections.abc import Iterator
@@ -128,13 +129,19 @@ class _FinalStreamer:
         return "".join(out)
 
 
-def _log_action(tool: str, args: dict, result: str, status: str) -> None:
+def _log_action(tool: str, args: dict, result: str, status: str,
+                *, risk: str = "", approved_by: str = "", duration_ms: int = 0) -> None:
+    # 台账（执行台/收尾能看到，保留旧行为）
     db.insert_event(
         source="agent", kind="action", domain="business",
         title=f"{tool} [{status}]",
         content=f"args={json.dumps(args, ensure_ascii=False)}\n-> {result[:1000]}",
         meta={"tool": tool, "status": status},
     )
+    # V4 审计账本：结构化、可筛选、带风险/耗时/可逆性（供审计页 + 回滚助手）。
+    from . import audit
+    audit.record(tool=tool, args=args, result=result, status=status,
+                 risk=risk, approved_by=approved_by, duration_ms=duration_ms)
 
 
 def _build_convo(messages: list[dict]) -> list[dict]:
@@ -232,7 +239,7 @@ def run_agent(messages: list[dict]) -> dict:
 
         if decision == "deny":
             obs = "⛔ 该操作被安全策略拒绝，未执行。"
-            _log_action(tool, args, obs, "denied")
+            _log_action(tool, args, obs, "denied", risk=decision)
             steps.append({"tool": tool, "args": args, "status": "denied"})
         elif decision == "confirm":
             pid = uuid.uuid4().hex[:12]
@@ -248,8 +255,10 @@ def run_agent(messages: list[dict]) -> dict:
                 }],
             }
         else:  # auto
+            _t0 = time.monotonic()
             obs = TOOLBUS.invoke(tool, args)
-            _log_action(tool, args, obs, "auto")
+            _log_action(tool, args, obs, "auto", risk=decision,
+                        duration_ms=int((time.monotonic() - _t0) * 1000))
             steps.append({"tool": tool, "args": args, "status": "done",
                           "result": obs[:600]})
 
@@ -338,7 +347,7 @@ def run_agent_stream(messages: list[dict]) -> Iterator[dict]:
         _record_gate(decision)
         if decision == "deny":
             obs = "⛔ 该操作被安全策略拒绝，未执行。"
-            _log_action(tool, args, obs, "denied")
+            _log_action(tool, args, obs, "denied", risk=decision)
             steps.append({"tool": tool, "args": args, "status": "denied"})
             yield {"type": "tool_result", "tool": tool, "status": "denied", "result": obs}
         elif decision == "confirm":
@@ -357,8 +366,10 @@ def run_agent_stream(messages: list[dict]) -> Iterator[dict]:
             }
             return
         else:  # auto
+            _t0 = time.monotonic()
             obs = TOOLBUS.invoke(tool, args)
-            _log_action(tool, args, obs, "auto")
+            _log_action(tool, args, obs, "auto", risk=decision,
+                        duration_ms=int((time.monotonic() - _t0) * 1000))
             steps.append({"tool": tool, "args": args, "status": "done", "result": obs[:600]})
             yield {"type": "tool_result", "tool": tool, "status": "done", "result": obs[:600]}
 
@@ -374,8 +385,12 @@ def approve_action(pid: str, decision: str) -> dict:
     if not pending:
         return {"ok": False, "error": "该待批准动作不存在或已处理"}
     if decision != "approve":
-        _log_action(pending["tool"], pending["args"], "用户拒绝", "rejected")
+        _log_action(pending["tool"], pending["args"], "用户拒绝", "rejected",
+                    risk="confirm", approved_by="user")
         return {"ok": True, "executed": False, "result": "已拒绝，未执行。"}
+    _t0 = time.monotonic()
     result = TOOLBUS.invoke(pending["tool"], pending["args"])
-    _log_action(pending["tool"], pending["args"], result, "approved")
+    _log_action(pending["tool"], pending["args"], result, "approved",
+                risk="confirm", approved_by="user",
+                duration_ms=int((time.monotonic() - _t0) * 1000))
     return {"ok": True, "executed": True, "tool": pending["tool"], "result": result}

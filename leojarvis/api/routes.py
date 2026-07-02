@@ -4,7 +4,7 @@ from copy import deepcopy
 import time
 import uuid
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -418,6 +418,32 @@ def agent_tools() -> list[dict]:
             for t in TOOLBUS.all()]
 
 
+@router.get("/audit/logs")
+def audit_logs(
+    tool: str = Query("", description="按工具名过滤"),
+    status: str = Query("", description="auto/approved/rejected/denied"),
+    risk: str = Query("", description="auto/confirm/deny"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """V4 动作审计账本：分页 + 按工具/状态/风险筛选。本机只读、可回溯。"""
+    rows = db.list_audit_logs(tool=tool, status=status, risk=risk, limit=limit, offset=offset)
+    total = db.count_audit_logs(tool=tool, status=status, risk=risk)
+    items = []
+    for r in rows:
+        d = dict(r)
+        items.append({
+            "id": d["id"], "ts": d["ts"], "tool": d["tool"],
+            "args": d.get("args"), "output_summary": d.get("output_summary"),
+            "risk": d.get("risk"), "status": d["status"],
+            "approved_by": d.get("approved_by") or "",
+            "reversible": bool(d.get("reversible")),
+            "undo_ref": d.get("undo_ref"),
+            "duration_ms": d.get("duration_ms") or 0,
+        })
+    return {"ok": True, "total": total, "limit": limit, "offset": offset, "items": items}
+
+
 @router.get("/metrics")
 def metrics() -> dict:
     """系统自身健康：LLM 调用数、批量 judge 规模、最近扫描耗时、DB 行数。本机只读。"""
@@ -427,7 +453,7 @@ def metrics() -> dict:
     try:
         with db.conn() as c:
             for table in ("events", "judgments", "memories", "personal_notes",
-                          "github_repo_snapshots", "device_heartbeats"):
+                          "github_repo_snapshots", "device_heartbeats", "audit_logs"):
                 try:
                     r = c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
                     rows[table] = int(r[0] if not isinstance(r, dict) else list(r.values())[0])
