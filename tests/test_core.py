@@ -810,6 +810,23 @@ def test_localize_detects_mixed_chinese_english_titles():
     assert not has_noisy_english(text)
 
 
+def test_localize_english_body_prefers_clean_original_over_cnen_salad():
+    """回归(用户实测反馈):离线时,整段英文正文若逐词映射后仍是大片英文,
+    不能吐半中半英碎片("NVIDIA reported record 数据中心 收入 quarter…")——
+    那比干净原句更难读、更像出错。此时应返回干净原句。"""
+    body = ("NVIDIA reported record data center revenue this quarter, "
+            "far exceeding analyst estimates and signaling strong AI demand across hyperscalers.")
+    text = to_chinese(body, context="RSS 资讯摘要", allow_llm=False)
+    # 沙拉签名:中文词后紧跟英文单词(逐词替换的残留)——绝不能出现
+    assert "数据中心 收入 this" not in text
+    assert "数据中心 revenue" not in text
+    # 落到干净原句(不是被切碎的半译)
+    assert text.startswith("NVIDIA reported record data center revenue")
+    # 而短语/含中文的输入仍照常清洁转中文(不被本修复误伤)
+    assert to_chinese("data center revenue", context="标题", allow_llm=False) == "数据中心 收入"
+    assert "英伟达" in to_chinese("英伟达 data center 收入暴增", context="标题", allow_llm=False)
+
+
 def test_localize_keeps_technical_proper_nouns_in_chinese_titles():
     title = "NASA 测试新一代月球 / 火星探测车原型 ERNEST：含主动悬挂与 AI 强化自主系统"
     assert not has_noisy_english(title)

@@ -133,9 +133,10 @@ def fallback_chinese(text: str, *, prefix: str = "") -> str:
             if synthesized:
                 return synthesized[:500]
             return lowered[:500]
-        # 正文：宁可保留尽量翻好的原文，也不再合成「来源提到X，已保留原始链接」这类模板噪声
-        # ——源头不产噪声，下游（briefing 的 _is_low_information_summary 等）就不必再猫鼠式地抓删。
-        return lowered[:500]
+        # 正文：逐词映射后仍是大片英文 = 没能真翻好。此时半中半英的碎片
+        # （"NVIDIA reported record 数据中心 收入 quarter…"）比干净原文更难读、更像出错。
+        # 宁可返回干净的原句，也不吐中英混插沙拉（用户实测反馈这类碎片挂在信号流里很刺眼）。
+        return value[:500]
     return lowered[:500]
 
 
