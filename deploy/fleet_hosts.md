@@ -20,6 +20,19 @@
 - 验证：`curl -s http://127.0.0.1:8787/ | grep -oE 'index-[A-Za-z0-9_-]+\.js'` 四台应一致；
   `/health /schedule /mcp/status` 均 200；`/research/report` 是实时联网调研,耗时 ~12s 属正常,别用短 timeout 误判。
 
+## 最近一次部署（2026-07-02, commit 10a4d39 「V4 可信执行层 + V5 主动智能」）
+- 内容: 一次性上齐 V4+V5 五个能力(前后端 + 测试)。
+  - **V4 信任地基**: 审计账本(`GET /audit/logs`,每个动作留痕) + 行动预演沙箱(`POST /agent/preview`,高危先 dry-run) + 一键回滚(`POST /audit/{id}/undo`) + 前端审计页(盾牌图标)。
+  - **V5 主动智能**: 行动卡简报(`GET /assistant/action-cards`,把 actionable 待办熔成 reply/decision/anticipate 卡,reply 附已备草稿,确定性零 LLM) + 驾驶舱首屏「今天要做的事」区块 + 草稿弹窗。
+- 前端有变(新 bundle `index-CAqileEZ.js`)→ **本机 build 出 dist,三台一律 rsync 本机 dist**(leomac 无 web/node_modules、build 失败,故不在远端 build,直接推 dist;Air 本就无 Node)。
+- 后端纯 Python:rsync `leojarvis/ tests/ web/src/`,再 rsync `web/dist/`,reload。
+- 本机 318 测试全绿(V4 +14、V5 +7)。
+- 部署验证(三台各查 health/audit/action-cards/bundle):
+  - **leomac-ssh**:       health=200 | audit=200 | action-cards=200 | bundle=index-CAqileEZ.js ✅
+  - **leo-cloudflare-mac**: health=200 | audit=200 | action-cards=200 | bundle=index-CAqileEZ.js ✅
+  - **leoyuanair**:       health=200 | audit=200 | action-cards=200 | bundle=index-CAqileEZ.js ✅
+- 坑记:launchd daemon 无 `--reload`,改完后端要 `kickstart -k` 重启才加载新模块/新路由(否则新端点 404)。
+
 ## 最近一次部署（2026-07-02, commit 87eebe0 「R8 情报链路:本地化去沙拉 + 清生产库测试脏数据」）
 - 触发: 用户截图反馈信号流里「NVIDIA reported record 数据中心 收入 quarter…」中英混插碎片 + 同源重复"挂了好几天"。
 - 根因(一手核实):
